@@ -64,10 +64,10 @@ def main() -> int:
         return 2
     # user.name / user.email が未設定の環境向けに local config を投入
     subprocess.run(
-        ["git", "config", "user.name", "Gandalf Ossie Drafter"], cwd=SEMANTIC
+        ["git", "config", "user.name", "Solomon Ossie Drafter"], cwd=SEMANTIC
     )
     subprocess.run(
-        ["git", "config", "user.email", "ossie@gandalf.local"], cwd=SEMANTIC
+        ["git", "config", "user.email", "ossie@solomon.local"], cwd=SEMANTIC
     )
     if (
         _run(

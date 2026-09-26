@@ -1,7 +1,7 @@
 """S3 Tool のテスト (boto3 client をモック化)。
 
-実際の S3 は叩かず、boto3 の :class:`ClientError` から Gandalf エラーコードへの
-写像だけを検証する。IDBroker との交換は :mod:`gandalf.tools._idbroker` の別テスト
+実際の S3 は叩かず、boto3 の :class:`ClientError` から Solomon エラーコードへの
+写像だけを検証する。IDBroker との交換は :mod:`solomon.tools._idbroker` の別テスト
 (現状は integration テスト扱い) で確認する。
 """
 from __future__ import annotations
@@ -12,9 +12,9 @@ from unittest import mock
 
 import pytest
 
-from gandalf.tools import _s3_client
-from gandalf.tools.s3 import S3GetRangeTool, S3HeadTool, S3ListTool
-from gandalf.transport.user_context import (
+from solomon.tools import _s3_client
+from solomon.tools.s3 import S3GetRangeTool, S3HeadTool, S3ListTool
+from solomon.transport.user_context import (
     AwsCredentials,
     UserContext,
     reset_user_context,
@@ -72,7 +72,7 @@ class TestS3ListTool:
         assert result["truncated"] is False
 
     def test_access_denied(self, auth_ctx: UserContext) -> None:
-        from gandalf.tools._s3_client import ClientError
+        from solomon.tools._s3_client import ClientError
 
         fake_client = mock.MagicMock()
         fake_client.list_objects_v2.side_effect = ClientError(
@@ -108,7 +108,7 @@ class TestS3HeadTool:
         assert result["etag"] == "abc123"  # クォート除去済み
 
     def test_not_found(self, auth_ctx: UserContext) -> None:
-        from gandalf.tools._s3_client import ClientError
+        from solomon.tools._s3_client import ClientError
 
         fake_client = mock.MagicMock()
         fake_client.head_object.side_effect = ClientError(
@@ -141,7 +141,7 @@ class TestS3GetRangeTool:
         assert kwargs["Range"] == "bytes=0-1023"
 
     def test_invalid_range(self, auth_ctx: UserContext) -> None:
-        from gandalf.tools._s3_client import ClientError
+        from solomon.tools._s3_client import ClientError
 
         fake_client = mock.MagicMock()
         fake_client.get_object.side_effect = ClientError(

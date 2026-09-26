@@ -14,19 +14,19 @@ crewai が入っていない環境では :class:`Agent` / :class:`Task` / :class
 """
 from __future__ import annotations
 
-from gandalf.analytics.agents import (
+from solomon.analytics.agents import (
     make_dashboard_builder_agent,
     make_summary_writer_agent,
     make_table_inspector_agent,
     make_viz_planner_agent,
 )
-from gandalf.analytics.crew import (
+from solomon.analytics.crew import (
     build_analytics_dashboard_crew,
     build_analytics_summary_crew,
     kickoff_analytics_dashboard,
     kickoff_analytics_summary,
 )
-from gandalf.analytics.models import (
+from solomon.analytics.models import (
     BuildDashboardResult,
     CDVStartupResult,
     SummaryObservation,
@@ -35,12 +35,12 @@ from gandalf.analytics.models import (
     VizPlan,
     VizProposal,
 )
-from gandalf.analytics.tasks import (
+from solomon.analytics.tasks import (
     ensure_cdv_running_guardrail,
     inspect_table_guardrail,
 )
-from gandalf.tools.viz import VizHeuristicTool
-from gandalf.transport.user_context import UserContext
+from solomon.tools.viz import VizHeuristicTool
+from solomon.transport.user_context import UserContext
 
 
 # ------------------------------------------------------------------ #

@@ -13,10 +13,10 @@ from unittest import mock
 
 import pytest
 
-from gandalf.tools import _trino_client
-from gandalf.tools._trino_client import map_trino_error
-from gandalf.tools.trino import TrinoDDLTool, TrinoMetaTool, TrinoQueryTool
-from gandalf.transport.user_context import (
+from solomon.tools import _trino_client
+from solomon.tools._trino_client import map_trino_error
+from solomon.tools.trino import TrinoDDLTool, TrinoMetaTool, TrinoQueryTool
+from solomon.transport.user_context import (
     UserContext,
     reset_user_context,
     set_user_context,

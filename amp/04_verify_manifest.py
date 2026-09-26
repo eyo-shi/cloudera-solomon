@@ -1,6 +1,6 @@
 """AMP セットアップ Step 4: Agent Studio manifest の drift 検出。
 
-`python -m gandalf.manifest --check` を走らせて、agent_studio_manifest/*.yaml が
+`python -m solomon.manifest --check` を走らせて、agent_studio_manifest/*.yaml が
 Python の source of truth と一致していることを確認する (Model C ハイブリッド
 契約)。ズレていたら AMP セットアップ全体を失敗させる。
 """
@@ -37,7 +37,7 @@ def main() -> int:
     cmd = [
         sys.executable,
         "-m",
-        "gandalf.manifest",
+        "solomon.manifest",
         "--check",
         "--out",
         "agent_studio_manifest",

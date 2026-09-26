@@ -12,7 +12,7 @@ crewai が入っていない環境では :class:`Agent` / :class:`Task` / :class
 """
 from __future__ import annotations
 
-from gandalf.ingestion.agents import (
+from solomon.ingestion.agents import (
     make_format_sniffer_agent,
     make_graph_loader_agent,
     make_ossie_drafter_agent,
@@ -20,10 +20,10 @@ from gandalf.ingestion.agents import (
     make_schema_drafter_agent,
     make_table_creator_agent,
 )
-from gandalf.ingestion.crew import build_ingestion_crew, kickoff_ingestion
-from gandalf.ingestion.models import ConflictAndPermissionsResult
-from gandalf.ingestion.tasks import conflict_permissions_guardrail
-from gandalf.transport.user_context import UserContext
+from solomon.ingestion.crew import build_ingestion_crew, kickoff_ingestion
+from solomon.ingestion.models import ConflictAndPermissionsResult
+from solomon.ingestion.tasks import conflict_permissions_guardrail
+from solomon.transport.user_context import UserContext
 
 
 # ------------------------------------------------------------------ #

@@ -1,6 +1,6 @@
 # semantic/ — Apache Ossie セマンティックレイヤ
 
-Gandalf が Text-to-SQL / ダッシュボード / サマリー生成に用いる **Apache Ossie** の YAML 定義を Git 管理するディレクトリ。Cloudera AI Workbench プロジェクトから同期する想定。
+Solomon が Text-to-SQL / ダッシュボード / サマリー生成に用いる **Apache Ossie** の YAML 定義を Git 管理するディレクトリ。Cloudera AI Workbench プロジェクトから同期する想定。
 
 ## 構造
 
@@ -34,4 +34,4 @@ dataset:
       sql: "SELECT ..."
 ```
 
-自動生成のロジックは `gandalf.ingestion.tasks.draft_ossie_task`、読み書きは `gandalf.semantic` にある。
+自動生成のロジックは `solomon.ingestion.tasks.draft_ossie_task`、読み書きは `solomon.semantic` にある。

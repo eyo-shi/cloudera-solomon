@@ -11,7 +11,7 @@ LLM を呼ばずに以下だけを確認する:
 """
 from __future__ import annotations
 
-from gandalf.router import (
+from solomon.router import (
     DispatchPlan,
     IntentClassification,
     RouterResult,
@@ -20,17 +20,17 @@ from gandalf.router import (
     heuristic_classify,
     kickoff_router,
 )
-from gandalf.router.agents import (
+from solomon.router.agents import (
     make_dispatcher_agent,
     make_intent_classifier_agent,
 )
-from gandalf.router.crew import _summarize_entity_memory
-from gandalf.router.tools import (
+from solomon.router.crew import _summarize_entity_memory
+from solomon.router.tools import (
     AnalyticsKickoffTool,
     EntityMemoryReadTool,
     IngestionKickoffTool,
 )
-from gandalf.transport.user_context import UserContext
+from solomon.transport.user_context import UserContext
 
 
 # ------------------------------------------------------------------ #
@@ -278,7 +278,7 @@ def test_summarize_entity_memory_empty() -> None:
 # EntityMemoryReadTool
 # ------------------------------------------------------------------ #
 def test_entity_memory_read_tool_returns_stored_snapshot() -> None:
-    from gandalf.api.state import get_store
+    from solomon.api.state import get_store
 
     tool = EntityMemoryReadTool()
     store = get_store()
@@ -286,7 +286,7 @@ def test_entity_memory_read_tool_returns_stored_snapshot() -> None:
     store.update_entity_memory(
         sess.session_id, {"last_table": "iceberg.demo.sales_2024"}
     )
-    # BaseGandalfTool._run 経由で呼ぶ (requires_auth=False なので user_ctx 不要)
+    # BaseSolomonTool._run 経由で呼ぶ (requires_auth=False なので user_ctx 不要)
     result = tool._run(session_id=sess.session_id)
     assert result["status"] == "ok"
     assert result["found"] is True
@@ -306,9 +306,9 @@ def test_entity_memory_read_tool_unknown_session_ok() -> None:
 # ------------------------------------------------------------------ #
 def test_analytics_kickoff_tool_returns_not_implemented() -> None:
     tool = AnalyticsKickoffTool()
-    # BaseGandalfTool._run は requires_auth=True (デフォルト) を強制する
+    # BaseSolomonTool._run は requires_auth=True (デフォルト) を強制する
     # そのため UserContext を ContextVar にセットして走らせる
-    from gandalf.transport.user_context import reset_user_context, set_user_context
+    from solomon.transport.user_context import reset_user_context, set_user_context
 
     ctx = UserContext(user_name="alice", groups=[], knox_jwt="tok")
     token = set_user_context(ctx)
@@ -321,7 +321,7 @@ def test_analytics_kickoff_tool_returns_not_implemented() -> None:
 
 
 def test_ingestion_kickoff_tool_requires_user_ctx() -> None:
-    """BaseGandalfTool の requires_auth=True で AUTH_MISSING を返す。"""
+    """BaseSolomonTool の requires_auth=True で AUTH_MISSING を返す。"""
     tool = IngestionKickoffTool()
     # user_ctx を立てないまま呼ぶ
     result = tool._run(bucket="b", key="k", target_schema="demo")

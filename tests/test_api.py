@@ -1,4 +1,4 @@
-"""gandalf.api の TestClient ベース smoke。
+"""solomon.api の TestClient ベース smoke。
 
 LLM / Trino / S3 は叩かない範囲でルーティング・認証・SSE 応答形式のみを検証する。
 Ingestion Crew の kickoff 経路は crewai が未インストールの環境ではフォールバック
@@ -13,7 +13,7 @@ from unittest import mock
 import pytest
 from fastapi.testclient import TestClient
 
-from gandalf.api.main import create_app
+from solomon.api.main import create_app
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def client() -> Iterator[TestClient]:
 def test_healthz(client: TestClient) -> None:
     r = client.get("/healthz")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "service": "gandalf.api"}
+    assert r.json() == {"status": "ok", "service": "solomon.api"}
 
 
 def test_root_placeholder_when_no_spa(client: TestClient) -> None:
@@ -37,7 +37,7 @@ def test_root_placeholder_when_no_spa(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200
     body = r.json()
-    assert body["service"] == "gandalf.api"
+    assert body["service"] == "solomon.api"
     assert body["ui"] == "not-built"
 
 
@@ -175,7 +175,7 @@ def test_wish_analytics_summary_dispatches_to_summary_crew(
     それ相当の構造化エラーで返るが、いずれにせよ AnalyticsSummaryCrew の
     running step が SSE に出て、NOT_IMPLEMENTED では **ない** ことを検証。
     """
-    from gandalf.api.state import get_store
+    from solomon.api.state import get_store
 
     store = get_store()
     sess = store.get_or_create_session("sess_analytics_1", "alice")
@@ -208,11 +208,11 @@ def test_wish_analytics_dashboard_dispatches_to_dashboard_crew(
     Summary と同じく entity_memory.last_table を仕込んで、AnalyticsDashboardCrew
     のディスパッチまで到達させる。crewai / CDV / LLM は未接続なので Crew
     起動時に HTTP_UNAVAILABLE (crewai 無し) または CDV_NOT_RUNNING
-    (crewai 有り + GANDALF_CDV_BASE_URL 未設定) 相当の構造化エラーで返るが、
+    (crewai 有り + SOLOMON_CDV_BASE_URL 未設定) 相当の構造化エラーで返るが、
     いずれにせよ AnalyticsDashboardCrew の running step が SSE に出て、
     NOT_IMPLEMENTED では **ない** ことを検証。
     """
-    from gandalf.api.state import get_store
+    from solomon.api.state import get_store
 
     store = get_store()
     sess = store.get_or_create_session("sess_dashboard_1", "alice")
@@ -258,10 +258,10 @@ def test_wish_session_id_persisted(client: TestClient) -> None:
 
 
 def test_wish_session_id_via_header(client: TestClient) -> None:
-    """`X-Gandalf-Session-Id` ヘッダでもセッションが特定される。"""
+    """`X-Solomon-Session-Id` ヘッダでもセッションが特定される。"""
     r = client.post(
         "/api/wish",
-        headers={"X-Gandalf-Session-Id": "sess_hdr_1"},
+        headers={"X-Solomon-Session-Id": "sess_hdr_1"},
         json={"prompt": "こんにちは"},
     )
     assert r.status_code == 200
@@ -303,7 +303,7 @@ def test_files_preview_csv_success(client: TestClient) -> None:
         csv_bytes, content_type="text/csv"
     )
     with mock.patch(
-        "gandalf.api.routes.files.s3_client_for_user", return_value=fake_client
+        "solomon.api.routes.files.s3_client_for_user", return_value=fake_client
     ):
         r = client.get(
             "/api/files/preview?bucket=demo&key=data.csv&rows=2",
@@ -327,7 +327,7 @@ def test_files_preview_json_success(client: TestClient) -> None:
         json_bytes, content_type="application/json"
     )
     with mock.patch(
-        "gandalf.api.routes.files.s3_client_for_user", return_value=fake_client
+        "solomon.api.routes.files.s3_client_for_user", return_value=fake_client
     ):
         r = client.get(
             "/api/files/preview?bucket=demo&key=data.json",
@@ -348,7 +348,7 @@ def test_files_preview_jsonl_success(client: TestClient) -> None:
         jsonl_bytes, content_type="application/x-ndjson"
     )
     with mock.patch(
-        "gandalf.api.routes.files.s3_client_for_user", return_value=fake_client
+        "solomon.api.routes.files.s3_client_for_user", return_value=fake_client
     ):
         r = client.get(
             "/api/files/preview?bucket=demo&key=data.jsonl&rows=2",
@@ -371,7 +371,7 @@ def test_files_preview_unsupported_format(client: TestClient) -> None:
         png_bytes, content_type="image/png"
     )
     with mock.patch(
-        "gandalf.api.routes.files.s3_client_for_user", return_value=fake_client
+        "solomon.api.routes.files.s3_client_for_user", return_value=fake_client
     ):
         r = client.get(
             "/api/files/preview?bucket=demo&key=logo.png",
@@ -385,14 +385,14 @@ def test_files_preview_unsupported_format(client: TestClient) -> None:
 
 def test_files_preview_s3_not_found(client: TestClient) -> None:
     """S3 NoSuchKey は 502 + S3_NOT_FOUND で返る。"""
-    from gandalf.tools._s3_client import ClientError
+    from solomon.tools._s3_client import ClientError
 
     fake_client = mock.MagicMock()
     fake_client.get_object.side_effect = ClientError(
         {"Error": {"Code": "NoSuchKey", "Message": "not found"}}, "GetObject"
     )
     with mock.patch(
-        "gandalf.api.routes.files.s3_client_for_user", return_value=fake_client
+        "solomon.api.routes.files.s3_client_for_user", return_value=fake_client
     ):
         r = client.get(
             "/api/files/preview?bucket=demo&key=missing.csv",
@@ -405,18 +405,18 @@ def test_files_preview_s3_not_found(client: TestClient) -> None:
 def test_uvicorn_log_level_treats_empty_env_as_info(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from gandalf.api.main import _uvicorn_log_level
+    from solomon.api.main import _uvicorn_log_level
 
-    monkeypatch.setenv("GANDALF_LOG_LEVEL", "")
+    monkeypatch.setenv("SOLOMON_LOG_LEVEL", "")
     assert _uvicorn_log_level() == "info"
-    monkeypatch.setenv("GANDALF_LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("SOLOMON_LOG_LEVEL", "WARNING")
     assert _uvicorn_log_level() == "warning"
 
 
 def test_running_inside_event_loop_detects_active_loop() -> None:
     import asyncio
 
-    from gandalf.api.main import _running_inside_event_loop
+    from solomon.api.main import _running_inside_event_loop
 
     async def _check() -> None:
         assert _running_inside_event_loop() is True

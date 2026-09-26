@@ -41,14 +41,14 @@ def main() -> int:
         print("[amp:01] pip install failed", file=sys.stderr, flush=True)
         return proc.returncode
 
-    # インポートスモークテスト (crewai / pydantic / gandalf.tools / gandalf.ingestion)
+    # インポートスモークテスト (crewai / pydantic / solomon.tools / solomon.ingestion)
     print("[amp:01] import smoke test", flush=True)
     smoke = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import gandalf, gandalf.tools, gandalf.ingestion, gandalf.manifest; "
-            "print('gandalf version:', gandalf.__version__ if hasattr(gandalf, '__version__') else 'dev')",
+            "import solomon, solomon.tools, solomon.ingestion, solomon.manifest; "
+            "print('solomon version:', solomon.__version__ if hasattr(solomon, '__version__') else 'dev')",
         ],
         cwd=REPO_ROOT,
     )

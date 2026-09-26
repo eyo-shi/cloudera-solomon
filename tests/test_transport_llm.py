@@ -1,4 +1,4 @@
-"""``gandalf.transport.llm.try_json_completion`` のテスト。
+"""``solomon.transport.llm.try_json_completion`` のテスト。
 
 LiteLLM 自体は差し替えて呼ぶ。環境変数・パース失敗・例外の分岐を検証する。
 """
@@ -11,7 +11,7 @@ from unittest import mock
 
 import pytest
 
-from gandalf.transport import llm as llm_mod
+from solomon.transport import llm as llm_mod
 
 
 # ------------------------------------------------------------------ #
@@ -150,7 +150,7 @@ def test_returns_none_for_non_dict_json(monkeypatch: pytest.MonkeyPatch) -> None
 def test_model_resolution_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://x")
     monkeypatch.setenv("CAI_INFERENCE_API_KEY", "k")
-    monkeypatch.setenv("GANDALF_LLM_ROUTER_MODEL", "env-model")
+    monkeypatch.setenv("SOLOMON_LLM_ROUTER_MODEL", "env-model")
 
     fake = mock.MagicMock()
     fake.completion.return_value = {"choices": [{"message": {"content": "{}"}}]}
@@ -164,7 +164,7 @@ def test_model_resolution_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_model_resolution_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://x")
     monkeypatch.setenv("CAI_INFERENCE_API_KEY", "k")
-    monkeypatch.setenv("GANDALF_LLM_ROUTER_MODEL", "env-model")
+    monkeypatch.setenv("SOLOMON_LLM_ROUTER_MODEL", "env-model")
 
     fake = mock.MagicMock()
     fake.completion.return_value = {"choices": [{"message": {"content": "{}"}}]}

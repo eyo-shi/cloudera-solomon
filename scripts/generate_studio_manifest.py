@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cloudera AI Agent Studio 用マニフェスト生成スクリプト。
 
-これは薄いラッパで、本体は :mod:`gandalf.manifest.cli` にある。
+これは薄いラッパで、本体は :mod:`solomon.manifest.cli` にある。
 
 使用例::
 
@@ -22,7 +22,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from gandalf.manifest.cli import main  # noqa: E402
+from solomon.manifest.cli import main  # noqa: E402
 
 if __name__ == "__main__":
     raise SystemExit(main())

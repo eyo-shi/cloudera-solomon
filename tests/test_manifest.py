@@ -2,7 +2,7 @@
 
 LLM も crewai 本体も呼ばない。以下だけを確認する:
 
-  * ``gandalf.tools.__all__`` の全 Tool が tools.yaml に現れる
+  * ``solomon.tools.__all__`` の全 Tool が tools.yaml に現れる
   * 各 Tool の args_schema が JSON Schema 形式になっている
   * Ingestion Crew の 5 Agent / 8 Task が agents.yaml / crews.yaml に載る
   * すべての Task ``context`` 参照が定義済み Task 名にリゾルブする
@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-import gandalf.tools as tools_pkg
-from gandalf.manifest import (
+import solomon.tools as tools_pkg
+from solomon.manifest import (
     build_agents_manifest,
     build_crews_manifest,
     build_tools_manifest,
@@ -23,8 +23,8 @@ from gandalf.manifest import (
     dump_manifest_yaml,
     write_manifests,
 )
-from gandalf.manifest.cli import main as cli_main
-from gandalf.manifest.writer import AGENTS_FILE, CREWS_FILE, TOOLS_FILE
+from solomon.manifest.cli import main as cli_main
+from solomon.manifest.writer import AGENTS_FILE, CREWS_FILE, TOOLS_FILE
 
 
 # ------------------------------------------------------------------ #
@@ -33,7 +33,7 @@ from gandalf.manifest.writer import AGENTS_FILE, CREWS_FILE, TOOLS_FILE
 def test_all_public_tools_appear_in_tools_manifest() -> None:
     m = build_tools_manifest()
     names = {t["name"] for t in m["tools"]}
-    # Tool クラス毎に BaseGandalfTool を継承しつつ name を持っているはず
+    # Tool クラス毎に BaseSolomonTool を継承しつつ name を持っているはず
     expected: set[str] = set()
     for cls_name in tools_pkg.__all__:
         cls = getattr(tools_pkg, cls_name)
@@ -41,7 +41,7 @@ def test_all_public_tools_appear_in_tools_manifest() -> None:
     assert names == expected
     # 予約されたトップレベルキー
     assert m["version"] == 1
-    assert m["generated_from"] == "gandalf.tools"
+    assert m["generated_from"] == "solomon.tools"
 
 
 def test_tools_have_json_schema_args() -> None:
@@ -57,7 +57,7 @@ def test_tools_have_json_schema_args() -> None:
 def test_tools_class_path_is_importable_looking() -> None:
     m = build_tools_manifest()
     for t in m["tools"]:
-        assert t["class_path"].startswith("gandalf."), t["name"]
+        assert t["class_path"].startswith("solomon."), t["name"]
         assert "." in t["class_path"], t["name"]
 
 

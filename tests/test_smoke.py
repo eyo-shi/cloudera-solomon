@@ -2,19 +2,19 @@
 from __future__ import annotations
 
 
-def test_import_gandalf() -> None:
-    import gandalf
+def test_import_solomon() -> None:
+    import solomon
 
-    assert gandalf.__version__
+    assert solomon.__version__
 
 
 def test_import_subpackages() -> None:
-    import gandalf.analytics  # noqa: F401
-    import gandalf.api  # noqa: F401
-    import gandalf.demo  # noqa: F401
-    import gandalf.ingestion  # noqa: F401
-    import gandalf.router  # noqa: F401
-    import gandalf.semantic  # noqa: F401
-    import gandalf.session  # noqa: F401
-    import gandalf.tools  # noqa: F401
-    import gandalf.transport  # noqa: F401
+    import solomon.analytics  # noqa: F401
+    import solomon.api  # noqa: F401
+    import solomon.demo  # noqa: F401
+    import solomon.ingestion  # noqa: F401
+    import solomon.router  # noqa: F401
+    import solomon.semantic  # noqa: F401
+    import solomon.session  # noqa: F401
+    import solomon.tools  # noqa: F401
+    import solomon.transport  # noqa: F401

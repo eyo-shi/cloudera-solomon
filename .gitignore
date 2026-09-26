@@ -17,18 +17,18 @@ venv/
 .coverage
 htmlcov/
 
-# --- Node (gandalf_ui) ---
-gandalf_ui/node_modules/
-gandalf_ui/dist/
-gandalf_ui/.vite/
-gandalf_ui/*.log
-gandalf_ui/.eslintcache
-gandalf_ui/*.tsbuildinfo
-gandalf_ui/vite.config.js
-gandalf_ui/vite.config.d.ts
+# --- Node (solomon_ui) ---
+solomon_ui/node_modules/
+solomon_ui/dist/
+solomon_ui/.vite/
+solomon_ui/*.log
+solomon_ui/.eslintcache
+solomon_ui/*.tsbuildinfo
+solomon_ui/vite.config.js
+solomon_ui/vite.config.d.ts
 
 # Vite ビルド成果物の出力先 (成果物は Git 管理しない)
-gandalf/api/static/
+solomon/api/static/
 
 # --- Ossie index (キャッシュ、大きいので Git LFS or 除外) ---
 semantic/index/*.parquet

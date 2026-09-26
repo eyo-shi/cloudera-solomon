@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from gandalf.graph.neo4j_connect import iter_neo4j_connection_uris, validate_neo4j_uri_for_ingest
-from gandalf.graph.neo4j_loader import ColumnGraphNode, IngestionGraphPayload
-from gandalf.tools.neo4j_graph import Neo4jGraphLoadTool
+from solomon.graph.neo4j_connect import iter_neo4j_connection_uris, validate_neo4j_uri_for_ingest
+from solomon.graph.neo4j_loader import ColumnGraphNode, IngestionGraphPayload
+from solomon.tools.neo4j_graph import Neo4jGraphLoadTool
 
 
 def test_iter_neo4j_connection_uris_internal_host() -> None:

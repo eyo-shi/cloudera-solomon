@@ -1,4 +1,4 @@
-"""gandalf.transport 単体テスト。
+"""solomon.transport 単体テスト。
 
 Knox JWT の抽出・redaction・UserContext / ContextVar / エラー形の契約を検証。
 """
@@ -11,7 +11,7 @@ import logging
 
 import pytest
 
-from gandalf.transport import (
+from solomon.transport import (
     ErrorCode,
     UserContext,
     bearer_header,
@@ -26,7 +26,7 @@ from gandalf.transport import (
     reset_user_context,
     set_user_context,
 )
-from gandalf.transport.auth import _decode_jwt_payload_unverified
+from solomon.transport.auth import _decode_jwt_payload_unverified
 
 
 # ---------- helpers ----------
@@ -241,13 +241,13 @@ class TestRedactLogging:
         assert "AKIA" not in line
 
 
-# ---------- BaseGandalfTool ----------
+# ---------- BaseSolomonTool ----------
 
-class TestBaseGandalfTool:
+class TestBaseSolomonTool:
     def test_auth_missing_when_no_context(self):
-        from gandalf.transport.tool_base import BaseGandalfTool
+        from solomon.transport.tool_base import BaseSolomonTool
 
-        class MyTool(BaseGandalfTool):
+        class MyTool(BaseSolomonTool):
             name = "my_tool"
             description = "test"
 
@@ -259,9 +259,9 @@ class TestBaseGandalfTool:
         assert result["error_code"] == "AUTH_MISSING"
 
     def test_success_path(self):
-        from gandalf.transport.tool_base import BaseGandalfTool
+        from solomon.transport.tool_base import BaseSolomonTool
 
-        class EchoTool(BaseGandalfTool):
+        class EchoTool(BaseSolomonTool):
             name = "echo"
             description = "echo"
 
@@ -276,9 +276,9 @@ class TestBaseGandalfTool:
         assert result == {"status": "ok", "who": "alice", "args": {"msg": "hi"}}
 
     def test_exception_is_caught(self):
-        from gandalf.transport.tool_base import BaseGandalfTool
+        from solomon.transport.tool_base import BaseSolomonTool
 
-        class BoomTool(BaseGandalfTool):
+        class BoomTool(BaseSolomonTool):
             name = "boom"
             description = "raises"
 
@@ -294,9 +294,9 @@ class TestBaseGandalfTool:
         assert "kaboom" in result["message"]
 
     def test_bad_result_shape_rejected(self):
-        from gandalf.transport.tool_base import BaseGandalfTool
+        from solomon.transport.tool_base import BaseSolomonTool
 
-        class BadTool(BaseGandalfTool):
+        class BadTool(BaseSolomonTool):
             name = "bad"
             description = "returns wrong shape"
 
@@ -312,9 +312,9 @@ class TestBaseGandalfTool:
         assert "unexpected shape" in result["message"]
 
     def test_requires_auth_false(self):
-        from gandalf.transport.tool_base import BaseGandalfTool
+        from solomon.transport.tool_base import BaseSolomonTool
 
-        class OpenTool(BaseGandalfTool):
+        class OpenTool(BaseSolomonTool):
             name = "open"
             description = "no auth needed"
             requires_auth = False

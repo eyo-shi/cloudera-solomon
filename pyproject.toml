@@ -3,9 +3,9 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "gandalf"
+name = "solomon"
 version = "0.0.1"
-description = "Cloudera AI Agent Studio 上で動作する Gandalf マルチエージェント (Router + Ingestion + Analytics) と、React + FastAPI ベースの 3 ペイン UI。"
+description = "Cloudera AI Agent Studio 上で動作する Solomon マルチエージェント (Router + Ingestion + Analytics) と、React + FastAPI ベースの 3 ペイン UI。"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
@@ -55,11 +55,11 @@ dev = [
 ]
 
 [project.scripts]
-gandalf-api = "gandalf.api.main:main"
-gandalf-manifest = "gandalf.manifest.cli:main"
+solomon-api = "solomon.api.main:main"
+solomon-manifest = "solomon.manifest.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["gandalf"]
+packages = ["solomon"]
 
 [tool.ruff]
 line-length = 100

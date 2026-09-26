@@ -1,4 +1,4 @@
-"""gandalf.transport.config の解決順テスト。
+"""solomon.transport.config の解決順テスト。
 
 env / Cloudera AI Workbench の cml.data_v1 (Data Connections) の解決順を、
 実際に cml が入っていない local dev でも通るように monkeypatch でテストする。
@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import pytest
 
-from gandalf.transport import config as cfg_mod
+from solomon.transport import config as cfg_mod
 
 
 # ------------------------------------------------------------------ #
@@ -24,22 +24,22 @@ from gandalf.transport import config as cfg_mod
 # ------------------------------------------------------------------ #
 _ALL_ENV_KEYS = [
     # trino
-    "GANDALF_TRINO_CONNECTION_NAME",
-    "GANDALF_TRINO_HOST",
-    "GANDALF_TRINO_PORT",
-    "GANDALF_TRINO_SCHEME",
-    "GANDALF_TRINO_VERIFY_SSL",
-    "GANDALF_TRINO_CATALOG",
-    "GANDALF_TRINO_SCHEMA",
+    "SOLOMON_TRINO_CONNECTION_NAME",
+    "SOLOMON_TRINO_HOST",
+    "SOLOMON_TRINO_PORT",
+    "SOLOMON_TRINO_SCHEME",
+    "SOLOMON_TRINO_VERIFY_SSL",
+    "SOLOMON_TRINO_CATALOG",
+    "SOLOMON_TRINO_SCHEMA",
     # s3
-    "GANDALF_S3_CONNECTION_NAME",
+    "SOLOMON_S3_CONNECTION_NAME",
     "AWS_REGION",
-    "GANDALF_AWS_REGION",
-    "GANDALF_S3_ENDPOINT_URL",
+    "SOLOMON_AWS_REGION",
+    "SOLOMON_S3_ENDPOINT_URL",
     # llm
-    "GANDALF_LLM_PROVIDER",
-    "GANDALF_LLM_ROUTER_MODEL",
-    "GANDALF_LLM_ANALYTICS_MODEL",
+    "SOLOMON_LLM_PROVIDER",
+    "SOLOMON_LLM_ROUTER_MODEL",
+    "SOLOMON_LLM_ANALYTICS_MODEL",
     "CAI_INFERENCE_BASE_URL",
     "CAI_INFERENCE_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -47,8 +47,8 @@ _ALL_ENV_KEYS = [
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
     # cdv
-    "GANDALF_CDV_BASE_URL",
-    "GANDALF_CDV_TRINO_CONNECTION_ID",
+    "SOLOMON_CDV_BASE_URL",
+    "SOLOMON_CDV_TRINO_CONNECTION_ID",
 ]
 
 
@@ -80,7 +80,7 @@ class TestGetTrinoConfig:
         assert cfg_mod.get_trino_config() is None
 
     def test_env_fallback_minimal(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("GANDALF_TRINO_HOST", "trino.example.com")
+        monkeypatch.setenv("SOLOMON_TRINO_HOST", "trino.example.com")
         c = cfg_mod.get_trino_config()
         assert c is not None
         assert c.host == "trino.example.com"
@@ -94,12 +94,12 @@ class TestGetTrinoConfig:
     def test_env_fallback_full_override(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_TRINO_HOST", "cdw.internal")
-        monkeypatch.setenv("GANDALF_TRINO_PORT", "8443")
-        monkeypatch.setenv("GANDALF_TRINO_SCHEME", "https")
-        monkeypatch.setenv("GANDALF_TRINO_VERIFY_SSL", "false")
-        monkeypatch.setenv("GANDALF_TRINO_CATALOG", "hive_prod")
-        monkeypatch.setenv("GANDALF_TRINO_SCHEMA", "analytics")
+        monkeypatch.setenv("SOLOMON_TRINO_HOST", "cdw.internal")
+        monkeypatch.setenv("SOLOMON_TRINO_PORT", "8443")
+        monkeypatch.setenv("SOLOMON_TRINO_SCHEME", "https")
+        monkeypatch.setenv("SOLOMON_TRINO_VERIFY_SSL", "false")
+        monkeypatch.setenv("SOLOMON_TRINO_CATALOG", "hive_prod")
+        monkeypatch.setenv("SOLOMON_TRINO_SCHEMA", "analytics")
         c = cfg_mod.get_trino_config()
         assert c is not None
         assert c.host == "cdw.internal"
@@ -111,8 +111,8 @@ class TestGetTrinoConfig:
     def test_verify_ssl_ca_bundle_path_passthrough(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_TRINO_HOST", "trino.example.com")
-        monkeypatch.setenv("GANDALF_TRINO_VERIFY_SSL", "/etc/ssl/certs/ca.pem")
+        monkeypatch.setenv("SOLOMON_TRINO_HOST", "trino.example.com")
+        monkeypatch.setenv("SOLOMON_TRINO_VERIFY_SSL", "/etc/ssl/certs/ca.pem")
         c = cfg_mod.get_trino_config()
         assert c is not None
         assert c.verify_ssl == "/etc/ssl/certs/ca.pem"
@@ -120,7 +120,7 @@ class TestGetTrinoConfig:
     def test_named_connection_resolved_from_cml(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_TRINO_CONNECTION_NAME", "prod-cdw")
+        monkeypatch.setenv("SOLOMON_TRINO_CONNECTION_NAME", "prod-cdw")
         conn = _fake_conn(
             _type="cdw",
             _name="prod-cdw",
@@ -144,9 +144,9 @@ class TestGetTrinoConfig:
     def test_env_catalog_overrides_data_connection(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """env の GANDALF_TRINO_CATALOG は Data Connection より優先される。"""
-        monkeypatch.setenv("GANDALF_TRINO_CONNECTION_NAME", "prod-cdw")
-        monkeypatch.setenv("GANDALF_TRINO_CATALOG", "override_catalog")
+        """env の SOLOMON_TRINO_CATALOG は Data Connection より優先される。"""
+        monkeypatch.setenv("SOLOMON_TRINO_CONNECTION_NAME", "prod-cdw")
+        monkeypatch.setenv("SOLOMON_TRINO_CATALOG", "override_catalog")
         conn = _fake_conn(
             _type="cdw",
             _name="prod-cdw",
@@ -183,8 +183,8 @@ class TestGetTrinoConfig:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """明示名指定が cml から取れなくても env host があれば動く。"""
-        monkeypatch.setenv("GANDALF_TRINO_CONNECTION_NAME", "does-not-exist")
-        monkeypatch.setenv("GANDALF_TRINO_HOST", "fallback.trino.example")
+        monkeypatch.setenv("SOLOMON_TRINO_CONNECTION_NAME", "does-not-exist")
+        monkeypatch.setenv("SOLOMON_TRINO_HOST", "fallback.trino.example")
         monkeypatch.setattr(
             cfg_mod, "_cml_get_connection", lambda name: None
         )
@@ -198,8 +198,8 @@ class TestGetTrinoConfig:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Data Connection に host が無ければ env fallback に落ちる。"""
-        monkeypatch.setenv("GANDALF_TRINO_CONNECTION_NAME", "broken")
-        monkeypatch.setenv("GANDALF_TRINO_HOST", "fallback.example")
+        monkeypatch.setenv("SOLOMON_TRINO_CONNECTION_NAME", "broken")
+        monkeypatch.setenv("SOLOMON_TRINO_HOST", "fallback.example")
         broken = _fake_conn(_type="trino", _name="broken")  # no host
         monkeypatch.setattr(
             cfg_mod, "_cml_get_connection", lambda name: broken
@@ -225,7 +225,7 @@ class TestGetS3Config:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("AWS_REGION", "ap-northeast-1")
-        monkeypatch.setenv("GANDALF_S3_ENDPOINT_URL", "https://minio.example")
+        monkeypatch.setenv("SOLOMON_S3_ENDPOINT_URL", "https://minio.example")
         c = cfg_mod.get_s3_config()
         assert c is not None
         assert c.region == "ap-northeast-1"
@@ -234,7 +234,7 @@ class TestGetS3Config:
     def test_named_connection_from_cml(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_S3_CONNECTION_NAME", "customer-lake")
+        monkeypatch.setenv("SOLOMON_S3_CONNECTION_NAME", "customer-lake")
         conn = _fake_conn(
             _type="s3",
             _name="customer-lake",
@@ -272,14 +272,14 @@ class TestGetLLMConfig:
     def test_unknown_provider_returns_none(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_LLM_PROVIDER", "invalid_xyz")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "invalid_xyz")
         assert cfg_mod.get_llm_config() is None
 
     # ---- CAI ----
     def test_cai_requires_base_url_and_api_key(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
         # base URL のみ → まだ None
         monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://cai.example")
         assert cfg_mod.get_llm_config() is None
@@ -306,7 +306,7 @@ class TestGetLLMConfig:
     def test_anthropic_requires_api_key(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "anthropic")
         assert cfg_mod.get_llm_config() is None
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-xxx")
         c = cfg_mod.get_llm_config()
@@ -319,7 +319,7 @@ class TestGetLLMConfig:
     def test_anthropic_optional_base_url(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "anthropic")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-xxx")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://proxy.example")
         c = cfg_mod.get_llm_config()
@@ -330,7 +330,7 @@ class TestGetLLMConfig:
     def test_openai_requires_api_key(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_LLM_PROVIDER", "openai")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "openai")
         assert cfg_mod.get_llm_config() is None
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-yyy")
         c = cfg_mod.get_llm_config()
@@ -342,7 +342,7 @@ class TestGetLLMConfig:
     def test_bedrock_requires_region(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_LLM_PROVIDER", "bedrock")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "bedrock")
         assert cfg_mod.get_llm_config() is None
         monkeypatch.setenv("AWS_REGION", "us-east-1")
         c = cfg_mod.get_llm_config()
@@ -355,13 +355,13 @@ class TestGetLLMConfig:
     def test_custom_router_and_analytics_models(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "anthropic")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
         monkeypatch.setenv(
-            "GANDALF_LLM_ROUTER_MODEL", "claude-3-opus-20240229"
+            "SOLOMON_LLM_ROUTER_MODEL", "claude-3-opus-20240229"
         )
         monkeypatch.setenv(
-            "GANDALF_LLM_ANALYTICS_MODEL", "claude-3-5-sonnet-latest"
+            "SOLOMON_LLM_ANALYTICS_MODEL", "claude-3-5-sonnet-latest"
         )
         c = cfg_mod.get_llm_config()
         assert c is not None
@@ -371,7 +371,7 @@ class TestGetLLMConfig:
     def test_provider_case_insensitive(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_LLM_PROVIDER", "Anthropic")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "Anthropic")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
         c = cfg_mod.get_llm_config()
         assert c is not None
@@ -386,7 +386,7 @@ class TestGetCDVConfig:
         assert cfg_mod.get_cdv_config() is None
 
     def test_base_url_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("GANDALF_CDV_BASE_URL", "https://cdv.example.com/")
+        monkeypatch.setenv("SOLOMON_CDV_BASE_URL", "https://cdv.example.com/")
         c = cfg_mod.get_cdv_config()
         assert c is not None
         assert c.base_url == "https://cdv.example.com"  # trailing slash 除去
@@ -395,8 +395,8 @@ class TestGetCDVConfig:
     def test_with_trino_connection_id(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("GANDALF_CDV_BASE_URL", "https://cdv.example.com")
-        monkeypatch.setenv("GANDALF_CDV_TRINO_CONNECTION_ID", "42")
+        monkeypatch.setenv("SOLOMON_CDV_BASE_URL", "https://cdv.example.com")
+        monkeypatch.setenv("SOLOMON_CDV_TRINO_CONNECTION_ID", "42")
         c = cfg_mod.get_cdv_config()
         assert c is not None
         assert c.trino_connection_id == "42"

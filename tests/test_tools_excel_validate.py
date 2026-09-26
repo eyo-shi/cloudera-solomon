@@ -1,6 +1,6 @@
 """``ExcelHeaderValidateTool`` (Excel ヘッダー LLM 検証段) のテスト。
 
-LLM は :func:`gandalf.transport.llm.try_json_completion` を monkeypatch で
+LLM は :func:`solomon.transport.llm.try_json_completion` を monkeypatch で
 差し替えて挙動を検証する。実際の LiteLLM や CAI Inference は叩かない。
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from gandalf.tools.excel import ExcelHeaderValidateTool
+from solomon.tools.excel import ExcelHeaderValidateTool
 
 
 # ------------------------------------------------------------------ #
@@ -43,7 +43,7 @@ def test_validate_passes_through_when_llm_unavailable() -> None:
     """LiteLLM が None を返すとき、heuristic を素通し (is_valid=True) で返す。"""
     tool = ExcelHeaderValidateTool()
     with mock.patch(
-        "gandalf.tools.excel.try_json_completion", return_value=None
+        "solomon.tools.excel.try_json_completion", return_value=None
     ):
         result = tool.run(user_ctx=None, candidates=[_valid_candidate()])
     assert result["status"] == "ok"
@@ -66,7 +66,7 @@ def test_validate_accepts_llm_approval() -> None:
         "reason": "row 3 has string-typed unique values consistent with a table header",
     }
     with mock.patch(
-        "gandalf.tools.excel.try_json_completion", return_value=llm_response
+        "solomon.tools.excel.try_json_completion", return_value=llm_response
     ):
         result = tool.run(user_ctx=None, candidates=[_valid_candidate()])
     v = result["validations"][0]
@@ -88,7 +88,7 @@ def test_validate_returns_llm_revision() -> None:
         "reason": "row 3 looks like a section title; row 4 is the real header",
     }
     with mock.patch(
-        "gandalf.tools.excel.try_json_completion", return_value=llm_response
+        "solomon.tools.excel.try_json_completion", return_value=llm_response
     ):
         result = tool.run(user_ctx=None, candidates=[_valid_candidate()])
     v = result["validations"][0]
@@ -104,7 +104,7 @@ def test_validate_shortcircuits_when_heuristic_had_no_header() -> None:
     tool = ExcelHeaderValidateTool()
     # LLM を呼ばない (呼ばれたら失敗)
     with mock.patch(
-        "gandalf.tools.excel.try_json_completion",
+        "solomon.tools.excel.try_json_completion",
         side_effect=AssertionError("LLM must not be called"),
     ):
         result = tool.run(
@@ -132,7 +132,7 @@ def test_validate_rejects_bad_candidate_type() -> None:
 def test_validate_accepts_dict_candidate_shape() -> None:
     tool = ExcelHeaderValidateTool()
     with mock.patch(
-        "gandalf.tools.excel.try_json_completion", return_value=None
+        "solomon.tools.excel.try_json_completion", return_value=None
     ):
         result = tool.run(user_ctx=None, candidates=[_valid_candidate()])
     assert result["status"] == "ok"
@@ -151,7 +151,7 @@ def test_validate_coerces_string_int_revised_row() -> None:
         "reason": "shifted",
     }
     with mock.patch(
-        "gandalf.tools.excel.try_json_completion", return_value=llm_response
+        "solomon.tools.excel.try_json_completion", return_value=llm_response
     ):
         result = tool.run(user_ctx=None, candidates=[_valid_candidate()])
     v = result["validations"][0]

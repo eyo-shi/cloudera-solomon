@@ -1,6 +1,6 @@
-"""AMP セットアップ Step 2: React + Vite で gandalf_ui をビルドする。
+"""AMP セットアップ Step 2: React + Vite で solomon_ui をビルドする。
 
-成果物は vite.config.ts の ``build.outDir`` どおり ``gandalf/api/static/`` に
+成果物は vite.config.ts の ``build.outDir`` どおり ``solomon/api/static/`` に
 出力する (FastAPI が SPA として / で配信)。
 
 Workbench の PBJ Python runtime には Node.js が含まれないことが多い。
@@ -40,8 +40,8 @@ def _repo_root() -> Path:
 
 
 REPO_ROOT = _repo_root()
-UI_DIR = REPO_ROOT / "gandalf_ui"
-STATIC_OUT = REPO_ROOT / "gandalf" / "api" / "static"
+UI_DIR = REPO_ROOT / "solomon_ui"
+STATIC_OUT = REPO_ROOT / "solomon" / "api" / "static"
 LOCK_FILE = UI_DIR / "package-lock.json"
 
 

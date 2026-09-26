@@ -1,4 +1,4 @@
-"""gandalf.transport.llm_factory の provider prefix / kwargs 組み立てテスト。
+"""solomon.transport.llm_factory の provider prefix / kwargs 組み立てテスト。
 
 Crew.ai の :class:`crewai.LLM` を実際に構築せずに、
 どんな kwargs で呼ばれたかを spy して検証する。
@@ -9,8 +9,8 @@ from typing import Any, Optional
 
 import pytest
 
-from gandalf.transport import config as cfg_mod
-from gandalf.transport import llm_factory
+from solomon.transport import config as cfg_mod
+from solomon.transport import llm_factory
 
 
 # ------------------------------------------------------------------ #
@@ -30,7 +30,7 @@ class _SpyLLM:
 def spy_llm(monkeypatch: pytest.MonkeyPatch) -> type[_SpyLLM]:
     """`from crewai import LLM` を _SpyLLM に差し替える。
 
-    :mod:`gandalf.transport.llm_factory` は関数内 import しているため、
+    :mod:`solomon.transport.llm_factory` は関数内 import しているため、
     ``sys.modules["crewai"]`` の LLM 属性を書き換えるだけで足りる。
     ``crewai`` 本体が未インストールでも仮の module を注入して通す。
     """

@@ -10,8 +10,8 @@ from datetime import date, datetime
 
 import pytest
 
-from gandalf.tools.format import CSVSnifferTool, MagicByteTool
-from gandalf.tools.schema import NameProposerTool, TypeInferTool, _infer_type_for_values
+from solomon.tools.format import CSVSnifferTool, MagicByteTool
+from solomon.tools.schema import NameProposerTool, TypeInferTool, _infer_type_for_values
 
 
 # ------------------------------------------------------------------ #
