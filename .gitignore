@@ -1,0 +1,41 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Node (gandalf_ui) ---
+gandalf_ui/node_modules/
+gandalf_ui/dist/
+gandalf_ui/.vite/
+gandalf_ui/*.log
+gandalf_ui/.eslintcache
+gandalf_ui/*.tsbuildinfo
+gandalf_ui/vite.config.js
+gandalf_ui/vite.config.d.ts
+
+# Vite ビルド成果物の出力先 (成果物は Git 管理しない)
+gandalf/api/static/
+
+# --- Ossie index (キャッシュ、大きいので Git LFS or 除外) ---
+semantic/index/*.parquet
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
