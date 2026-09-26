@@ -34,6 +34,7 @@ from solomon.api.auth import get_user_context
 from solomon.api.sse import sse_artifact, sse_done, sse_error, sse_step, sse_token
 from solomon.api.state import SessionTurn, get_store
 from solomon.ingestion.crew import kickoff_ingestion
+from solomon.rag.crew import kickoff_knowledge_rag
 from solomon.router import DispatchPlan, RouterResult, kickoff_router
 from solomon.transport.config import get_llm_config
 from solomon.transport.llm_factory import build_llm_pair
@@ -169,6 +170,18 @@ async def post_wish(
                     fq_table_name=str(plan.inputs.get("fq_table_name", "")),
                     question=str(plan.inputs.get("question") or body.prompt),
                     llm_light=llm_light,
+                    llm_strong=llm_strong,
+                    artifacts_created=artifacts_created,
+                    response_md_parts=response_md_parts,
+                    error_holder=error_holder,
+                ):
+                    yield chunk
+            elif plan.child_crew == "knowledge_rag":
+                async for chunk in _handle_knowledge_rag(
+                    request=request,
+                    user_ctx=user_ctx,
+                    session_id=session.session_id,
+                    question=str(plan.inputs.get("question") or body.prompt),
                     llm_strong=llm_strong,
                     artifacts_created=artifacts_created,
                     response_md_parts=response_md_parts,
@@ -526,6 +539,123 @@ async def _handle_summary(
 
 # ------------------------------------------------------------------ #
 # Analytics Dashboard path
+# ------------------------------------------------------------------ #
+async def _handle_knowledge_rag(
+    *,
+    request: Request,
+    user_ctx: UserContext,
+    session_id: str,
+    question: str,
+    llm_strong: Optional[Any],
+    artifacts_created: list[str],
+    response_md_parts: list[str],
+    error_holder: list[Optional[str]],
+) -> AsyncIterator[dict]:
+    """Agentic RAG (Knowledge Router + Multi-Source Retrieval) を実行する。"""
+    yield sse_step(
+        "KnowledgeRagCrew",
+        "running",
+        "ナレッジソースを横断検索しています...",
+    )
+
+    scoped_ctx = UserContext(
+        user_name=user_ctx.user_name,
+        groups=user_ctx.groups,
+        knox_jwt=user_ctx.knox_jwt,
+        aws_credentials=user_ctx.aws_credentials,
+        session_id=session_id,
+    )
+
+    def _run() -> dict:
+        return kickoff_knowledge_rag(
+            user_ctx=scoped_ctx,
+            prompt=question,
+            llm_strong=llm_strong,
+        )
+
+    task = asyncio.create_task(asyncio.to_thread(_run))
+
+    while not task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+        except asyncio.TimeoutError:
+            if await request.is_disconnected():
+                task.cancel()
+                return
+            yield sse_step("KnowledgeRagCrew", "running", "検索・統合中...")
+
+    result = await task
+    if result.get("status") != "ok":
+        code = result.get("error_code", "KNOWLEDGE_RAG_FAILED")
+        msg = result.get("message", "Knowledge RAG failed")
+        error_holder[0] = code
+        yield sse_error(code, msg)
+        return
+
+    strategy = result.get("strategy", "")
+    yield sse_step(
+        "KnowledgeRagCrew",
+        "done",
+        f"strategy={strategy}, hits={result.get('hit_count', 0)}",
+    )
+
+    md = result.get("answer_markdown") or ""
+    if md:
+        response_md_parts.append(md)
+        yield sse_token(md)
+
+    hits = result.get("hits") or []
+    neo4j_hits = [h for h in hits if h.get("source") == "neo4j"]
+    if neo4j_hits or strategy in ("GRAPH_QUERY", "COMPOSITE"):
+        entity_hint = _graph_entity_hint_from_rag(result, question)
+        if entity_hint is not None:
+            try:
+                from solomon.graph.browse import visualize_entity_hint
+
+                viz = visualize_entity_hint(entity_hint, limit=100)
+                if viz.graph.nodes:
+                    store = get_store()
+                    title = f"Graph: {entity_hint or 'overview'}"
+                    art = store.register_artifact(
+                        "graph",
+                        ref={
+                            "query_type": "entity",
+                            "entity_hint": entity_hint,
+                            "title": title,
+                        },
+                        session_id=session_id,
+                    )
+                    artifacts_created.append(art.artifact_id)
+                    yield sse_artifact(
+                        art.artifact_id,
+                        "graph",
+                        ref={
+                            "query_type": "entity",
+                            "entity_hint": entity_hint,
+                            "title": title,
+                        },
+                    )
+            except Exception as exc:  # noqa: BLE001
+                _logger.debug("knowledge_rag.graph_artifact_skipped", error=str(exc))
+
+
+def _graph_entity_hint_from_rag(result: dict, question: str) -> str | None:
+    """RAG 結果から Graph 可視化用 entity_hint を推定する。"""
+    for hit in result.get("hits") or []:
+        if hit.get("source") != "neo4j":
+            continue
+        payload = hit.get("payload") or {}
+        for record in payload.get("records") or []:
+            for key in ("system_name", "fq_name", "name"):
+                val = record.get(key)
+                if val:
+                    return str(val)
+    strategy = result.get("strategy", "")
+    if strategy in ("GRAPH_QUERY", "COMPOSITE"):
+        return question.strip() or None
+    return None
+
+
 # ------------------------------------------------------------------ #
 async def _handle_dashboard(
     *,

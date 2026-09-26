@@ -32,7 +32,7 @@ env 更新後は Application 再起動が必要だが、逆にリクエストご
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from solomon.transport.logging import get_logger
@@ -111,6 +111,27 @@ class CDVConfig:
 
     base_url: str
     trino_connection_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class OpenSearchConfig:
+    """Cloudera Semantic Search (Data Hub OpenSearch) への外部接続設定。
+
+    OpenSearch は Trino/CDW と同様、Solomon 内では起動せず Data Hub 上の
+    Semantic Search for AWS クラスタへ接続する。認証情報は env / Data Connection
+    から取得し、Knox JWT とは別系統。
+    """
+
+    host: str
+    port: int = 9200
+    scheme: str = "https"
+    verify_ssl: Any = True
+    namespace: str = "solomon"
+    index_name: str = "solomon-datasets"
+    username: Optional[str] = None
+    password: Optional[str] = None
+    embedding_dim: int = 1024
+    connection_name: Optional[str] = None
 
 
 # ------------------------------------------------------------------ #
@@ -438,14 +459,183 @@ def get_neo4j_config():
     return _get_neo4j_config()
 
 
+# ------------------------------------------------------------------ #
+# OpenSearch (Cloudera Semantic Search on Data Hub)
+# ------------------------------------------------------------------ #
+_OPENSEARCH_CONN_TYPES = frozenset(
+    {"opensearch", "css", "semantic_search", "elasticsearch"}
+)
+
+
+def _parse_opensearch_endpoint(raw: str) -> tuple[str, int, str]:
+    """``https://host:9200`` 形式または ``host`` のみを (host, port, scheme) に分解。"""
+    text = raw.strip()
+    if "://" in text:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(text)
+        host = (parsed.hostname or "").strip()
+        if not host:
+            return "", 9200, "https"
+        scheme = parsed.scheme or "https"
+        default_port = 443 if scheme == "https" else 9200
+        port = parsed.port if parsed.port is not None else default_port
+        return host, port, scheme
+    return text, 9200, "https"
+
+
+def _opensearch_config_from_params(
+    p: dict[str, Any],
+    *,
+    connection_name: Optional[str],
+    namespace_env: Optional[str],
+    index_env: Optional[str],
+    embedding_dim_env: Optional[str],
+) -> Optional[OpenSearchConfig]:
+    endpoint = (
+        p.get("endpoint")
+        or p.get("endpoint_url")
+        or p.get("host")
+        or p.get("hostname")
+    )
+    if not endpoint:
+        return None
+    host, port, scheme = _parse_opensearch_endpoint(str(endpoint))
+    if not host:
+        return None
+    port_raw = p.get("port") or port
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        pass
+    scheme = str(p.get("http_scheme") or p.get("scheme") or scheme)
+    verify = _parse_verify_ssl(
+        str(p.get("verify_ssl")) if p.get("verify_ssl") is not None else None
+    )
+    namespace = str(
+        namespace_env
+        or p.get("namespace")
+        or p.get("opensearch_namespace")
+        or "solomon"
+    )
+    index_name = index_env or str(p.get("index") or p.get("index_name") or f"{namespace}-datasets")
+    dim_raw = embedding_dim_env or str(p.get("embedding_dim") or "1024")
+    try:
+        embedding_dim = int(dim_raw)
+    except (TypeError, ValueError):
+        embedding_dim = 1024
+    username = p.get("username") or p.get("user")
+    password = p.get("password")
+    return OpenSearchConfig(
+        host=host,
+        port=port,
+        scheme=scheme,
+        verify_ssl=verify,
+        namespace=namespace,
+        index_name=index_name,
+        username=str(username) if username else None,
+        password=str(password) if password else None,
+        embedding_dim=embedding_dim,
+        connection_name=connection_name,
+    )
+
+
+def get_opensearch_config() -> Optional[OpenSearchConfig]:
+    """OpenSearch (Cloudera Semantic Search) 接続設定を解決する。解決順は 4 段:
+
+    1. env ``SOLOMON_OPENSEARCH_CONNECTION_NAME`` があれば ``cml.data_v1`` から取得
+    2. cml.data の全 connection から OpenSearch/CSS 系を auto-detect (1 件目)
+    3. env ``SOLOMON_OPENSEARCH_ENDPOINT`` / ``SOLOMON_OPENSEARCH_HOST`` 系にフォールバック
+    4. 何も無ければ ``None`` (Tool は ``OPENSEARCH_NOT_CONFIGURED`` を返す)
+
+    Data Hub の Semantic Search for AWS を Provision した後、Management Console
+    からエンドポイント URL と namespace を取得して Data Connection または env に
+    設定する (Trino/CDW と同じ post-deploy ワークフロー)。
+    """
+    namespace_env = _env("SOLOMON_OPENSEARCH_NAMESPACE")
+    index_env = _env("SOLOMON_OPENSEARCH_INDEX")
+    embedding_dim_env = _env("SOLOMON_OPENSEARCH_EMBEDDING_DIM")
+
+    name = _env("SOLOMON_OPENSEARCH_CONNECTION_NAME")
+    conn: Optional[Any] = None
+    if name:
+        conn = _cml_get_connection(name)
+        if conn is None:
+            _logger.warning(
+                "opensearch_config.named_connection_missing", name=name
+            )
+
+    if conn is None:
+        for c in _cml_list_connections():
+            if _conn_type(c) in _OPENSEARCH_CONN_TYPES:
+                conn = c
+                name = getattr(c, "name", None) or name
+                _logger.info(
+                    "opensearch_config.auto_detected",
+                    connection_name=name,
+                    type=_conn_type(c),
+                )
+                break
+
+    if conn is not None:
+        cfg = _opensearch_config_from_params(
+            _conn_params(conn),
+            connection_name=name,
+            namespace_env=namespace_env,
+            index_env=index_env,
+            embedding_dim_env=embedding_dim_env,
+        )
+        if cfg is not None:
+            if namespace_env:
+                return replace(cfg, namespace=namespace_env)
+            return cfg
+        _logger.warning(
+            "opensearch_config.connection_missing_endpoint",
+            connection_name=name,
+        )
+
+    endpoint = _env("SOLOMON_OPENSEARCH_ENDPOINT") or _env("SOLOMON_OPENSEARCH_HOST")
+    if not endpoint:
+        _logger.debug("opensearch_config.not_configured")
+        return None
+
+    host, port, scheme = _parse_opensearch_endpoint(endpoint)
+    if not host:
+        return None
+    port = int(_env("SOLOMON_OPENSEARCH_PORT") or str(port))
+    scheme = _env("SOLOMON_OPENSEARCH_SCHEME") or scheme
+    verify = _parse_verify_ssl(_env("SOLOMON_OPENSEARCH_VERIFY_SSL"))
+    namespace = namespace_env or "solomon"
+    index_name = index_env or f"{namespace}-datasets"
+    dim_raw = embedding_dim_env or "1024"
+    try:
+        embedding_dim = int(dim_raw)
+    except (TypeError, ValueError):
+        embedding_dim = 1024
+    return OpenSearchConfig(
+        host=host,
+        port=port,
+        scheme=scheme,
+        verify_ssl=verify,
+        namespace=namespace,
+        index_name=index_name,
+        username=_env("SOLOMON_OPENSEARCH_USERNAME"),
+        password=_env("SOLOMON_OPENSEARCH_PASSWORD"),
+        embedding_dim=embedding_dim,
+        connection_name=None,
+    )
+
+
 __all__ = [
     "TrinoConfig",
     "S3Config",
     "LLMConfig",
     "CDVConfig",
+    "OpenSearchConfig",
     "get_trino_config",
     "get_s3_config",
     "get_llm_config",
     "get_cdv_config",
     "get_neo4j_config",
+    "get_opensearch_config",
 ]

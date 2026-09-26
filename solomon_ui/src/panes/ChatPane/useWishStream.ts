@@ -153,6 +153,8 @@ function titleFor(kind: ArtifactType, ref: Record<string, unknown>): string {
       return "SQL";
     case "file_preview":
       return String(ref.key ?? "File").split("/").slice(-1)[0] || "File";
+    case "graph":
+      return String(ref.title ?? "Graph");
     default:
       return "Result";
   }

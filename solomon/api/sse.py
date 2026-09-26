@@ -39,6 +39,7 @@ class WishArtifactEvent(BaseModel):
         "summary",
         "sql",
         "file_preview",
+        "graph",
     ]
     ref: dict[str, Any] = Field(
         default_factory=dict,

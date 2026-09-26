@@ -68,6 +68,53 @@ export function IconDatabase() {
   );
 }
 
+export function IconGraph({ active }: { active?: boolean }) {
+  return (
+    <svg
+      className={"explorer-icon" + (active ? " explorer-icon--active" : "")}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <circle cx="6" cy="6" r="2.25" fill="currentColor" />
+      <circle cx="18" cy="6" r="2.25" fill="currentColor" />
+      <circle cx="12" cy="18" r="2.25" fill="currentColor" />
+      <path
+        d="M8 6h8M7.5 7.5L10.5 16M16.5 7.5L13.5 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+export function IconSemanticSearch({ active }: { active?: boolean }) {
+  return (
+    <svg
+      className={"explorer-icon" + (active ? " explorer-icon--active" : "")}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <circle cx="10" cy="10" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.75" />
+      <path
+        d="M14.5 14.5L19 19"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8 10h4M10 8v4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function IconSearch() {
   return (
     <svg className="explorer-search-icon" viewBox="0 0 16 16" aria-hidden="true">

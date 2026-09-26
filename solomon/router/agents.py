@@ -38,7 +38,9 @@ def make_intent_classifier_agent(llm: Optional[Any] = None) -> Agent:
         role="Intent Classifier",
         goal=(
             "ユーザーの発話を INGEST / ANALYZE_SUMMARY / ANALYZE_DASHBOARD / "
-            "CHITCHAT / UNKNOWN のいずれかに分類する。"
+            "KNOWLEDGE_RAG / CHITCHAT / UNKNOWN のいずれかに分類する。"
+            "KNOWLEDGE_RAG は Neo4j グラフ探索 / OpenSearch 検索 / Lakehouse SQL "
+            "などナレッジ横断質問 (設計書・障害・用語説明・複合検索)。"
             "代名詞 (『そのテーブル』『さっきのダッシュボード』等) が現れたら "
             "entity_memory_read で last_table / last_dashboard_id を引き当てて "
             "extracted_args に埋める。判定不能な場合は needs_clarification=true "
@@ -70,6 +72,7 @@ def make_dispatcher_agent(llm: Optional[Any] = None) -> Agent:
             "INGEST なら child_crew='ingestion' + inputs={bucket, key, target_schema}、"
             "ANALYZE_SUMMARY なら 'analytics_summary'、"
             "ANALYZE_DASHBOARD なら 'analytics_dashboard'、"
+            "KNOWLEDGE_RAG なら 'knowledge_rag' + inputs={question}、"
             "CHITCHAT / needs_clarification なら skip_child=true にして "
             "response_markdown に日本語の返信文を書く。実際の子 Crew 起動は "
             "Python 側 (kickoff_router) が担当するので、この Agent は"

@@ -14,6 +14,7 @@
   create_iceberg_table_task        -> CreateIcebergTableResult
   load_neo4j_graph_task            -> LoadNeo4jGraphResult
   draft_ossie_task                 -> DraftOssieResult
+  index_opensearch_task            -> IndexOpenSearchResult
   wrap_up_task                     -> IngestionReport
 """
 from __future__ import annotations
@@ -125,6 +126,9 @@ class CreateIcebergTableResult(BaseModel):
 class LoadNeo4jGraphResult(BaseModel):
     dataset_id: str
     source_id: str
+    system_id: Optional[str] = None
+    system_name: Optional[str] = None
+    document_ids: list[str] = Field(default_factory=list)
     neo4j_uri: Optional[str] = None
     counts: dict[str, int] = Field(default_factory=dict)
     skipped: bool = False
@@ -139,10 +143,22 @@ class DraftOssieResult(BaseModel):
     yaml_path: str
     git_status: str  # "committed" / "skipped"
     commit_sha: Optional[str] = None
+    dataset: dict[str, Any] = Field(default_factory=dict)
 
 
 # ------------------------------------------------------------------ #
-# 9. wrap_up
+# 9. index_opensearch
+# ------------------------------------------------------------------ #
+class IndexOpenSearchResult(BaseModel):
+    fq_name: str
+    index: Optional[str] = None
+    indexed_count: int = 0
+    skipped: bool = False
+    reason: Optional[str] = None
+
+
+# ------------------------------------------------------------------ #
+# 10. wrap_up
 # ------------------------------------------------------------------ #
 class IngestionReport(BaseModel):
     """ユーザーに返す最終レポート (Markdown はレンダー時に組み立てる)。"""
@@ -154,7 +170,10 @@ class IngestionReport(BaseModel):
     column_count: int
     ossie_yaml_path: str
     neo4j_dataset_id: Optional[str] = None
+    neo4j_system_id: Optional[str] = None
     neo4j_counts: dict[str, int] = Field(default_factory=dict)
+    opensearch_index: Optional[str] = None
+    opensearch_indexed_count: int = 0
     similar_tables: list[dict[str, Any]] = Field(default_factory=list)
     source: dict[str, Any] = Field(default_factory=dict)
     summary_markdown: str = ""

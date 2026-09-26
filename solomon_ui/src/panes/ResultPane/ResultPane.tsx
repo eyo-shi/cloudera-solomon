@@ -8,6 +8,7 @@ import { DashboardTab } from "./tabs/DashboardTab";
 import { FilePreviewTab } from "./tabs/FilePreviewTab";
 import { SQLTab } from "./tabs/SQLTab";
 import { SummaryTab } from "./tabs/SummaryTab";
+import { GraphTab } from "./tabs/GraphTab";
 import { TablePreviewTab } from "./tabs/TablePreviewTab";
 
 export function ResultPane() {
@@ -54,6 +55,8 @@ function TabRenderer({ tabId }: { tabId: string }) {
       return <SQLTab tab={tab} />;
     case "file_preview":
       return <FilePreviewTab tab={tab} />;
+    case "graph":
+      return <GraphTab tab={tab} />;
     default:
       return <p className="placeholder">未対応のタブ種別</p>;
   }

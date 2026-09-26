@@ -1,16 +1,29 @@
 /**
- * 左ペイン: データ Explorer（Tables / Storage 切替）。
+ * 左ペイン: データ Explorer（Tables / Storage / Graph / Search 切替）。
  *
- * 上部アイコンで Tables (Explore) / Storage (S3) を切替。
- * Tables: 検索 + フラットテーブル一覧 (ホバーでカラム、ダブルクリックで中央表示)
- * Storage: S3 階層
+ * 上部アイコンで各データソースを切替。
+ * Search タブ: 表示ラベル "Search"、ツールチップ / aria-label "Semantic Search"。
  */
 import { useState } from "react";
 import { ExploreView } from "./ExploreView";
-import { IconStorage, IconTables } from "./ExplorerIcons";
+import {
+  IconGraph,
+  IconSemanticSearch,
+  IconStorage,
+  IconTables,
+} from "./ExplorerIcons";
+import { GraphView } from "./GraphView";
+import { SearchView } from "./SearchView";
 import { StorageView } from "./StorageView";
 
-export type ExplorerMode = "tables" | "storage";
+export type ExplorerMode = "tables" | "storage" | "graph" | "search";
+
+const SEARCH_PLACEHOLDERS: Record<ExplorerMode, string> = {
+  tables: "Search SQL tables…",
+  storage: "Search storage…",
+  graph: "Search graph nodes…",
+  search: "Search indexed documents…",
+};
 
 export function TreePane() {
   const [mode, setMode] = useState<ExplorerMode>("tables");
@@ -43,14 +56,37 @@ export function TreePane() {
         >
           <IconStorage active={mode === "storage"} />
         </button>
+        <button
+          type="button"
+          className={
+            "explorer-toolbar__btn" +
+            (mode === "graph" ? " explorer-toolbar__btn--active" : "")
+          }
+          aria-label="Graph"
+          title="Graph"
+          onClick={() => setMode("graph")}
+        >
+          <IconGraph active={mode === "graph"} />
+        </button>
+        <button
+          type="button"
+          className={
+            "explorer-toolbar__btn explorer-toolbar__btn--labeled" +
+            (mode === "search" ? " explorer-toolbar__btn--active" : "")
+          }
+          aria-label="Semantic Search"
+          title="Semantic Search"
+          onClick={() => setMode("search")}
+        >
+          <IconSemanticSearch active={mode === "search"} />
+          <span className="explorer-toolbar__label">Search</span>
+        </button>
       </div>
 
       <div className="explorer-search">
         <input
           type="search"
-          placeholder={
-            mode === "tables" ? "Search SQL tables…" : "Search storage…"
-          }
+          placeholder={SEARCH_PLACEHOLDERS[mode]}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
@@ -60,11 +96,10 @@ export function TreePane() {
       </div>
 
       <div className="tree-body explorer-body">
-        {mode === "tables" ? (
-          <ExploreView filter={filter} />
-        ) : (
-          <StorageView filter={filter} />
-        )}
+        {mode === "tables" && <ExploreView filter={filter} />}
+        {mode === "storage" && <StorageView filter={filter} />}
+        {mode === "graph" && <GraphView filter={filter} />}
+        {mode === "search" && <SearchView filter={filter} />}
       </div>
     </div>
   );

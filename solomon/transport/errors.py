@@ -10,7 +10,8 @@ LLM 再試行ループを暴走させない。エラーコードは 7 プレフ�
     PERM_*    権限不足 (CREATE / SELECT など)
     CDV_*     Cloudera Data Visualization
     OSSIE_*   Apache Ossie YAML
-    NEO4J_*   Neo4j graph database
+    NEO4J_*       Neo4j graph database
+    OPENSEARCH_*  Cloudera Semantic Search (external OpenSearch)
 
 `Dispatcher` はコード別にユーザー向け日本語メッセージに変換する。
 """
@@ -73,6 +74,14 @@ class ErrorCode:
     NEO4J_NOT_CONFIGURED = "NEO4J_NOT_CONFIGURED"
     NEO4J_CONNECT_FAILED = "NEO4J_CONNECT_FAILED"
     NEO4J_LOAD_FAILED = "NEO4J_LOAD_FAILED"
+    NEO4J_QUERY_FAILED = "NEO4J_QUERY_FAILED"
+
+    # OpenSearch (Cloudera Semantic Search on Data Hub — external)
+    #: Data Hub OpenSearch / Data Connection / env が未設定。UI に SetupGuide を出させる。
+    OPENSEARCH_NOT_CONFIGURED = "OPENSEARCH_NOT_CONFIGURED"
+    OPENSEARCH_CONNECT_FAILED = "OPENSEARCH_CONNECT_FAILED"
+    OPENSEARCH_QUERY_FAILED = "OPENSEARCH_QUERY_FAILED"
+    OPENSEARCH_INDEX_FAILED = "OPENSEARCH_INDEX_FAILED"
 
     # LLM
     #: LLM provider が未設定 or 必要な env が欠けている。API では 503 に変換。

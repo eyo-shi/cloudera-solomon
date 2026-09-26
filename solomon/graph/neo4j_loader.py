@@ -27,6 +27,17 @@ class ColumnGraphNode:
 
 
 @dataclass
+class DocumentGraphNode:
+    """設計書 / ソースファイル / セマンティックレイヤ等の Document ノード。"""
+
+    id: str
+    title: str
+    doc_type: str  # source_file | design_doc | semantic_layer | reference
+    path: str
+    content_preview: str | None = None
+
+
+@dataclass
 class IngestionGraphPayload:
     """Graph payload built from an Iceberg ingestion run."""
 
@@ -41,6 +52,9 @@ class IngestionGraphPayload:
     header_row: int | None = None
     meta_kv: list[dict[str, Any]] = field(default_factory=list)
     row_count_hint: int | None = None
+    system_name: str = "default"
+    system_description: str | None = None
+    documents: list[DocumentGraphNode] = field(default_factory=list)
 
     @property
     def dataset_id(self) -> str:
@@ -54,9 +68,15 @@ class IngestionGraphPayload:
     def schema_id(self) -> str:
         return f"{self.catalog}.{self.schema}"
 
+    @property
+    def system_id(self) -> str:
+        from solomon.graph.system import normalize_system_id
+
+        return normalize_system_id(self.system_name)
+
 
 class IngestionGraphLoader:
-    """Write Dataset / Column / SourceFile nodes and relationships into Neo4j."""
+    """Write Dataset / Column / SourceFile / System / Document nodes into Neo4j."""
 
     def __init__(self, uri: str, username: str, password: str) -> None:
         self._configured_uri = uri
@@ -113,6 +133,8 @@ class IngestionGraphLoader:
             ("SourceFile", "id"),
             ("Schema", "id"),
             ("MetadataEntry", "id"),
+            ("System", "id"),
+            ("Document", "id"),
         ):
             tx.run(
                 f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS "
@@ -236,6 +258,41 @@ class IngestionGraphLoader:
                 rows=chunk,
             )
 
+        tx.run(
+            """
+            MERGE (sys:System {id: $system_id})
+            SET sys.name = $system_name,
+                sys.description = $system_description
+            """,
+            system_id=payload.system_id,
+            system_name=payload.system_name,
+            system_description=payload.system_description,
+        )
+
+        doc_rows = [
+            {
+                "id": doc.id,
+                "title": doc.title,
+                "doc_type": doc.doc_type,
+                "path": doc.path,
+                "content_preview": doc.content_preview,
+            }
+            for doc in payload.documents
+        ]
+        for index in range(0, len(doc_rows), BATCH_SIZE):
+            chunk = doc_rows[index : index + BATCH_SIZE]
+            tx.run(
+                """
+                UNWIND $rows AS row
+                MERGE (doc:Document {id: row.id})
+                SET doc.title = row.title,
+                    doc.doc_type = row.doc_type,
+                    doc.path = row.path,
+                    doc.content_preview = row.content_preview
+                """,
+                rows=chunk,
+            )
+
     @staticmethod
     def _create_relationships(tx, payload: IngestionGraphPayload) -> dict[str, int]:
         tx.run(
@@ -274,11 +331,46 @@ class IngestionGraphLoader:
             source_id=payload.source_id,
         )
         metadata_count = result.single()["metadata_count"] if payload.meta_kv else 0
+
+        tx.run(
+            """
+            MATCH (sys:System {id: $system_id})
+            MATCH (d:Dataset {id: $dataset_id})
+            MERGE (sys)-[:OWNS_DATASET]->(d)
+            """,
+            system_id=payload.system_id,
+            dataset_id=payload.dataset_id,
+        )
+
+        doc_rel_count = 0
+        for doc in payload.documents:
+            tx.run(
+                """
+                MATCH (sys:System {id: $system_id})
+                MATCH (doc:Document {id: $doc_id})
+                MERGE (sys)-[:HAS_DOCUMENT]->(doc)
+                """,
+                system_id=payload.system_id,
+                doc_id=doc.id,
+            )
+            tx.run(
+                """
+                MATCH (doc:Document {id: $doc_id})
+                MATCH (d:Dataset {id: $dataset_id})
+                MERGE (doc)-[:REFERENCES_DATASET]->(d)
+                """,
+                doc_id=doc.id,
+                dataset_id=payload.dataset_id,
+            )
+            doc_rel_count += 2
+
         return {
             "dataset_nodes": 1,
             "column_nodes": len(payload.columns),
             "source_nodes": 1,
             "schema_nodes": 1,
             "metadata_nodes": metadata_count,
-            "relationships": 2 + len(payload.columns) + metadata_count,
+            "system_nodes": 1,
+            "document_nodes": len(payload.documents),
+            "relationships": 3 + len(payload.columns) + metadata_count + doc_rel_count,
         }

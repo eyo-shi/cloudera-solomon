@@ -4,6 +4,8 @@
 
   * :mod:`.health`     — ``/healthz``
   * :mod:`.catalog`    — ``/api/catalog/*`` (Trino メタ)
+  * :mod:`.graph`      — ``/api/graph/*``   (Neo4j ブラウズ)
+  * :mod:`.search`     — ``/api/search/*``  (Semantic Search ブラウズ)
   * :mod:`.files`      — ``/api/files/*``   (S3 ブラウズ)
   * :mod:`.query`      — ``/api/query``     (Table Preview 用 SELECT)
   * :mod:`.ossie`      — ``/api/ossie/*``   (Ossie YAML)

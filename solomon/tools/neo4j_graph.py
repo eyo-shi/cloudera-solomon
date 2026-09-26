@@ -7,7 +7,13 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from solomon.graph.config import get_neo4j_config
-from solomon.graph.neo4j_loader import ColumnGraphNode, IngestionGraphLoader, IngestionGraphPayload
+from solomon.graph.neo4j_loader import (
+    ColumnGraphNode,
+    DocumentGraphNode,
+    IngestionGraphLoader,
+    IngestionGraphPayload,
+)
+from solomon.graph.system import build_ingestion_documents, infer_system_name
 from solomon.transport.errors import ErrorCode, err, ok
 from solomon.transport.logging import get_logger
 from solomon.transport.tool_base import BaseSolomonTool
@@ -36,6 +42,10 @@ class Neo4jGraphLoadArgs(BaseModel):
     header_row: Optional[int] = None
     meta_kv: list[dict[str, Any]] = Field(default_factory=list)
     row_count_hint: Optional[int] = None
+    system_name: Optional[str] = Field(
+        None, description="System 名 (省略時は S3 key / meta_kv / schema から推定)"
+    )
+    ossie_path: Optional[str] = Field(None, description="Ossie YAML 相対パス (Document リンク用)")
 
     model_config = {"populate_by_name": True}
 
@@ -50,9 +60,10 @@ class Neo4jGraphLoadTool(BaseSolomonTool):
     name: str = "neo4j_graph_load"
     description: str = (
         "Load ingestion metadata into Neo4j as graph nodes and relationships. "
-        "Creates Dataset, Column, SourceFile, Schema, and optional MetadataEntry "
-        "nodes, then links them with HAS_COLUMN, IN_SCHEMA, SOURCED_FROM, and "
-        "HAS_METADATA relationships. Call after Iceberg table creation."
+        "Creates Dataset, Column, SourceFile, Schema, System, Document, and optional "
+        "MetadataEntry nodes, then links them with HAS_COLUMN, IN_SCHEMA, "
+        "SOURCED_FROM, HAS_METADATA, OWNS_DATASET, HAS_DOCUMENT, and "
+        "REFERENCES_DATASET. Call after Iceberg table creation."
     )
     args_schema: type[BaseModel] = Neo4jGraphLoadArgs
     requires_auth: bool = False
@@ -71,6 +82,8 @@ class Neo4jGraphLoadTool(BaseSolomonTool):
         header_row: Optional[int] = None,
         meta_kv: Optional[list[dict[str, Any]]] = None,
         row_count_hint: Optional[int] = None,
+        system_name: Optional[str] = None,
+        ossie_path: Optional[str] = None,
         **_: Any,
     ) -> dict[str, Any]:
         config = get_neo4j_config()
@@ -89,6 +102,20 @@ class Neo4jGraphLoadTool(BaseSolomonTool):
             c if isinstance(c, ColumnGraphInput) else ColumnGraphInput.model_validate(c)
             for c in columns
         ]
+        resolved_system = infer_system_name(
+            key=key,
+            schema=schema,
+            meta_kv=meta_kv,
+            explicit=system_name,
+        )
+        documents = build_ingestion_documents(
+            dataset_id=f"{catalog}.{schema}.{table}",
+            bucket=bucket,
+            key=key,
+            format=format,
+            ossie_path=ossie_path,
+            meta_kv=meta_kv,
+        )
         payload = IngestionGraphPayload(
             catalog=catalog,
             schema=schema,
@@ -110,6 +137,9 @@ class Neo4jGraphLoadTool(BaseSolomonTool):
             header_row=header_row,
             meta_kv=meta_kv or [],
             row_count_hint=row_count_hint,
+            system_name=resolved_system,
+            system_description=f"Ingested from {bucket}/{key}",
+            documents=documents,
         )
 
         loader = IngestionGraphLoader(
@@ -131,6 +161,9 @@ class Neo4jGraphLoadTool(BaseSolomonTool):
             {
                 "dataset_id": payload.dataset_id,
                 "source_id": payload.source_id,
+                "system_id": payload.system_id,
+                "system_name": payload.system_name,
+                "document_ids": [d.id for d in payload.documents],
                 "neo4j_uri": loader._uri,
                 "counts": counts,
             }

@@ -15,7 +15,8 @@
   6. create_iceberg_table_task
   7. load_neo4j_graph_task
   8. draft_ossie_task
-  9. wrap_up_task
+  9. index_opensearch_task
+  10. wrap_up_task
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from solomon.ingestion.models import (
     ConflictAndPermissionsResult,
     CreateIcebergTableResult,
     DraftOssieResult,
+    IndexOpenSearchResult,
     LoadNeo4jGraphResult,
     ExtractDataFrameResult,
     IngestionReport,
@@ -193,15 +195,16 @@ def make_load_neo4j_graph_task(agent: Any, context: list[Task]) -> Task:
     return Task(
         description=(
             "create_iceberg_table 完了後、Neo4jGraphLoadTool を使って取り込み"
-            "メタデータを Neo4j へ反映せよ。catalog / target_schema / "
-            "resolved_table / columns / bucket / key / format / sheet / "
-            "header_row / meta_kv / row_count_hint を前段タスクから集約して"
-            "渡す。NEO4J_URI 未設定時は skipped=true, reason を返し、"
-            "Crew 全体は失敗させない。副作用ありのため max_retries=0。"
+            "メタデータを Neo4j へ反映せよ。System / Document ノードも作成する。"
+            "catalog / target_schema / resolved_table / columns / bucket / key / "
+            "format / sheet / header_row / meta_kv / row_count_hint を前段タスクから"
+            "集約して渡す。system_name は meta_kv または S3 key から推定可。"
+            "NEO4J_URI 未設定時は skipped=true, reason を返し、Crew 全体は失敗させない。"
+            "副作用ありのため max_retries=0。"
         ),
         expected_output=(
-            "LoadNeo4jGraphResult の JSON。dataset_id, source_id, neo4j_uri, "
-            "counts, skipped, reason を含む。"
+            "LoadNeo4jGraphResult の JSON。dataset_id, source_id, system_id, "
+            "system_name, document_ids, neo4j_uri, counts, skipped, reason を含む。"
         ),
         agent=agent,
         context=context,
@@ -235,19 +238,45 @@ def make_draft_ossie_task(agent: Any, context: list[Task]) -> Task:
 
 
 # ------------------------------------------------------------------ #
-# 9. wrap_up_task
+# 9. index_opensearch_task  (副作用あり: max_retries=0)
+# ------------------------------------------------------------------ #
+def make_index_opensearch_task(agent: Any, context: list[Task]) -> Task:
+    return Task(
+        description=(
+            "draft_ossie 完了後、OpenSearchIndexTool で Ossie dataset と "
+            "Neo4j Document 相当のメタデータを外部 OpenSearch (Cloudera Semantic "
+            "Search) にインデックスせよ。fq_name, dataset dict, system_id, "
+            "documents を前段 (load_neo4j_graph, draft_ossie) から集約して渡す。"
+            "OpenSearch 未設定時は skipped=true で返し、Crew 全体は失敗させない。"
+            "副作用ありのため max_retries=0。"
+        ),
+        expected_output=(
+            "IndexOpenSearchResult の JSON。fq_name, index, indexed_count, "
+            "skipped, reason を含む。"
+        ),
+        agent=agent,
+        context=context,
+        output_json=IndexOpenSearchResult,
+        max_retries=0,
+    )
+
+
+# ------------------------------------------------------------------ #
+# 10. wrap_up_task
 # ------------------------------------------------------------------ #
 def make_wrap_up_task(agent: Any, context: list[Task]) -> Task:
     return Task(
         description=(
             "これまでのタスク結果を統合し、ユーザーへの最終レポートを"
             "IngestionReport JSON として返せ。summary_markdown には作成した"
-            " fq_table_name、行数目安、カラム数、Neo4j グラフ投入結果、"
-            "類似テーブル、Ossie YAML のパスを日本語で 5-8 行にまとめる。"
+            " fq_table_name、行数目安、カラム数、Neo4j System/Document 投入結果、"
+            "OpenSearch インデックス結果、類似テーブル、Ossie YAML のパスを"
+            "日本語で 5-10 行にまとめる。"
         ),
         expected_output=(
             "IngestionReport の JSON。fq_table_name, ddl, column_count, "
-            "ossie_yaml_path, neo4j_dataset_id, neo4j_counts, similar_tables, "
+            "ossie_yaml_path, neo4j_dataset_id, neo4j_system_id, neo4j_counts, "
+            "opensearch_index, opensearch_indexed_count, similar_tables, "
             "source, summary_markdown を含む。"
         ),
         agent=agent,
@@ -301,6 +330,7 @@ __all__ = [
     "make_create_iceberg_table_task",
     "make_load_neo4j_graph_task",
     "make_draft_ossie_task",
+    "make_index_opensearch_task",
     "make_wrap_up_task",
     "conflict_permissions_guardrail",
 ]

@@ -28,6 +28,72 @@ export interface ColumnListResponse {
   columns: ColumnEntry[];
 }
 
+// ---------------- Graph ---------------- //
+export interface GraphNodeDTO {
+  id: string;
+  labels: string[];
+  properties: Record<string, unknown>;
+  caption: string;
+}
+export interface GraphEdgeDTO {
+  id: string;
+  type: string;
+  source: string;
+  target: string;
+  properties: Record<string, unknown>;
+}
+export interface GraphVisualization {
+  nodes: GraphNodeDTO[];
+  edges: GraphEdgeDTO[];
+  truncated?: boolean;
+  cypher?: string;
+  query_type?: GraphQueryType;
+}
+export type GraphQueryType =
+  | "schema"
+  | "label"
+  | "relationship"
+  | "property"
+  | "neighborhood"
+  | "entity";
+
+export interface GraphSchemaResponse {
+  node_labels: string[];
+  relationship_types: string[];
+  property_keys: string[];
+}
+export interface GraphQueryResponse {
+  query_type: GraphQueryType;
+  cypher: string;
+  graph: GraphVisualization;
+  node_count: number;
+  edge_count: number;
+}
+
+export interface GraphTabRef {
+  query_type: GraphQueryType;
+  label?: string;
+  rel_type?: string;
+  property_key?: string;
+  node_id?: string;
+  entity_hint?: string;
+  depth?: number;
+  title?: string;
+}
+
+// ---------------- Search ---------------- //
+export interface SearchDocumentEntry {
+  fq_name?: string | null;
+  score?: number;
+  dataset?: Record<string, unknown>;
+}
+export interface SearchDocumentsResponse {
+  index: string;
+  namespace: string;
+  query: string;
+  documents: SearchDocumentEntry[];
+}
+
 // ---------------- Files ---------------- //
 export interface S3Object {
   key: string;
@@ -94,7 +160,8 @@ export type ArtifactType =
   | "dashboard"
   | "summary"
   | "sql"
-  | "file_preview";
+  | "file_preview"
+  | "graph";
 
 export interface Artifact {
   id: string;

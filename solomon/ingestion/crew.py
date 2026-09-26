@@ -20,6 +20,7 @@ from solomon.ingestion.agents import (
     make_format_sniffer_agent,
     make_graph_loader_agent,
     make_ossie_drafter_agent,
+    make_search_indexer_agent,
     make_s3_scout_agent,
     make_schema_drafter_agent,
     make_table_creator_agent,
@@ -31,6 +32,7 @@ from solomon.ingestion.tasks import (
     make_create_iceberg_table_task,
     make_load_neo4j_graph_task,
     make_draft_ossie_task,
+    make_index_opensearch_task,
     make_extract_dataframe_task,
     make_locate_s3_object_task,
     make_propose_schema_and_name_task,
@@ -90,6 +92,7 @@ def build_ingestion_crew(
     table_creator = make_table_creator_agent(llm=llm_strong)
     graph_loader = make_graph_loader_agent(llm=llm_light)
     ossie_drafter = make_ossie_drafter_agent(llm=llm_light)
+    search_indexer = make_search_indexer_agent(llm=llm_light)
 
     # Tasks
     t_locate = make_locate_s3_object_task(s3_scout)
@@ -115,9 +118,13 @@ def build_ingestion_crew(
         ossie_drafter,
         context=[t_locate, t_propose, t_create, t_extract],
     )
+    t_index = make_index_opensearch_task(
+        search_indexer,
+        context=[t_graph, t_ossie],
+    )
     t_wrap = make_wrap_up_task(
         ossie_drafter,
-        context=[t_locate, t_propose, t_create, t_graph, t_ossie],
+        context=[t_locate, t_propose, t_create, t_graph, t_ossie, t_index],
     )
 
     crew = Crew(
@@ -128,6 +135,7 @@ def build_ingestion_crew(
             table_creator,
             graph_loader,
             ossie_drafter,
+            search_indexer,
         ],
         tasks=[
             t_locate,
@@ -138,6 +146,7 @@ def build_ingestion_crew(
             t_create,
             t_graph,
             t_ossie,
+            t_index,
             t_wrap,
         ],
         process=getattr(Process, "sequential"),

@@ -19,7 +19,11 @@ Router / CDV / Viz)。
   CDV:        :class:`CDVStartupCheckTool`, :class:`CDVDatasetTool`,
               :class:`CDVVisualTool`, :class:`CDVDashboardTool`
   Viz:        :class:`VizHeuristicTool`
-  Neo4j:      :class:`Neo4jGraphLoadTool`
+  Neo4j:      :class:`Neo4jGraphLoadTool`, :class:`Neo4jGraphQueryTool`
+  OpenSearch: :class:`OpenSearchKeywordSearchTool`, :class:`OpenSearchVectorSearchTool`,
+              :class:`OpenSearchHybridSearchTool`, :class:`OpenSearchIndexTool`,
+              :class:`OpenSearchPingTool`
+  RAG:        :class:`Text2SQLTool`
 """
 from solomon.router.tools import (
     AnalyticsKickoffTool,
@@ -45,6 +49,15 @@ from solomon.tools.ossie import (
 from solomon.tools.s3 import S3GetRangeTool, S3HeadTool, S3ListTool
 from solomon.tools.schema import NameProposerTool, TypeInferTool
 from solomon.tools.neo4j_graph import Neo4jGraphLoadTool
+from solomon.tools.neo4j_query import Neo4jGraphQueryTool
+from solomon.tools.opensearch import (
+    OpenSearchHybridSearchTool,
+    OpenSearchIndexTool,
+    OpenSearchKeywordSearchTool,
+    OpenSearchPingTool,
+    OpenSearchVectorSearchTool,
+)
+from solomon.tools.text2sql import Text2SQLTool
 from solomon.tools.trino import TrinoDDLTool, TrinoMetaTool, TrinoQueryTool
 from solomon.tools.viz import VizHeuristicTool
 
@@ -90,4 +103,13 @@ __all__ = [
     "VizHeuristicTool",
     # neo4j
     "Neo4jGraphLoadTool",
+    "Neo4jGraphQueryTool",
+    # opensearch (external Data Hub)
+    "OpenSearchKeywordSearchTool",
+    "OpenSearchVectorSearchTool",
+    "OpenSearchHybridSearchTool",
+    "OpenSearchIndexTool",
+    "OpenSearchPingTool",
+    # rag
+    "Text2SQLTool",
 ]

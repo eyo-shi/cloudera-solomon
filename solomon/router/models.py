@@ -5,11 +5,12 @@ Router は 2 タスク固定:
   1. classify_intent_task   -> IntentClassification
   2. dispatch_task          -> DispatchPlan
 
-Intent は 5 分類:
+Intent は 6 分類:
 
   * ``INGEST``            — s3://... の取り込み依頼
   * ``ANALYZE_SUMMARY``   — 既存テーブルへの Markdown サマリー要求
   * ``ANALYZE_DASHBOARD`` — 既存テーブルへのダッシュボード生成要求
+  * ``KNOWLEDGE_RAG``     — Agentic RAG (Neo4j / OpenSearch / Lakehouse)
   * ``CHITCHAT``          — 挨拶・雑談・ヘルプ (子 Crew は起動しない)
   * ``UNKNOWN``           — 判定不能。needs_clarification=True で聞き返す
 
@@ -32,6 +33,7 @@ IntentLiteral = Literal[
     "INGEST",
     "ANALYZE_SUMMARY",
     "ANALYZE_DASHBOARD",
+    "KNOWLEDGE_RAG",
     "CHITCHAT",
     "UNKNOWN",
 ]
@@ -46,7 +48,8 @@ class IntentClassification(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     intent: IntentLiteral = Field(
-        ..., description="INGEST / ANALYZE_SUMMARY / ANALYZE_DASHBOARD / CHITCHAT / UNKNOWN"
+        ...,
+        description="INGEST / ANALYZE_SUMMARY / ANALYZE_DASHBOARD / KNOWLEDGE_RAG / CHITCHAT / UNKNOWN",
     )
     confidence: float = Field(1.0, ge=0.0, le=1.0)
     extracted_args: dict[str, Any] = Field(
@@ -81,7 +84,13 @@ class DispatchPlan(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     intent: IntentLiteral
-    child_crew: Literal["ingestion", "analytics_summary", "analytics_dashboard", "none"]
+    child_crew: Literal[
+        "ingestion",
+        "analytics_summary",
+        "analytics_dashboard",
+        "knowledge_rag",
+        "none",
+    ]
     inputs: dict[str, Any] = Field(default_factory=dict)
     response_markdown: str = Field(
         "",

@@ -176,7 +176,19 @@ def heuristic_classify(
             reasoning="analyze keyword but no last_table in entity_memory",
         )
 
-    # 3) CHITCHAT
+    # 3) KNOWLEDGE_RAG (取り込み/分析/雑談以外のナレッジ探索)
+    from solomon.rag.classifier import is_knowledge_query
+
+    if is_knowledge_query(prompt):
+        return IntentClassification(
+            intent="KNOWLEDGE_RAG",
+            confidence=0.85,
+            extracted_args={"question": prompt},
+            needs_clarification=False,
+            reasoning="knowledge RAG query detected",
+        )
+
+    # 4) CHITCHAT
     if any(kw in prompt for kw in _CHITCHAT_KEYWORDS) or any(
         kw in p_lower for kw in _CHITCHAT_KEYWORDS
     ):
@@ -188,7 +200,7 @@ def heuristic_classify(
             reasoning="chitchat keyword",
         )
 
-    # 4) UNKNOWN
+    # 5) UNKNOWN
     return IntentClassification(
         intent="UNKNOWN",
         confidence=0.3,
@@ -196,7 +208,8 @@ def heuristic_classify(
         needs_clarification=True,
         clarification_prompt=(
             "ご依頼の内容を『S3 パスを取り込む』『テーブルをサマリーする』"
-            "『テーブルからダッシュボードを作る』のいずれかで教えてください。"
+            "『テーブルからダッシュボードを作る』『ナレッジ検索』"
+            "のいずれかで教えてください。"
         ),
         reasoning="no heuristic matched",
     )
@@ -277,14 +290,23 @@ def build_dispatch_plan(
             skip_child=False,
         )
 
+    if intent == "KNOWLEDGE_RAG":
+        return DispatchPlan(
+            intent=intent,
+            child_crew="knowledge_rag",
+            inputs={"question": args.get("question") or ""},
+            response_markdown="",
+            skip_child=False,
+        )
+
     if intent == "CHITCHAT":
         return DispatchPlan(
             intent=intent,
             child_crew="none",
             inputs={},
             response_markdown=(
-                "Solomon です。S3 パスを取り込むか、既存テーブルからサマリー / "
-                "ダッシュボードを作れます。何をしましょうか?"
+                "Solomon です。S3 パスを取り込む、テーブルサマリー / ダッシュボード、"
+                "ナレッジ検索 (Neo4j / OpenSearch / SQL) ができます。何をしましょうか?"
             ),
             skip_child=True,
         )

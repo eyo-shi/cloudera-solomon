@@ -12,7 +12,8 @@ Agent と Tool の対応 (プラン通り):
   SchemaDrafterAgent -> TypeInferTool, NameProposerTool, SimilarTableSearchTool
   TableCreatorAgent  -> TableExistsTool, TrinoMetaTool, IcebergCreateTableTool
   GraphLoaderAgent   -> Neo4jGraphLoadTool
-  OssieDrafterAgent  -> OssieWriteTool
+  OssieDrafterAgent    -> OssieWriteTool
+  SearchIndexerAgent   -> OpenSearchIndexTool
 
 LLM は Crew.ai の :class:`LLM` (LiteLLM ベース) を受け取れば十分。Cloudera
 AI Inference のエンドポイントは環境変数から組み立てる想定。
@@ -29,6 +30,7 @@ from solomon.tools import (
     MagicByteTool,
     Neo4jGraphLoadTool,
     NameProposerTool,
+    OpenSearchIndexTool,
     OssieWriteTool,
     ParquetMetaTool,
     S3GetRangeTool,
@@ -163,14 +165,14 @@ def make_graph_loader_agent(llm: Optional[Any] = None) -> Agent:
         role="Graph Loader",
         goal=(
             "Iceberg テーブル作成後、取り込みメタデータを Neo4j グラフDBへ"
-            "反映する。Dataset / Column / SourceFile / Schema ノードと"
-            " HAS_COLUMN / IN_SCHEMA / SOURCED_FROM リレーションを作成する。"
-            "NEO4J_URI が未設定の場合は skipped=true で返し、取り込み全体は"
-            "失敗させない。"
+            "反映する。System / Document / Dataset / Column / SourceFile ノードと"
+            " OWNS_DATASET / HAS_DOCUMENT / REFERENCES_DATASET 等のリレーションを"
+            "作成する。NEO4J_URI が未設定の場合は skipped=true で返し、取り込み"
+            "全体は失敗させない。"
         ),
         backstory=(
             "データカタログとリネージをグラフで表現するデータエンジニア。"
-            "Neo4j への書き込みは max_retries=0 を守る。"
+            "System と Document を Dataset に結び付け、横断検索の基盤を作る。"
         ),
         tools=[Neo4jGraphLoadTool()],
         llm=llm,
@@ -205,6 +207,29 @@ def make_ossie_drafter_agent(llm: Optional[Any] = None) -> Agent:
     )
 
 
+# ------------------------------------------------------------------ #
+# SearchIndexerAgent
+# ------------------------------------------------------------------ #
+def make_search_indexer_agent(llm: Optional[Any] = None) -> Agent:
+    return Agent(
+        role="Search Indexer",
+        goal=(
+            "Ossie 書き込み後、OpenSearchIndexTool で dataset と Document メタデータを"
+            " Data Hub の Cloudera Semantic Search クラスタへインデックスする。"
+            "OpenSearch 未設定時は skipped=true で返し、取り込み全体は失敗させない。"
+        ),
+        backstory=(
+            "外部 OpenSearch クラスタへのインデックス投入を担当する。"
+            "Keyword / Vector / Hybrid 検索のためのドキュメントを整備する。"
+        ),
+        tools=[OpenSearchIndexTool()],
+        llm=llm,
+        allow_delegation=False,
+        verbose=False,
+        memory=False,
+    )
+
+
 __all__ = [
     "make_s3_scout_agent",
     "make_format_sniffer_agent",
@@ -212,4 +237,5 @@ __all__ = [
     "make_table_creator_agent",
     "make_graph_loader_agent",
     "make_ossie_drafter_agent",
+    "make_search_indexer_agent",
 ]

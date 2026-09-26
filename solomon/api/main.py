@@ -29,9 +29,11 @@ from solomon.api.routes import (
     artifacts as artifacts_route,
     catalog as catalog_route,
     files as files_route,
+    graph as graph_route,
     health as health_route,
     ossie as ossie_route,
     query as query_route,
+    search as search_route,
     sessions as sessions_route,
     wish as wish_route,
 )
@@ -118,6 +120,8 @@ def create_app() -> FastAPI:
     # /api/* と /healthz のルート登録
     app.include_router(health_route.router)
     app.include_router(catalog_route.router)
+    app.include_router(graph_route.router)
+    app.include_router(search_route.router)
     app.include_router(files_route.router)
     app.include_router(query_route.router)
     app.include_router(ossie_route.router)

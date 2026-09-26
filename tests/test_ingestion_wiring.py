@@ -2,8 +2,8 @@
 
 LLM を呼ばずに以下だけを確認する:
 
-  * 6 Agent が正しい Tool set を持って生成される
-  * 9 Task が正しい順序 + context 依存で組み立てられる
+  * 7 Agent が正しい Tool set を持って生成される
+  * 10 Task が正しい順序 + context 依存で組み立てられる
   * guardrail 関数が期待通り (blocked / passed) の判定を返す
   * kickoff_ingestion は crewai 未インストール環境でも構造化エラーで返る
 
@@ -16,6 +16,7 @@ from solomon.ingestion.agents import (
     make_format_sniffer_agent,
     make_graph_loader_agent,
     make_ossie_drafter_agent,
+    make_search_indexer_agent,
     make_s3_scout_agent,
     make_schema_drafter_agent,
     make_table_creator_agent,
@@ -77,6 +78,11 @@ def test_ossie_drafter_has_ossie_tool() -> None:
     assert _tool_names(agent) == {"ossie_write"}
 
 
+def test_search_indexer_has_opensearch_tool() -> None:
+    agent = make_search_indexer_agent()
+    assert _tool_names(agent) == {"opensearch_index"}
+
+
 # ------------------------------------------------------------------ #
 # Crew build
 # ------------------------------------------------------------------ #
@@ -84,9 +90,9 @@ def test_build_ingestion_crew_shape() -> None:
     crew = build_ingestion_crew(memory=False)
     agents = list(getattr(crew, "agents", []))
     tasks = list(getattr(crew, "tasks", []))
-    # 6 agents / 9 tasks
-    assert len(agents) == 6
-    assert len(tasks) == 9
+    # 7 agents / 10 tasks
+    assert len(agents) == 7
+    assert len(tasks) == 10
     # sequential
     assert str(getattr(crew, "process", "")).endswith("sequential")
 
@@ -104,6 +110,7 @@ def test_task_context_chain() -> None:
         t_create,
         t_graph,
         t_ossie,
+        t_index,
         t_wrap,
     ) = tasks
 
@@ -129,20 +136,25 @@ def test_task_context_chain() -> None:
     # ossie は create + propose + extract + locate を受ける
     ossie_ctx = getattr(t_ossie, "context", [])
     assert t_create in ossie_ctx and t_propose in ossie_ctx
-    # wrap は create + graph + ossie を受ける
+    # index は graph + ossie を受ける
+    index_ctx = getattr(t_index, "context", [])
+    assert t_graph in index_ctx and t_ossie in index_ctx
+    # wrap は create + graph + ossie + index を受ける
     wrap_ctx = getattr(t_wrap, "context", [])
     assert t_create in wrap_ctx and t_graph in wrap_ctx and t_ossie in wrap_ctx
+    assert t_index in wrap_ctx
 
 
 def test_side_effect_tasks_have_zero_retries() -> None:
     """CREATE / Git commit のタスクは max_retries=0 を守っていること。"""
     crew = build_ingestion_crew(memory=False)
     tasks = list(getattr(crew, "tasks", []))
-    _, _, _, _, t_check, t_create, t_graph, t_ossie, _ = tasks
+    _, _, _, _, t_check, t_create, t_graph, t_ossie, t_index, _ = tasks
     assert getattr(t_check, "max_retries", None) == 0
     assert getattr(t_create, "max_retries", None) == 0
     assert getattr(t_graph, "max_retries", None) == 0
     assert getattr(t_ossie, "max_retries", None) == 0
+    assert getattr(t_index, "max_retries", None) == 0
 
 
 # ------------------------------------------------------------------ #
