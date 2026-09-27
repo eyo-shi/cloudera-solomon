@@ -12,6 +12,17 @@ def test_iter_neo4j_connection_uris_internal_host() -> None:
     candidates = iter_neo4j_connection_uris(uri)
     assert uri in candidates
     assert any(".svc.cluster.local" in c for c in candidates)
+    assert "bolt://cml-neo4j-abc:7687" not in candidates
+
+
+def test_iter_neo4j_connection_uris_includes_external_env(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "NEO4J_EXTERNAL_URI",
+        "bolt://abc.elb.amazonaws.com:7687",
+    )
+    uri = "bolt://cml-neo4j-abc.mlx-user-123:7687"
+    candidates = iter_neo4j_connection_uris(uri)
+    assert "bolt://abc.elb.amazonaws.com:7687" in candidates
 
 
 def test_validate_neo4j_uri_rejects_browser_url() -> None:

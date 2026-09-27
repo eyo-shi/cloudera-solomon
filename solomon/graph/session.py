@@ -6,7 +6,10 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from solomon.graph.config import get_neo4j_config
-from solomon.graph.neo4j_connect import iter_neo4j_connection_uris
+from solomon.graph.neo4j_connect import (
+    format_neo4j_connection_help,
+    iter_neo4j_connection_uris,
+)
 from solomon.transport.logging import get_logger
 
 _logger = get_logger(__name__)
@@ -34,7 +37,7 @@ def with_read_session(fn: Callable[[Any], T]) -> T:
             "NEO4J_CONNECT_FAILED", "neo4j driver is not installed."
         ) from exc
 
-    last_error: Exception | None = None
+    errors: list[str] = []
     for uri in iter_neo4j_connection_uris(config.uri):
         driver = GraphDatabase.driver(uri, auth=(config.username, config.password))
         try:
@@ -44,12 +47,12 @@ def with_read_session(fn: Callable[[Any], T]) -> T:
         except Neo4jSessionError:
             raise
         except Exception as exc:  # noqa: BLE001
-            last_error = exc
+            errors.append(f"  {uri}: {exc}")
             _logger.debug("neo4j_session.failed", uri=uri, error=str(exc))
         finally:
             driver.close()
 
     raise Neo4jSessionError(
         "NEO4J_CONNECT_FAILED",
-        f"Neo4j session failed: {last_error}",
+        format_neo4j_connection_help(config.uri, errors),
     )

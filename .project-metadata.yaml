@@ -60,8 +60,15 @@ environment_variables:
   NEO4J_URI:
     default: "bolt://cml-neo4j-REPLACE_FROM_APPLICATION_LOG.mlx-user-0:7687"
     description: |
-      Internal Bolt URI copied from the co-located Neo4j Launcher Application
-      Log after this AMP starts Neo4j.
+      Primary Bolt URI from neo4j-launcher Application Log (Internal Bolt for
+      same AMP project). If internal DNS fails, set this or NEO4J_EXTERNAL_URI
+      to External Bolt (ELB) and restart Solomon.
+    required: false
+  NEO4J_EXTERNAL_URI:
+    default: "-"
+    description: |
+      Optional External Bolt URI (ELB) from neo4j-launcher Application Log.
+      Used when Internal Bolt DNS is unreachable from the Solomon pod.
     required: false
   NEO4J_ACCEPT_LICENSE_AGREEMENT:
     default: "yes"

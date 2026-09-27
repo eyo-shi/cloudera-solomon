@@ -35,61 +35,81 @@ def _parse_uri(uri: str) -> tuple[str, str, int, str]:
     return text, host, port, scheme
 
 
+def _configured_neo4j_uri_seeds(
+    uri: str,
+    *,
+    internal_uri: str | None = None,
+) -> list[str]:
+    """Primary URI plus optional NEO4J_EXTERNAL_URI / NEO4J_INTERNAL_URI overrides."""
+    seeds: list[str] = []
+    for candidate in (
+        uri,
+        os.environ.get("NEO4J_EXTERNAL_URI", ""),
+        internal_uri or os.environ.get("NEO4J_INTERNAL_URI", ""),
+    ):
+        text = (candidate or "").strip()
+        if text and text not in seeds:
+            seeds.append(text)
+    return seeds
+
+
+def _expand_uri_seed(seed: str) -> list[str]:
+    """Expand one configured URI into DNS / scheme variants to try."""
+    _, host, port, scheme = _parse_uri(seed)
+    if not host:
+        text = seed.strip()
+        return [text if "://" in text else f"bolt://{text}"]
+
+    expanded: list[str] = []
+
+    def add(candidate_scheme: str, candidate_host: str) -> None:
+        expanded.append(f"{candidate_scheme}://{candidate_host}:{port}")
+
+    if _is_cml_internal_neo4j_host(host):
+        add(scheme, host)
+        parts = host.split(".")
+        service = parts[0]
+        if len(parts) >= 2 and not host.endswith(".svc.cluster.local"):
+            namespace = parts[1]
+            add(scheme, f"{service}.{namespace}.svc.cluster.local")
+        return expanded
+
+    if _is_browser_neo4j_host(host):
+        return []
+
+    if _is_external_bolt_neo4j_host(host):
+        add(scheme, host)
+        return expanded
+
+    add(scheme, host)
+    if scheme in {"bolt+ssc", "bolt+s", "neo4j+ssc", "neo4j+s"}:
+        add("bolt", host)
+    if "neo4j-launcher" in host:
+        add("bolt", "neo4j-launcher")
+    return expanded
+
+
 def iter_neo4j_connection_uris(
     uri: str,
     *,
     internal_uri: str | None = None,
 ) -> list[str]:
     """Build URIs to try when connecting from a CML job."""
-    internal_uri = (internal_uri or os.environ.get("NEO4J_INTERNAL_URI", "")).strip() or None
-
-    _, host, port, scheme = _parse_uri(uri)
-    if not host and not internal_uri:
-        return [uri.strip() if "://" in uri else f"bolt://{uri.strip()}"]
+    seeds = _configured_neo4j_uri_seeds(uri, internal_uri=internal_uri)
+    if not seeds:
+        text = uri.strip()
+        return [text if "://" in text else f"bolt://{text}"]
 
     seen: set[str] = set()
     ordered: list[str] = []
-
-    def add(candidate: str) -> None:
-        normalized = candidate.strip()
-        if "://" not in normalized:
-            normalized = f"bolt://{normalized}"
-        if normalized not in seen:
-            seen.add(normalized)
-            ordered.append(normalized)
-
-    def add_host(candidate_scheme: str, candidate_host: str) -> None:
-        add(f"{candidate_scheme}://{candidate_host}:{port}")
-
-    if internal_uri:
-        add(internal_uri)
-
-    if host and _is_cml_internal_neo4j_host(host):
-        add_host(scheme, host)
-        parts = host.split(".")
-        service = parts[0]
-        if len(parts) >= 2 and not host.endswith(".svc.cluster.local"):
-            namespace = parts[1]
-            add_host(scheme, f"{service}.{namespace}.svc.cluster.local")
-        if service and service != host:
-            add_host(scheme, service)
-        return ordered
-
-    if host and _is_browser_neo4j_host(host):
-        return ordered
-
-    if host and _is_external_bolt_neo4j_host(host):
-        add_host(scheme, host)
-        return ordered
-
-    if host:
-        add_host(scheme, host)
-        if scheme in {"bolt+ssc", "bolt+s", "neo4j+ssc", "neo4j+s"}:
-            add_host("bolt", host)
-
-    if host and "neo4j-launcher" in host:
-        add_host("bolt", "neo4j-launcher")
-
+    for seed in seeds:
+        for candidate in _expand_uri_seed(seed):
+            normalized = candidate.strip()
+            if "://" not in normalized:
+                normalized = f"bolt://{normalized}"
+            if normalized not in seen:
+                seen.add(normalized)
+                ordered.append(normalized)
     return ordered or [uri.strip()]
 
 
@@ -114,18 +134,24 @@ def format_neo4j_connection_help(configured_uri: str, errors: list[str]) -> str:
         os.environ.get("NEO4J_INTERNAL_URI", "").strip()
         or "bolt://cml-neo4j-<hash>.mlx-user-<id>:7687"
     )
+    external_example = (
+        os.environ.get("NEO4J_EXTERNAL_URI", "").strip()
+        or "bolt://<lb-id>.<region>.elb.amazonaws.com:7687"
+    )
     attempts = "\n".join(errors) if errors else "  (no attempts recorded)"
     return (
         f"Could not connect to Neo4j (configured: {configured_uri}).\n"
         f"Attempts:\n{attempts}\n"
         "CML neo4j-launcher checklist:\n"
         "  1. neo4j-launcher application is Running (Applications page)\n"
-        "  2. Copy a Bolt URL from neo4j-launcher Application Log into NEO4J_URI\n"
-        "     - Same AMP project as neo4j-launcher: Internal Bolt\n"
+        "  2. Copy Bolt URLs from neo4j-launcher Application Log\n"
+        "     - Same AMP project: set NEO4J_URI to Internal Bolt\n"
         f"       Example: {internal_example}\n"
-        "     - Different AMP project (cross-namespace): External Bolt (ELB)\n"
-        "       Example: bolt://<lb-id>.<region>.elb.amazonaws.com:7687\n"
+        "     - Internal DNS fails (Name or service not known): set NEO4J_URI or\n"
+        "       NEO4J_EXTERNAL_URI to External Bolt (ELB) and restart Solomon\n"
+        f"       Example: {external_example}\n"
         "     Do not use browser URL (*.cloudera.site) — that is not a Bolt endpoint\n"
-        "  3. NEO4J_PASSWORD is the password from neo4j-launcher startup\n"
-        "  4. NEO4J_USERNAME is usually neo4j"
+        "  3. After changing env vars, restart the Solomon Application (not only neo4j-launcher)\n"
+        "  4. NEO4J_PASSWORD is the password from neo4j-launcher startup\n"
+        "  5. NEO4J_USERNAME is usually neo4j"
     )
