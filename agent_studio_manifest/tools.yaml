@@ -601,11 +601,13 @@ tools:
     ''bucket'': {''description'': None, ''type'': ''str''}, ''key'': {''description'': None, ''type'': ''str''}, ''format'':
     {''description'': None, ''type'': ''str''}, ''sheet'': {''description'': None, ''type'': ''Union[str, NoneType]''}, ''header_row'':
     {''description'': None, ''type'': ''Union[int, NoneType]''}, ''meta_kv'': {''description'': None, ''type'': ''list[dict[str,
-    Any]]''}, ''row_count_hint'': {''description'': None, ''type'': ''Union[int, NoneType]''}}
+    Any]]''}, ''row_count_hint'': {''description'': None, ''type'': ''Union[int, NoneType]''}, ''system_name'': {''description'':
+    ''System 名 (省略時は S3 key / meta_kv / schema から推定)'', ''type'': ''Union[str, NoneType]''}, ''ossie_path'': {''description'':
+    ''Ossie YAML 相対パス (Document リンク用)'', ''type'': ''Union[str, NoneType]''}}
 
     Tool Description: Load ingestion metadata into Neo4j as graph nodes and relationships. Creates Dataset, Column, SourceFile,
-    Schema, and optional MetadataEntry nodes, then links them with HAS_COLUMN, IN_SCHEMA, SOURCED_FROM, and HAS_METADATA relationships.
-    Call after Iceberg table creation.'
+    Schema, System, Document, and optional MetadataEntry nodes, then links them with HAS_COLUMN, IN_SCHEMA, SOURCED_FROM,
+    HAS_METADATA, OWNS_DATASET, HAS_DOCUMENT, and REFERENCES_DATASET. Call after Iceberg table creation.'
   requires_auth: false
   args_schema:
     $defs:
@@ -686,6 +688,20 @@ tools:
         - type: 'null'
         default: null
         title: Row Count Hint
+      system_name:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: System 名 (省略時は S3 key / meta_kv / schema から推定)
+        title: System Name
+      ossie_path:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: Ossie YAML 相対パス (Document リンク用)
+        title: Ossie Path
     required:
     - schema
     - table
@@ -694,6 +710,163 @@ tools:
     - key
     - format
     title: Neo4jGraphLoadArgs
+    type: object
+- name: neo4j_graph_query
+  class_path: solomon.tools.neo4j_query.Neo4jGraphQueryTool
+  description: 'Tool Name: neo4j_graph_query
+
+    Tool Arguments: {''cypher'': {''description'': ''Read-only Cypher (MATCH ... RETURN ...)'', ''type'': ''str''}, ''params'':
+    {''description'': ''Cypher parameters'', ''type'': ''dict[str, Any]''}}
+
+    Tool Description: Run a read-only Cypher query against Neo4j to explore datasets, columns, source files, and relationships
+    (lineage). Mutations are rejected.'
+  requires_auth: false
+  args_schema:
+    properties:
+      cypher:
+        description: Read-only Cypher (MATCH ... RETURN ...)
+        title: Cypher
+        type: string
+      params:
+        additionalProperties: true
+        description: Cypher parameters
+        title: Params
+        type: object
+    required:
+    - cypher
+    title: Neo4jGraphQueryArgs
+    type: object
+- name: opensearch_hybrid_search
+  class_path: solomon.tools.opensearch.OpenSearchHybridSearchTool
+  description: 'Tool Name: opensearch_hybrid_search
+
+    Tool Arguments: {''query'': {''description'': ''自然言語クエリ (BM25 + k-NN Hybrid)'', ''type'': ''str''}, ''top_k'': {''description'':
+    None, ''type'': ''int''}}
+
+    Tool Description: Search datasets using Hybrid Search (BM25 keyword + k-NN vector with RRF) in the external Cloudera Semantic
+    Search cluster.'
+  requires_auth: false
+  args_schema:
+    properties:
+      query:
+        description: 自然言語クエリ (BM25 + k-NN Hybrid)
+        title: Query
+        type: string
+      top_k:
+        default: 5
+        maximum: 20
+        minimum: 1
+        title: Top K
+        type: integer
+    required:
+    - query
+    title: OpenSearchHybridSearchArgs
+    type: object
+- name: opensearch_index
+  class_path: solomon.tools.opensearch.OpenSearchIndexTool
+  description: 'Tool Name: opensearch_index
+
+    Tool Arguments: {''fq_name'': {''description'': ''catalog.schema.table'', ''type'': ''str''}, ''dataset'': {''description'':
+    ''Ossie dataset dict'', ''type'': ''dict[str, Any]''}, ''system_id'': {''description'': ''Neo4j System id'', ''type'':
+    ''Union[str, NoneType]''}, ''documents'': {''description'': ''Neo4j Document ノード相当 (id, title, doc_type, path, content_preview)'',
+    ''type'': ''list[dict[str, Any]]''}}
+
+    Tool Description: Index an Ossie dataset and optional related documents into the external Cloudera Semantic Search cluster.
+    Call after ossie_write during ingestion. Skips gracefully when OpenSearch is not configured.'
+  requires_auth: false
+  args_schema:
+    properties:
+      fq_name:
+        description: catalog.schema.table
+        title: Fq Name
+        type: string
+      dataset:
+        additionalProperties: true
+        description: Ossie dataset dict
+        title: Dataset
+        type: object
+      system_id:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: Neo4j System id
+        title: System Id
+      documents:
+        description: Neo4j Document ノード相当 (id, title, doc_type, path, content_preview)
+        items:
+          additionalProperties: true
+          type: object
+        title: Documents
+        type: array
+    required:
+    - fq_name
+    - dataset
+    title: OpenSearchIndexArgs
+    type: object
+- name: opensearch_keyword_search
+  class_path: solomon.tools.opensearch.OpenSearchKeywordSearchTool
+  description: 'Tool Name: opensearch_keyword_search
+
+    Tool Arguments: {''query'': {''description'': ''自然言語の検索クエリ'', ''type'': ''str''}, ''top_k'': {''description'': None, ''type'':
+    ''int''}}
+
+    Tool Description: Search datasets in the external Cloudera Semantic Search (OpenSearch) cluster using BM25 keyword matching.'
+  requires_auth: false
+  args_schema:
+    properties:
+      query:
+        description: 自然言語の検索クエリ
+        title: Query
+        type: string
+      top_k:
+        default: 3
+        maximum: 20
+        minimum: 1
+        title: Top K
+        type: integer
+    required:
+    - query
+    title: OpenSearchKeywordSearchArgs
+    type: object
+- name: opensearch_ping
+  class_path: solomon.tools.opensearch.OpenSearchPingTool
+  description: 'Tool Name: opensearch_ping
+
+    Tool Arguments: {}
+
+    Tool Description: Check connectivity to the external Cloudera Semantic Search (OpenSearch) cluster configured via Data
+    Connection or environment variables.'
+  requires_auth: false
+  args_schema:
+    properties: {}
+    title: OpenSearchPingArgs
+    type: object
+- name: opensearch_vector_search
+  class_path: solomon.tools.opensearch.OpenSearchVectorSearchTool
+  description: 'Tool Name: opensearch_vector_search
+
+    Tool Arguments: {''query'': {''description'': ''自然言語の検索クエリ (embedding → k-NN)'', ''type'': ''str''}, ''top_k'': {''description'':
+    None, ''type'': ''int''}}
+
+    Tool Description: Search datasets in the external Cloudera Semantic Search (OpenSearch) cluster using k-NN vector similarity.
+    Requires LLM embedding model.'
+  requires_auth: false
+  args_schema:
+    properties:
+      query:
+        description: 自然言語の検索クエリ (embedding → k-NN)
+        title: Query
+        type: string
+      top_k:
+        default: 3
+        maximum: 20
+        minimum: 1
+        title: Top K
+        type: integer
+    required:
+    - query
+    title: OpenSearchVectorSearchArgs
     type: object
 - name: ossie_read
   class_path: solomon.tools.ossie.OssieReadTool
@@ -941,6 +1114,51 @@ tools:
     - schema
     - table
     title: TableExistsArgs
+    type: object
+- name: text2sql
+  class_path: solomon.tools.text2sql.Text2SQLTool
+  description: 'Tool Name: text2sql
+
+    Tool Arguments: {''question'': {''description'': ''自然言語の分析質問'', ''type'': ''str''}, ''catalog'': {''description'': None,
+    ''type'': ''str''}, ''schema_'': {''description'': None, ''type'': ''Union[str, NoneType]''}, ''fq_table_hint'': {''description'':
+    ''既知の catalog.schema.table (省略可)'', ''type'': ''Union[str, NoneType]''}, ''max_rows'': {''description'': None, ''type'':
+    ''int''}}
+
+    Tool Description: Answer analytics questions by retrieving relevant dataset context (Ossie/OpenSearch), generating a read-only
+    Trino SELECT, and executing it.'
+  requires_auth: true
+  args_schema:
+    properties:
+      question:
+        description: 自然言語の分析質問
+        title: Question
+        type: string
+      catalog:
+        default: iceberg
+        title: Catalog
+        type: string
+      schema:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Schema
+      fq_table_hint:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: 既知の catalog.schema.table (省略可)
+        title: Fq Table Hint
+      max_rows:
+        default: 100
+        maximum: 1000
+        minimum: 1
+        title: Max Rows
+        type: integer
+    required:
+    - question
+    title: Text2SQLArgs
     type: object
 - name: trino_ddl
   class_path: solomon.tools.trino.TrinoDDLTool
