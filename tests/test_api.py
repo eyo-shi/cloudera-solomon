@@ -102,6 +102,28 @@ def test_files_requires_knox_jwt(client: TestClient) -> None:
     assert r.json()["detail"]["error_code"] == "AUTH_MISSING"
 
 
+def test_files_buckets_requires_knox_jwt(client: TestClient) -> None:
+    r = client.get("/api/files/buckets")
+    assert r.status_code == 401
+
+
+def test_files_buckets_from_env(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SOLOMON_S3_BUCKETS", "eyda-buk-edf7cfcf,raw")
+    r = client.get(
+        "/api/files/buckets",
+        headers={"Authorization": "Bearer eyJ.test.token"},
+    )
+    assert r.status_code == 200
+    assert r.json()["buckets"] == ["eyda-buk-edf7cfcf", "raw"]
+
+
+def test_files_upload_requires_auth(client: TestClient) -> None:
+    r = client.post("/api/files/upload", files={"file": ("a.csv", b"a,b\n1,2", "text/csv")})
+    assert r.status_code == 401
+
+
 def test_files_preview_requires_knox_jwt(client: TestClient) -> None:
     r = client.get("/api/files/preview?bucket=x&key=a.csv")
     assert r.status_code == 401

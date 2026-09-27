@@ -7,10 +7,17 @@
 import { create } from "zustand";
 import type { SetupGuideError } from "../api/client";
 
+export interface ChatAttachment {
+  name: string;
+  s3Uri?: string;
+  size?: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "solomon";
   text: string;
+  attachments?: ChatAttachment[];
   /** Solomon 応答に artifact が付いていたときのタブへのジャンプ用 */
   artifactIds?: string[];
   /** エラーコード (Solomon 側) */
@@ -34,7 +41,7 @@ interface ChatState {
   /** Deploy 後の設定不足 (LLM / Trino / CDV 等) — ユーザーが ✕ するまで保持。 */
   setupErrors: SetupGuideError[];
   setPendingPrompt: (t: string | null) => void;
-  appendUser: (text: string) => string;
+  appendUser: (text: string, attachments?: ChatAttachment[]) => string;
   appendSolomon: (text: string, opts?: { artifactIds?: string[]; errorCode?: string }) => string;
   appendToLastSolomon: (delta: string) => void;
   addStep: (step: StepEntry) => void;
@@ -67,10 +74,19 @@ export const useChatStore = create<ChatState>((set) => ({
     set((s) => ({
       setupErrors: s.setupErrors.filter((x) => x.errorCode !== errorCode),
     })),
-  appendUser: (text) => {
+  appendUser: (text, attachments) => {
     const id = mid();
     set((s) => ({
-      messages: [...s.messages, { id, role: "user", text, createdAt: Date.now() }],
+      messages: [
+        ...s.messages,
+        {
+          id,
+          role: "user",
+          text,
+          attachments: attachments?.length ? attachments : undefined,
+          createdAt: Date.now(),
+        },
+      ],
     }));
     return id;
   },

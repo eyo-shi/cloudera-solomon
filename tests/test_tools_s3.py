@@ -14,6 +14,7 @@ import pytest
 
 from solomon.tools import _s3_client
 from solomon.tools.s3 import S3GetRangeTool, S3HeadTool, S3ListTool
+from solomon.transport.config import S3Config
 from solomon.transport.user_context import (
     AwsCredentials,
     UserContext,
@@ -41,6 +42,33 @@ def auth_ctx(user_ctx: UserContext):
     token = set_user_context(user_ctx)
     yield user_ctx
     reset_user_context(token)
+
+
+class TestS3ClientForUser:
+    def test_uses_cml_data_connection_when_idbroker_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SOLOMON_IDBROKER_URL", raising=False)
+        fake_client = mock.MagicMock()
+        conn = mock.MagicMock()
+        conn.get_base_connection.return_value = fake_client
+        monkeypatch.setattr(
+            _s3_client,
+            "get_s3_config",
+            lambda: S3Config(
+                region="ap-northeast-1",
+                connection_name="S3 Object Store",
+            ),
+        )
+        monkeypatch.setattr(
+            _s3_client,
+            "_cml_get_connection",
+            lambda name: conn if name == "S3 Object Store" else None,
+        )
+        result = _s3_client.s3_client_for_user(
+            UserContext(user_name="alice", knox_jwt="fake-jwt")
+        )
+        assert result is fake_client
 
 
 class TestS3ListTool:

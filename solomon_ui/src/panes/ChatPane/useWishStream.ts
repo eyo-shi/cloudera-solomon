@@ -8,14 +8,15 @@
  */
 import { useCallback, useRef } from "react";
 import { SetupGuideError } from "../../api/client";
+import { uploadChatFile } from "../../api/files";
 import { streamWish } from "../../api/wish";
-import { useChatStore } from "../../stores/chatStore";
+import { useChatStore, type ChatAttachment } from "../../stores/chatStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useTabStore } from "../../stores/tabStore";
 import type { ArtifactType, WishEvent } from "../../types";
 
 export interface UseWishStream {
-  send: (prompt: string) => Promise<void>;
+  send: (prompt: string, files?: File[]) => Promise<void>;
   cancel: () => void;
 }
 
@@ -39,20 +40,43 @@ export function useWishStream(): UseWishStream {
   }, [setStreaming]);
 
   const send = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, files: File[] = []) => {
       const trimmed = prompt.trim();
-      if (!trimmed) return;
-      appendUser(trimmed);
+      if (!trimmed && files.length === 0) return;
+
       clearSteps();
       setStreaming(true);
-      // Solomon 側のバブルは token / artifact が来る前に空で用意
-      appendSolomon("");
 
       const controller = new AbortController();
       controllerRef.current = controller;
 
+      let uploaded: ChatAttachment[] = [];
+      if (files.length > 0) {
+        try {
+          const results = await Promise.all(
+            files.map((file) => uploadChatFile(file)),
+          );
+          uploaded = results.map((r) => ({
+            name: r.name,
+            s3Uri: r.s3_uri,
+            size: r.size,
+          }));
+        } catch (e) {
+          setStreaming(false);
+          controllerRef.current = null;
+          const msg = e instanceof Error ? e.message : String(e);
+          appendUser(trimmed || "(ファイル添付)", []);
+          appendSolomon(`ファイルのアップロードに失敗しました。\n\n${msg}`);
+          return;
+        }
+      }
+
+      const finalPrompt = buildPromptWithAttachments(trimmed, uploaded);
+      appendUser(finalPrompt, uploaded);
+      appendSolomon("");
+
       await streamWish(
-        { prompt: trimmed, session_id: sessionId ?? undefined },
+        { prompt: finalPrompt, session_id: sessionId ?? undefined },
         {
           signal: controller.signal,
           onEvent: (evt: WishEvent) => {
@@ -137,6 +161,25 @@ export function useWishStream(): UseWishStream {
   );
 
   return { send, cancel };
+}
+
+function buildPromptWithAttachments(
+  prompt: string,
+  attachments: ChatAttachment[],
+): string {
+  const uris = attachments
+    .map((a) => a.s3Uri)
+    .filter((uri): uri is string => Boolean(uri));
+  if (!uris.length) return prompt;
+
+  const uriBlock = uris.map((uri) => `- ${uri}`).join("\n");
+  if (prompt) {
+    return `${prompt}\n\n添付ファイル:\n${uriBlock}`;
+  }
+  if (uris.length === 1) {
+    return `${uris[0]} を取り込んでテーブルを作って`;
+  }
+  return `以下のファイルを取り込んでテーブルを作って:\n${uriBlock}`;
 }
 
 function titleFor(kind: ArtifactType, ref: Record<string, unknown>): string {

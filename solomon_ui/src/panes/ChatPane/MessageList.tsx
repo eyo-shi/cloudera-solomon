@@ -66,7 +66,19 @@ export function MessageList() {
             </div>
           ) : (
             <div className="chat-turn__user-bubble">
-              <p>{m.text}</p>
+              {m.text && <p>{m.text}</p>}
+              {m.attachments && m.attachments.length > 0 && (
+                <ul className="chat-turn__attachments">
+                  {m.attachments.map((a) => (
+                    <li key={`${a.name}-${a.s3Uri ?? "local"}`}>
+                      📎 {a.name}
+                      {a.s3Uri && (
+                        <span className="chat-turn__attachment-uri">{a.s3Uri}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </div>

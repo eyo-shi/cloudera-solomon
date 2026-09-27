@@ -5,6 +5,8 @@ IDBroker で発行されたエンドユーザー STS 資格情報で S3 を叩�
 
 エンドポイント:
 
+* ``GET /api/files/buckets``  — Storage / アップロード先バケット一覧
+* ``POST /api/files/upload``  — チャット添付ファイルを S3 に配置
 * ``GET /api/files/list``     — 指定 prefix 下の一覧 (フォルダ + オブジェクト)
 * ``GET /api/files/preview``  — フォーマット判定 + 中身プレビュー
   (CSV/TSV/JSON/JSONL/Excel/Parquet 対応)
@@ -18,9 +20,12 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
+import re
+import uuid
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from solomon.api.auth import require_user_context
 from solomon.transport.errors import ErrorCode, err
@@ -35,6 +40,111 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 # xlsx / parquet は別途 GetObject で全体を読む (:class:`ExcelHeaderDetectTool`
 # / :class:`ParquetMetaTool` の要件)。
 _PREVIEW_RANGE_BYTES = 2 * 1024 * 1024  # 2 MB
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+_UPLOAD_KEY_PREFIX = "solomon-uploads"
+
+
+# ------------------------------------------------------------------ #
+# /api/files/buckets
+# ------------------------------------------------------------------ #
+def _configured_s3_buckets() -> list[str]:
+    """Storage タブに表示するバケット名 (post-deploy env)。"""
+    raw = (
+        os.environ.get("SOLOMON_S3_BUCKETS")
+        or os.environ.get("VITE_SOLOMON_S3_BUCKETS")
+        or ""
+    )
+    buckets = [part.strip() for part in raw.split(",") if part.strip()]
+    return buckets or ["demo-bucket"]
+
+
+@router.get("/buckets")
+def list_buckets(
+    _user_ctx: Annotated[UserContext, Depends(require_user_context)],
+) -> dict[str, Any]:
+    buckets = _configured_s3_buckets()
+    return {"buckets": buckets}
+
+
+def _default_upload_bucket() -> str:
+    buckets = _configured_s3_buckets()
+    bucket = buckets[0] if buckets else ""
+    if not bucket or bucket == "demo-bucket":
+        raise HTTPException(
+            status_code=503,
+            detail=err(
+                ErrorCode.S3_ASSUMEROLE_FAILED,
+                "SOLOMON_S3_BUCKETS is not configured; cannot upload chat attachments.",
+            ),
+        )
+    return bucket
+
+
+def _safe_upload_filename(name: str) -> str:
+    base = (name or "upload").strip().replace("\\", "/").split("/")[-1]
+    cleaned = re.sub(r"[^\w.\-]+", "_", base).strip("._")
+    return cleaned or "upload"
+
+
+def _upload_object_key(user_name: str, filename: str) -> str:
+    safe_user = re.sub(r"[^\w.\-]+", "_", user_name or "user").strip("._") or "user"
+    token = uuid.uuid4().hex[:10]
+    return f"{_UPLOAD_KEY_PREFIX}/{safe_user}/{token}/{_safe_upload_filename(filename)}"
+
+
+# ------------------------------------------------------------------ #
+# /api/files/upload
+# ------------------------------------------------------------------ #
+@router.post("/upload")
+async def upload_file(
+    user_ctx: Annotated[UserContext, Depends(require_user_context)],
+    file: UploadFile = File(...),
+    bucket: Annotated[Optional[str], Query(max_length=256)] = None,
+) -> dict[str, Any]:
+    """Chat 添付ファイルを S3 に PUT し、s3:// URI を返す。"""
+    target_bucket = bucket or _default_upload_bucket()
+    filename = file.filename or "upload"
+    body = await file.read()
+    if not body:
+        raise HTTPException(
+            status_code=400,
+            detail=err(ErrorCode.S3_RANGE_FAILED, "Upload file is empty."),
+        )
+    if len(body) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=err(
+                ErrorCode.S3_RANGE_FAILED,
+                f"Upload exceeds {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+            ),
+        )
+
+    client = s3_client_for_user(user_ctx)
+    if isinstance(client, dict):
+        raise HTTPException(status_code=502, detail=client)
+
+    key = _upload_object_key(user_ctx.user_name, filename)
+    put_kwargs: dict[str, Any] = {
+        "Bucket": target_bucket,
+        "Key": key,
+        "Body": body,
+    }
+    if file.content_type:
+        put_kwargs["ContentType"] = file.content_type
+    try:
+        client.put_object(**put_kwargs)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502, detail=map_s3_error(exc, target_bucket, key)
+        ) from exc
+
+    return {
+        "bucket": target_bucket,
+        "key": key,
+        "name": filename,
+        "size": len(body),
+        "s3_uri": f"s3://{target_bucket}/{key}",
+    }
 
 
 # ------------------------------------------------------------------ #

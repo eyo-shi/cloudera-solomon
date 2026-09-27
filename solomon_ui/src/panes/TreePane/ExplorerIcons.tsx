@@ -1,52 +1,35 @@
-/** Explorer 上部ツールバー用 SVG アイコン */
+/** Explorer 上部ツールバー用アイコン */
 
-export function IconTables({ active }: { active?: boolean }) {
+const EXPLORER_ICONS = {
+  tables: "/explorer/tables.png",
+  storage: "/explorer/storage.png",
+  graph: "/explorer/graph.png",
+  search: "/explorer/search.png",
+} as const;
+
+function ExplorerToolbarIcon({
+  src,
+  active,
+}: {
+  src: string;
+  active?: boolean;
+}) {
   return (
-    <svg
+    <img
+      src={src}
+      alt=""
       className={"explorer-icon" + (active ? " explorer-icon--active" : "")}
-      viewBox="0 0 24 24"
       aria-hidden="true"
-    >
-      <ellipse cx="12" cy="5" rx="8" ry="2.5" fill="currentColor" />
-      <path
-        d="M4 5v5c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5V5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.75"
-      />
-      <path
-        d="M4 10v5c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5v-5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.75"
-      />
-    </svg>
+    />
   );
 }
 
+export function IconTables({ active }: { active?: boolean }) {
+  return <ExplorerToolbarIcon src={EXPLORER_ICONS.tables} active={active} />;
+}
+
 export function IconStorage({ active }: { active?: boolean }) {
-  return (
-    <svg
-      className={"explorer-icon" + (active ? " explorer-icon--active" : "")}
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path
-        d="M4 6h16v12H4z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M4 10h16M8 6V4h8v2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
+  return <ExplorerToolbarIcon src={EXPLORER_ICONS.storage} active={active} />;
 }
 
 export function IconTableGrid() {
@@ -69,71 +52,11 @@ export function IconDatabase() {
 }
 
 export function IconGraph({ active }: { active?: boolean }) {
-  return (
-    <svg
-      className={"explorer-icon" + (active ? " explorer-icon--active" : "")}
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <circle cx="6" cy="6" r="2.25" fill="currentColor" />
-      <circle cx="18" cy="6" r="2.25" fill="currentColor" />
-      <circle cx="12" cy="18" r="2.25" fill="currentColor" />
-      <path
-        d="M8 6h8M7.5 7.5L10.5 16M16.5 7.5L13.5 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
+  return <ExplorerToolbarIcon src={EXPLORER_ICONS.graph} active={active} />;
 }
 
 export function IconSemanticSearch({ active }: { active?: boolean }) {
-  return (
-    <svg
-      className={"explorer-icon" + (active ? " explorer-icon--active" : "")}
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      {/* Indexed document */}
-      <rect
-        x="3.5"
-        y="5"
-        width="9"
-        height="14"
-        rx="1.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.75"
-      />
-      <path
-        d="M6 9h5M6 12h4M6 15h5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinecap="round"
-      />
-      {/* Embedding / similarity cluster */}
-      <circle cx="16.5" cy="8.5" r="1.6" fill="currentColor" />
-      <circle cx="19.5" cy="13.5" r="1.6" fill="currentColor" />
-      <circle cx="14.5" cy="16.5" r="1.6" fill="currentColor" />
-      <path
-        d="M16.5 8.5L19.5 13.5M19.5 13.5L14.5 16.5M14.5 16.5L16.5 8.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinecap="round"
-      />
-      <path
-        d="M12.5 12h1.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
+  return <ExplorerToolbarIcon src={EXPLORER_ICONS.search} active={active} />;
 }
 
 export function IconSearch() {

@@ -2,20 +2,28 @@
 
 Tool 実装 (:mod:`solomon.tools.s3` など) が薄く共通利用する。
 
-認証情報は毎回 IDBroker STS 経由で ``UserContext`` から取得する
-(:func:`solomon.tools._idbroker.get_or_fetch_credentials`)。region や
-endpoint_url は :mod:`solomon.transport.config` の :func:`get_s3_config` から
-取得する (Data Connection 由来 or env fallback)。
+認証 (優先順):
+
+1. ``SOLOMON_IDBROKER_URL`` 設定時 — Knox JWT を IDBroker で STS 資格情報に交換
+   (:func:`solomon.tools._idbroker.get_or_fetch_credentials`)。ユーザー単位の権限。
+2. 未設定時 — CML Data Connection の ``get_base_connection()`` (Session と同じ経路)。
+
+region / endpoint_url は :mod:`solomon.transport.config` の :func:`get_s3_config`
+から取得する (Data Connection 由来 or env fallback)。
 """
 from __future__ import annotations
 
-from typing import Any, Union
+import os
+from typing import Any, Optional, Union
 from urllib.parse import urlparse
 
-from solomon.transport.config import get_s3_config
+from solomon.transport.config import S3Config, _cml_get_connection, get_s3_config
 from solomon.transport.errors import ErrorCode, err
-from solomon.transport.user_context import AwsCredentials, UserContext
+from solomon.transport.logging import get_logger
+from solomon.transport.user_context import UserContext
 from solomon.tools._idbroker import get_or_fetch_credentials
+
+_logger = get_logger(__name__)
 
 try:  # boto3 は本番依存。テストではモックする。
     import boto3
@@ -41,21 +49,49 @@ def parse_s3_uri(uri: str) -> tuple[str, str]:
     return parsed.netloc, parsed.path.lstrip("/")
 
 
-def s3_client_for_user(user_ctx: UserContext) -> Union[Any, dict[str, Any]]:
-    """ユーザー権限で boto3 S3 client を返す。失敗時は err() dict。
+def _try_s3_client_from_cml_connection(cfg: Optional[S3Config]) -> Any | None:
+    """CML Data Connection の boto3 client (Session の get_base_connection 相当)。"""
+    if cfg is None or not cfg.connection_name:
+        return None
+    conn = _cml_get_connection(cfg.connection_name)
+    if conn is None:
+        return None
+    getter = getattr(conn, "get_base_connection", None)
+    if not callable(getter):
+        return None
+    try:
+        client = getter()
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning(
+            "s3.cml_connection_client_failed",
+            connection_name=cfg.connection_name,
+            error=str(exc),
+        )
+        return None
+    if client is None:
+        return None
+    _logger.debug(
+        "s3.using_cml_data_connection",
+        connection_name=cfg.connection_name,
+    )
+    return client
 
-    region / endpoint_url は :func:`get_s3_config` の解決結果を使う
-    (Data Connection or env or default ``us-east-1``)。
-    認証情報は IDBroker STS 経由で毎リクエスト取得する。
-    """
+
+def s3_client_for_user(user_ctx: UserContext) -> Union[Any, dict[str, Any]]:
+    """ユーザー権限で boto3 S3 client を返す。失敗時は err() dict。"""
     if boto3 is None:
         return err(ErrorCode.S3_ASSUMEROLE_FAILED, "boto3 is not installed")
+
+    cfg = get_s3_config()
+    if not os.environ.get("SOLOMON_IDBROKER_URL"):
+        cml_client = _try_s3_client_from_cml_connection(cfg)
+        if cml_client is not None:
+            return cml_client
+
     creds = get_or_fetch_credentials(user_ctx)
     if isinstance(creds, dict):
         return creds
-    cfg = get_s3_config()
-    # get_s3_config は必ず S3Config を返す設計 (region の default があるため
-    # None にはならない)。ただし将来 None を返すようになった場合の safeguard。
+
     region = cfg.region if cfg else "us-east-1"
     endpoint_url = cfg.endpoint_url if cfg else None
     kwargs: dict[str, Any] = dict(
