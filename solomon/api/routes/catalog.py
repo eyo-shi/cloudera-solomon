@@ -11,6 +11,7 @@ TreePane の左ペイン `iceberg` ルートに対応。Knox JWT でエンドユ
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +22,8 @@ from solomon.transport.user_context import UserContext
 from solomon.tools._trino_client import map_trino_error, trino_connection_for_user
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
+
+_TRINO_QUERY_TIMEOUT_S = 45.0
 
 
 def _require_trino_or_503() -> None:
@@ -63,8 +66,34 @@ def _run_query(
         raise HTTPException(status_code=502, detail=map_trino_error(e, sql)) from e
 
 
+async def _run_query_async(
+    user_ctx: UserContext,
+    sql: str,
+    catalog: str,
+) -> list[list[Any]]:
+    """Trino 同期 I/O をスレッドに逃がし、API 全体の待ち時間に上限を設ける。"""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_run_query, user_ctx, sql, catalog),
+            timeout=_TRINO_QUERY_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error_code": "TRINO_QUERY_FAILED",
+                "message": (
+                    f"Trino query timed out after {_TRINO_QUERY_TIMEOUT_S:.0f}s. "
+                    "The cluster may still be waking from auto-suspend — wait a "
+                    "few minutes and reload, or verify SOLOMON_TRINO_HOST / "
+                    "SOLOMON_TRINO_CONNECTION_NAME."
+                ),
+            },
+        ) from exc
+
+
 @router.get("/schemas")
-def list_schemas(
+async def list_schemas(
     user_ctx: Annotated[UserContext, Depends(require_user_context)],
     catalog: Annotated[str, Query(min_length=1, max_length=128)] = "iceberg",
 ) -> dict[str, Any]:
@@ -73,7 +102,7 @@ def list_schemas(
         f"SELECT schema_name FROM {catalog}.information_schema.schemata "
         "ORDER BY schema_name"
     )
-    rows = _run_query(user_ctx, sql, catalog)
+    rows = await _run_query_async(user_ctx, sql, catalog)
     return {
         "catalog": catalog,
         "schemas": [r[0] for r in rows if r and r[0]],
@@ -81,7 +110,7 @@ def list_schemas(
 
 
 @router.get("/tables")
-def list_tables(
+async def list_tables(
     user_ctx: Annotated[UserContext, Depends(require_user_context)],
     schema: Annotated[str, Query(min_length=1, max_length=128)],
     catalog: Annotated[str, Query(min_length=1, max_length=128)] = "iceberg",
@@ -93,7 +122,7 @@ def list_tables(
         f"WHERE table_schema = '{_esc(schema)}' "
         f"ORDER BY table_name"
     )
-    rows = _run_query(user_ctx, sql, catalog)
+    rows = await _run_query_async(user_ctx, sql, catalog)
     return {
         "catalog": catalog,
         "schema": schema,
@@ -106,7 +135,7 @@ def list_tables(
 
 
 @router.get("/columns")
-def list_columns(
+async def list_columns(
     user_ctx: Annotated[UserContext, Depends(require_user_context)],
     fq: Annotated[str, Query(min_length=3, max_length=256)],
 ) -> dict[str, Any]:
@@ -129,7 +158,7 @@ def list_columns(
         f"  AND table_name = '{_esc(table)}' "
         f"ORDER BY ordinal_position"
     )
-    rows = _run_query(user_ctx, sql, catalog)
+    rows = await _run_query_async(user_ctx, sql, catalog)
     return {
         "fq": fq,
         "columns": [

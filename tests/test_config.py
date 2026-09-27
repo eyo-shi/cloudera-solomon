@@ -85,6 +85,16 @@ class TestGetTrinoConfig:
         assert c is not None
         assert c.host == "trino.example.com"
         assert c.port == 443
+
+    def test_env_fallback_strips_embedded_port_from_host(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_TRINO_HOST", "trino.example.com:443")
+        monkeypatch.setenv("SOLOMON_TRINO_PORT", "8443")
+        c = cfg_mod.get_trino_config()
+        assert c is not None
+        assert c.host == "trino.example.com"
+        assert c.port == 443
         assert c.scheme == "https"
         assert c.catalog == "iceberg"  # default
         assert c.schema == "demo"  # default

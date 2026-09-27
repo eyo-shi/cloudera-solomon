@@ -146,6 +146,24 @@ def _env(name: str) -> Optional[str]:
     return v or None
 
 
+def _normalize_trino_host(host: str, port: int) -> tuple[str, int]:
+    """``SOLOMON_TRINO_HOST`` に誤って ``:443`` 等が含まれるケースを正規化する。"""
+    text = host.strip()
+    if not text or text.startswith("["):
+        return text, port
+    if ":" in text:
+        host_part, _, port_part = text.rpartition(":")
+        if port_part.isdigit():
+            _logger.warning(
+                "trino_config.host_had_embedded_port",
+                raw_host=text,
+                normalized_host=host_part,
+                port=int(port_part),
+            )
+            return host_part, int(port_part)
+    return text, port
+
+
 def _parse_verify_ssl(raw: Optional[str]) -> Any:
     """``SOLOMON_TRINO_VERIFY_SSL`` の値を bool / path に変換する。"""
     if raw is None:
@@ -272,6 +290,7 @@ def get_trino_config() -> Optional[TrinoConfig]:
             )
             catalog = catalog_env or str(p.get("catalog") or "iceberg")
             schema = schema_env or str(p.get("schema") or p.get("database") or "demo")
+            host, port = _normalize_trino_host(host, port)
             return TrinoConfig(
                 host=host,
                 port=port,
@@ -288,6 +307,7 @@ def get_trino_config() -> Optional[TrinoConfig]:
         _logger.debug("trino_config.not_configured")
         return None
     port = int(_env("SOLOMON_TRINO_PORT") or "443")
+    host, port = _normalize_trino_host(host, port)
     scheme = _env("SOLOMON_TRINO_SCHEME") or "https"
     verify = _parse_verify_ssl(_env("SOLOMON_TRINO_VERIFY_SSL"))
     catalog = catalog_env or "iceberg"

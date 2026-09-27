@@ -17,6 +17,7 @@ export function useSchemas(catalog: string = "iceberg") {
       apiFetch<SchemaListResponse>(
         `/api/catalog/schemas?catalog=${encodeURIComponent(catalog)}`,
       ),
+    retry: false,
   });
 }
 

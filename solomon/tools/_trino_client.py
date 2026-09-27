@@ -63,6 +63,7 @@ def trino_connection_for_user(
         catalog=catalog or cfg.catalog,
         schema=schema or cfg.schema,
         verify=cfg.verify_ssl,
+        request_timeout=30,
         http_headers={
             "X-Solomon-Request-Id": user_ctx.request_id,
         },
