@@ -19,6 +19,21 @@ def test_iter_neo4j_connection_uris_internal_host(monkeypatch) -> None:
     assert "bolt://cml-neo4j-abc:7687" in candidates
 
 
+def test_iter_neo4j_connection_uris_prefers_shared_endpoints_file(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.neo4j_connect.load_bolt_uris",
+        lambda: ["bolt://10.43.10.5:7687"],
+    )
+    monkeypatch.setattr(
+        "solomon.graph.neo4j_connect.resolve_bolt_uris_from_k8s",
+        lambda *args, **kwargs: [],
+    )
+    candidates = iter_neo4j_connection_uris("bolt://cml-neo4j-abc.mlx-user-123:7687")
+    assert candidates[0] == "bolt://10.43.10.5:7687"
+
+
 def test_iter_neo4j_connection_uris_prefers_bolt_host_override(monkeypatch) -> None:
     monkeypatch.setenv("NEO4J_BOLT_HOST", "10.42.1.17")
     monkeypatch.setattr(

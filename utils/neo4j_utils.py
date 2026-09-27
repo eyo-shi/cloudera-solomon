@@ -2334,8 +2334,59 @@ def get_connection_info() -> dict:
     return info
 
 
+def _collect_bolt_hosts_for_solomon() -> list[str]:
+    hosts: list[str] = []
+    seen: set[str] = set()
+
+    def add(host: str | None) -> None:
+        text = (host or "").strip()
+        if not text or text in seen:
+            return
+        seen.add(text)
+        hosts.append(text)
+
+    for pod_ip in _neo4j_pod_ips():
+        add(pod_ip)
+    try:
+        service = client.CoreV1Api().read_namespaced_service(
+            name=get_neo4j_service_name(),
+            namespace=get_current_namespace(),
+        )
+        cluster_ip = (service.spec.cluster_ip or "").strip()
+        if cluster_ip and cluster_ip.lower() != "none":
+            add(cluster_ip)
+    except ApiException:
+        pass
+    return hosts
+
+
+def _write_solomon_neo4j_endpoints(info: dict) -> None:
+    try:
+        from solomon.graph.neo4j_endpoints_file import write_endpoints
+
+        bolt_hosts = _collect_bolt_hosts_for_solomon()
+        payload = {
+            "internal_bolt": info.get("internal_bolt"),
+            "external_bolt": info.get("external_bolt"),
+            "bolt_hosts": bolt_hosts,
+            "service_name": get_neo4j_service_name(),
+            "namespace": get_current_namespace(),
+        }
+        path = write_endpoints(payload)
+        print(f"Solomon endpoints file: {path}")
+        if bolt_hosts:
+            print(
+                "Solomon NEO4J_BOLT_HOST (if Graph DNS fails): "
+                f"{bolt_hosts[0]}"
+            )
+    except Exception as exc:
+        print(f"Warning: could not write Solomon Neo4j endpoints file: {exc}")
+
+
 def print_connection_info() -> None:
     info = get_connection_info()
+    if info.get("status") == "running":
+        _write_solomon_neo4j_endpoints(info)
 
     print("=== POD LOGS START ===")
     print(info.get("neo4j_pod_logs"))
@@ -2346,6 +2397,11 @@ def print_connection_info() -> None:
     print(f"Password: {info['password']}")
     print(f"Internal Bolt URI: {info['internal_bolt']}")
     print(f"Internal Browser:  {info['internal_browser']}")
+    if info.get("status") == "running":
+        bolt_hosts = _collect_bolt_hosts_for_solomon()
+        if bolt_hosts:
+            print(f"Solomon Bolt Host (IP): {bolt_hosts[0]}")
+            print(f"Solomon NEO4J_URI (if DNS fails): bolt://{bolt_hosts[0]}:7687")
     if info["external_bolt"]:
         print(f"External Bolt URI: {info['external_bolt']}")
     if info["external_browser"]:

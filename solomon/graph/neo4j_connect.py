@@ -6,6 +6,7 @@ import os
 from urllib.parse import urlparse
 
 from solomon.graph.k8s_neo4j import parse_cml_neo4j_service, resolve_bolt_uris_from_k8s
+from solomon.graph.neo4j_endpoints_file import load_bolt_uris
 
 _BROWSER_HOST_MARKERS = (".cloudera.site",)
 _EXTERNAL_BOLT_HOST_MARKERS = (".elb.amazonaws.com", ".amazonaws.com")
@@ -57,6 +58,9 @@ def _configured_neo4j_uri_seeds(
 ) -> list[str]:
     """Primary URI plus optional NEO4J_INTERNAL_URI / NEO4J_EXTERNAL_URI overrides."""
     seeds: list[str] = []
+    for shared_uri in load_bolt_uris():
+        if shared_uri not in seeds:
+            seeds.append(shared_uri)
     bolt_host_override = _normalize_uri_seed(os.environ.get("NEO4J_BOLT_HOST", ""))
     if bolt_host_override:
         if "://" in bolt_host_override:
@@ -185,8 +189,8 @@ def format_neo4j_connection_help(configured_uri: str, errors: list[str]) -> str:
         "       NEO4J_EXTERNAL_URI to External Bolt (ELB) and restart Solomon\n"
         f"       Example: {external_example}\n"
         "     Do not use browser URL (*.cloudera.site) — that is not a Bolt endpoint\n"
-        "  3. CML Application pods may not resolve cluster DNS; Solomon auto-tries\n"
-        "     Kubernetes Service ClusterIP / Pod IP when DNS fails\n"
+        "  3. Restart neo4j-launcher so it writes .solomon/neo4j_endpoints.json\n"
+        "     (ClusterIP / Pod IP for Solomon when DNS is unavailable)\n"
         "  4. Manual override: NEO4J_BOLT_HOST=<pod-ip-or-cluster-ip> (optional)\n"
         "  5. After changing env vars, restart the Solomon Application (not only neo4j-launcher)\n"
         "  6. NEO4J_PASSWORD is the password from neo4j-launcher startup\n"
