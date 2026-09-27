@@ -39,6 +39,7 @@ export function useWishStream(): UseWishStream {
   const addSetupError = useChatStore((s) => s.addSetupError);
   const openTab = useTabStore((s) => s.openTab);
   const sessionId = useSessionStore((s) => s.sessionId);
+  const setSessionId = useSessionStore((s) => s.setSessionId);
 
   const cancel = useCallback(() => {
     userCancelledRef.current = true;
@@ -117,7 +118,9 @@ export function useWishStream(): UseWishStream {
                 );
                 break;
               case "done":
-                // タブは既に開いているので特に何もしない
+                if (evt.data.session_id) {
+                  setSessionId(evt.data.session_id);
+                }
                 break;
             }
           },
@@ -175,6 +178,7 @@ export function useWishStream(): UseWishStream {
       setStreaming,
       addSetupError,
       sessionId,
+      setSessionId,
       openTab,
     ],
   );

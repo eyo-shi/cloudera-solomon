@@ -110,6 +110,42 @@ def test_heuristic_graph_ingest_pending_fields_reply() -> None:
     assert c.extracted_args["node_fields"] == ["customer_id", "product_name"]
 
 
+def test_heuristic_graph_ingest_pending_fields_production_columns() -> None:
+    c = heuristic_classify(
+        "order_id, plant_code, product_code, source_system, plant_type",
+        entity_memory={
+            "pending_graph_ingest": {
+                "bucket": "eyda-buk-edf7cfcf",
+                "key": "demo/erp_mc/production_work_orders.csv",
+            }
+        },
+    )
+    assert c.intent == "INGEST"
+    assert c.needs_clarification is False
+    assert c.extracted_args["node_fields"] == [
+        "order_id",
+        "plant_code",
+        "product_code",
+        "source_system",
+        "plant_type",
+    ]
+
+
+def test_heuristic_pending_graph_ingest_not_chitchat_on_gibberish() -> None:
+    c = heuristic_classify(
+        "maybe these columns?",
+        entity_memory={
+            "pending_graph_ingest": {
+                "bucket": "demo-bucket",
+                "key": "data/customers.csv",
+            }
+        },
+    )
+    assert c.intent == "INGEST"
+    assert c.needs_clarification is True
+    assert c.extracted_args.get("awaiting_node_fields") is True
+
+
 def test_dispatch_plan_graph_ingest_passes_node_fields() -> None:
     classification = IntentClassification(
         intent="INGEST",

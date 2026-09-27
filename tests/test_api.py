@@ -199,6 +199,7 @@ def test_wish_chitchat_returns_greeting_no_error(client: TestClient) -> None:
     assert "done" in kinds
     done_evt = next(p for k, p in events if k == "done")
     assert done_evt["ok"] is True
+    assert done_evt.get("session_id", "").startswith("sess_")
 
 
 def test_wish_unknown_asks_clarification(client: TestClient) -> None:

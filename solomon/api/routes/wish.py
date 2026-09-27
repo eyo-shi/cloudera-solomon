@@ -262,6 +262,7 @@ async def post_wish(
             )
             yield sse_done(
                 turn_id=turn_id,
+                session_id=session.session_id,
                 artifacts=artifacts_created,
                 ok=(error_holder[0] is None),
             )

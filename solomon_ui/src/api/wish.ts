@@ -41,13 +41,17 @@ export async function streamWish(
   const { onEvent, onError, onSetupGuide, onClose, signal } = handlers;
   let res: Response;
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    };
+    if (body.session_id) {
+      headers["X-Solomon-Session-Id"] = body.session_id;
+    }
     res = await fetch("/api/wish", {
       method: "POST",
       credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      },
+      headers,
       body: JSON.stringify(body),
       signal,
     });

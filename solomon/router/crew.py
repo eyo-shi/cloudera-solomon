@@ -167,6 +167,29 @@ def heuristic_classify(
             reasoning="resolved pending_graph_ingest with node_fields",
         )
 
+    pending_raw = entity_memory.get("pending_graph_ingest")
+    if (
+        isinstance(pending_raw, dict)
+        and pending_raw.get("bucket")
+        and pending_raw.get("key")
+    ):
+        return IntentClassification(
+            intent="INGEST",
+            confidence=0.75,
+            extracted_args={
+                "bucket": str(pending_raw["bucket"]),
+                "key": str(pending_raw["key"]),
+                "target_schema": str(pending_raw.get("target_schema") or "demo"),
+                "graph_ingest": True,
+                "awaiting_node_fields": True,
+            },
+            needs_clarification=True,
+            clarification_prompt=build_graph_ingest_clarification(
+                key=str(pending_raw["key"])
+            ),
+            reasoning="pending graph ingest awaiting valid node_fields",
+        )
+
     # 1) INGEST が最優先 (s3 URI があれば確定)
     m = _S3_URI_RE.search(prompt)
     if m or any(kw in prompt for kw in _INGEST_KEYWORDS) or any(kw in p_lower for kw in _INGEST_KEYWORDS):

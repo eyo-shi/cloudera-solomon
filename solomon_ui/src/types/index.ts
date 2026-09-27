@@ -193,6 +193,7 @@ export interface WishErrorEvent {
 }
 export interface WishDoneEvent {
   turn_id: string;
+  session_id: string;
   artifacts: string[];
   ok: boolean;
 }

@@ -54,6 +54,7 @@ class WishErrorEvent(BaseModel):
 
 class WishDoneEvent(BaseModel):
     turn_id: str
+    session_id: str = Field(..., description="会話セッション ID (次回以降の /api/wish に渡す)")
     artifacts: list[str] = Field(default_factory=list)
     ok: bool = True
 
@@ -97,8 +98,17 @@ def sse_error(error_code: str, message: str) -> dict[str, str]:
 
 
 def sse_done(
-    turn_id: str, artifacts: list[str], ok: bool = True
+    turn_id: str,
+    session_id: str,
+    artifacts: list[str],
+    ok: bool = True,
 ) -> dict[str, str]:
     return _envelope(
-        "done", WishDoneEvent(turn_id=turn_id, artifacts=artifacts, ok=ok)
+        "done",
+        WishDoneEvent(
+            turn_id=turn_id,
+            session_id=session_id,
+            artifacts=artifacts,
+            ok=ok,
+        ),
     )
