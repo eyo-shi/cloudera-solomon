@@ -13,6 +13,7 @@ from unittest import mock
 import pytest
 
 from solomon.tools import _s3_client
+from solomon.tools import s3 as s3_mod
 from solomon.tools.s3 import S3GetRangeTool, S3HeadTool, S3ListTool
 from solomon.transport.config import S3Config
 from solomon.transport.user_context import (
@@ -48,7 +49,7 @@ class TestS3ClientForUser:
     def test_uses_cml_data_connection_when_idbroker_unset(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("SOLOMON_IDBROKER_URL", raising=False)
+        monkeypatch.setattr(_s3_client, "idbroker_configured", lambda: False)
         fake_client = mock.MagicMock()
         conn = mock.MagicMock()
         conn.get_base_connection.return_value = fake_client
@@ -62,13 +63,30 @@ class TestS3ClientForUser:
         )
         monkeypatch.setattr(
             _s3_client,
+            "iter_s3_connection_names",
+            lambda: ["S3 Object Store"],
+        )
+        monkeypatch.setattr(
+            _s3_client,
             "_cml_get_connection",
             lambda name: conn if name == "S3 Object Store" else None,
         )
+        monkeypatch.setattr(_s3_client, "cml_data_available", lambda: True)
         result = _s3_client.s3_client_for_user(
             UserContext(user_name="alice", knox_jwt="fake-jwt")
         )
         assert result is fake_client
+
+    def test_returns_cml_error_when_idbroker_unset_and_no_connection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_s3_client, "idbroker_configured", lambda: False)
+        monkeypatch.setattr(_s3_client, "cml_data_available", lambda: False)
+        result = _s3_client.s3_client_for_user(
+            UserContext(user_name="alice", knox_jwt="fake-jwt")
+        )
+        assert result["error_code"] == "S3_ASSUMEROLE_FAILED"
+        assert "cml.data_v1" in result["message"]
 
 
 class TestS3ListTool:
@@ -90,7 +108,7 @@ class TestS3ListTool:
             "CommonPrefixes": [{"Prefix": "data/subdir/"}],
             "IsTruncated": False,
         }
-        with mock.patch.object(_s3_client, "s3_client_for_user", return_value=fake_client):
+        with mock.patch.object(s3_mod, "s3_client_for_user", return_value=fake_client):
             result = S3ListTool()._run(bucket="demo", prefix="data/", delimiter="/")
         assert result["status"] == "ok"
         assert len(result["objects"]) == 2
@@ -107,7 +125,7 @@ class TestS3ListTool:
             {"Error": {"Code": "AccessDenied", "Message": "Access denied"}},
             "ListObjectsV2",
         )
-        with mock.patch.object(_s3_client, "s3_client_for_user", return_value=fake_client):
+        with mock.patch.object(s3_mod, "s3_client_for_user", return_value=fake_client):
             result = S3ListTool()._run(bucket="secret", prefix="")
         assert result["status"] == "error"
         assert result["error_code"] == "S3_ACCESS_DENIED"
@@ -128,7 +146,7 @@ class TestS3HeadTool:
             "ETag": '"abc123"',
             "LastModified": datetime(2024, 3, 15, tzinfo=timezone.utc),
         }
-        with mock.patch.object(_s3_client, "s3_client_for_user", return_value=fake_client):
+        with mock.patch.object(s3_mod, "s3_client_for_user", return_value=fake_client):
             result = S3HeadTool()._run(bucket="demo", key="file.xlsx")
         assert result["status"] == "ok"
         assert result["size"] == 4096
@@ -143,7 +161,7 @@ class TestS3HeadTool:
             {"Error": {"Code": "NoSuchKey", "Message": "Key not found"}},
             "HeadObject",
         )
-        with mock.patch.object(_s3_client, "s3_client_for_user", return_value=fake_client):
+        with mock.patch.object(s3_mod, "s3_client_for_user", return_value=fake_client):
             result = S3HeadTool()._run(bucket="demo", key="missing.csv")
         assert result["status"] == "error"
         assert result["error_code"] == "S3_NOT_FOUND"
@@ -155,7 +173,7 @@ class TestS3GetRangeTool:
         fake_body.read.return_value = b"PK\x03\x04hello"
         fake_client = mock.MagicMock()
         fake_client.get_object.return_value = {"Body": fake_body}
-        with mock.patch.object(_s3_client, "s3_client_for_user", return_value=fake_client):
+        with mock.patch.object(s3_mod, "s3_client_for_user", return_value=fake_client):
             result = S3GetRangeTool()._run(
                 bucket="demo", key="file.xlsx", start=0, length=1024
             )
@@ -176,7 +194,7 @@ class TestS3GetRangeTool:
             {"Error": {"Code": "InvalidRange", "Message": "range not satisfiable"}},
             "GetObject",
         )
-        with mock.patch.object(_s3_client, "s3_client_for_user", return_value=fake_client):
+        with mock.patch.object(s3_mod, "s3_client_for_user", return_value=fake_client):
             result = S3GetRangeTool()._run(bucket="demo", key="tiny.txt", start=99999, length=1024)
         assert result["status"] == "error"
         assert result["error_code"] == "S3_RANGE_FAILED"

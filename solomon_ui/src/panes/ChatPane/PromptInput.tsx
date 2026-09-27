@@ -1,5 +1,6 @@
 /**
  * multiline prompt 入力。Enter で Send、Shift+Enter で改行。
+ * IME 変換確定中の Enter は送信しない。
  * クリップアイコン / ドラッグ&ドロップでファイル添付。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -24,6 +25,7 @@ export function PromptInput({ wish }: Props) {
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
   const streaming = useChatStore((s) => s.streaming);
   const pendingPrompt = useChatStore((s) => s.pendingPrompt);
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt);
@@ -131,11 +133,26 @@ export function PromptInput({ wish }: Props) {
           value={text}
           disabled={streaming}
           onChange={(e) => setText(e.target.value)}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            // 確定 Enter の keydown が compositionend より後に来るブラウザ向け
+            window.setTimeout(() => {
+              isComposingRef.current = false;
+            }, 0);
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (canSend) void submit();
+            if (e.key !== "Enter" || e.shiftKey) return;
+            if (
+              isComposingRef.current ||
+              e.nativeEvent.isComposing ||
+              e.keyCode === 229
+            ) {
+              return;
             }
+            e.preventDefault();
+            if (canSend) void submit();
           }}
         />
         <div className="chat-composer__toolbar">
@@ -170,6 +187,7 @@ export function PromptInput({ wish }: Props) {
                 alt=""
                 className="chat-composer__attach-icon"
                 aria-hidden="true"
+                draggable={false}
               />
             </button>
             {streaming ? (

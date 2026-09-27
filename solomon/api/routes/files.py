@@ -30,6 +30,15 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from solomon.api.auth import require_user_context
 from solomon.transport.errors import ErrorCode, err
 from solomon.transport.user_context import UserContext
+from solomon.transport.config import (
+    _cml_get_connection,
+    _cml_list_connections,
+    _conn_type,
+    _is_s3_connection,
+    cml_data_available,
+    idbroker_configured,
+    iter_s3_connection_names,
+)
 from solomon.tools._s3_client import map_s3_error, s3_client_for_user
 from solomon.tools.excel import ExcelHeaderDetectTool
 from solomon.tools.format import CSVSnifferTool, MagicByteTool, ParquetMetaTool
@@ -64,6 +73,42 @@ def list_buckets(
 ) -> dict[str, Any]:
     buckets = _configured_s3_buckets()
     return {"buckets": buckets}
+
+
+@router.get("/diagnostics")
+def s3_diagnostics(
+    _user_ctx: Annotated[UserContext, Depends(require_user_context)],
+) -> dict[str, Any]:
+    """Storage タブの S3 接続トラブルシュート用 (資格情報は返さない)。"""
+    connections: list[dict[str, Any]] = []
+    for conn in _cml_list_connections():
+        connections.append(
+            {
+                "name": getattr(conn, "name", None),
+                "type": _conn_type(conn),
+                "is_s3": _is_s3_connection(conn),
+            }
+        )
+
+    candidates: list[dict[str, Any]] = []
+    for name in iter_s3_connection_names():
+        conn = _cml_get_connection(name)
+        getter = getattr(conn, "get_base_connection", None) if conn else None
+        candidates.append(
+            {
+                "name": name,
+                "found": conn is not None,
+                "has_get_base_connection": callable(getter),
+            }
+        )
+
+    return {
+        "cml_data_available": cml_data_available(),
+        "idbroker_configured": idbroker_configured(),
+        "configured_buckets": _configured_s3_buckets(),
+        "connections": connections,
+        "s3_connection_candidates": candidates,
+    }
 
 
 def _default_upload_bucket() -> str:

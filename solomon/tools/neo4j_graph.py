@@ -46,6 +46,10 @@ class Neo4jGraphLoadArgs(BaseModel):
         None, description="System 名 (省略時は S3 key / meta_kv / schema から推定)"
     )
     ossie_path: Optional[str] = Field(None, description="Ossie YAML 相対パス (Document リンク用)")
+    node_fields: Optional[list[str]] = Field(
+        None,
+        description="ナレッジグラフ上で entity ノードとして扱う列名",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -84,6 +88,7 @@ class Neo4jGraphLoadTool(BaseSolomonTool):
         row_count_hint: Optional[int] = None,
         system_name: Optional[str] = None,
         ossie_path: Optional[str] = None,
+        node_fields: Optional[list[str]] = None,
         **_: Any,
     ) -> dict[str, Any]:
         config = get_neo4j_config()
@@ -102,6 +107,24 @@ class Neo4jGraphLoadTool(BaseSolomonTool):
             c if isinstance(c, ColumnGraphInput) else ColumnGraphInput.model_validate(c)
             for c in columns
         ]
+        node_field_set = {
+            str(name).strip().lower()
+            for name in (node_fields or [])
+            if str(name).strip()
+        }
+        if node_field_set:
+            parsed_columns = [
+                ColumnGraphInput(
+                    name=c.name,
+                    trino_type=c.trino_type,
+                    nullable=c.nullable,
+                    role="graph_node"
+                    if c.name.lower() in node_field_set
+                    else c.role,
+                    description=c.description,
+                )
+                for c in parsed_columns
+            ]
         resolved_system = infer_system_name(
             key=key,
             schema=schema,
@@ -164,6 +187,7 @@ class Neo4jGraphLoadTool(BaseSolomonTool):
                 "system_id": payload.system_id,
                 "system_name": payload.system_name,
                 "document_ids": [d.id for d in payload.documents],
+                "node_fields": sorted(node_field_set) if node_field_set else [],
                 "neo4j_uri": loader._uri,
                 "counts": counts,
             }

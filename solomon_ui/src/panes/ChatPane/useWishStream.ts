@@ -177,7 +177,7 @@ function buildPromptWithAttachments(
     return `${prompt}\n\n添付ファイル:\n${uriBlock}`;
   }
   if (uris.length === 1) {
-    return `${uris[0]} を取り込んでテーブルを作って`;
+    return `${uris[0]} を取り込んでナレッジグラフに追加して`;
   }
   return `以下のファイルを取り込んでテーブルを作って:\n${uriBlock}`;
 }

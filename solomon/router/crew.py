@@ -19,6 +19,12 @@ import re
 from typing import Any, Literal, Optional
 
 from solomon.router.agents import make_dispatcher_agent, make_intent_classifier_agent
+from solomon.router.graph_ingest import (
+    build_graph_ingest_clarification,
+    is_graph_ingest_request,
+    parse_node_fields,
+    resolve_pending_graph_ingest,
+)
 from solomon.router.models import (
     DispatchPlan,
     IntentClassification,
@@ -119,18 +125,50 @@ def heuristic_classify(
     entity_memory = entity_memory or {}
     p_lower = prompt.lower()
 
+    # 0) グラフ取り込みの聞き返し (pending + フィールド名回答)
+    pending_ingest = resolve_pending_graph_ingest(prompt, entity_memory)
+    if pending_ingest:
+        return IntentClassification(
+            intent="INGEST",
+            confidence=0.92,
+            extracted_args=pending_ingest,
+            needs_clarification=False,
+            reasoning="resolved pending_graph_ingest with node_fields",
+        )
+
     # 1) INGEST が最優先 (s3 URI があれば確定)
     m = _S3_URI_RE.search(prompt)
     if m or any(kw in prompt for kw in _INGEST_KEYWORDS) or any(kw in p_lower for kw in _INGEST_KEYWORDS):
         if m:
+            graph_ingest = is_graph_ingest_request(prompt)
+            node_fields = parse_node_fields(prompt) if graph_ingest else None
+            args: dict[str, Any] = {
+                "bucket": m.group(1),
+                "key": m.group(2),
+                "target_schema": "demo",
+            }
+            if graph_ingest:
+                args["graph_ingest"] = True
+                if node_fields:
+                    args["node_fields"] = node_fields
+                else:
+                    return IntentClassification(
+                        intent="INGEST",
+                        confidence=0.9,
+                        extracted_args={
+                            **args,
+                            "awaiting_node_fields": True,
+                        },
+                        needs_clarification=True,
+                        clarification_prompt=build_graph_ingest_clarification(
+                            key=m.group(2)
+                        ),
+                        reasoning="graph ingest without node_fields",
+                    )
             return IntentClassification(
                 intent="INGEST",
                 confidence=0.95,
-                extracted_args={
-                    "bucket": m.group(1),
-                    "key": m.group(2),
-                    "target_schema": "demo",
-                },
+                extracted_args=args,
                 needs_clarification=False,
                 reasoning="s3 URI matched by heuristic",
             )
@@ -147,8 +185,12 @@ def heuristic_classify(
         )
 
     # 2) ANALYZE_DASHBOARD / ANALYZE_SUMMARY
-    is_dashboard = any(kw in prompt for kw in _DASHBOARD_KEYWORDS) or any(
-        kw in p_lower for kw in _DASHBOARD_KEYWORDS
+    is_dashboard = (
+        not is_graph_ingest_request(prompt)
+        and (
+            any(kw in prompt for kw in _DASHBOARD_KEYWORDS)
+            or any(kw in p_lower for kw in _DASHBOARD_KEYWORDS)
+        )
     )
     is_summary = any(kw in prompt for kw in _SUMMARY_KEYWORDS) or any(
         kw in p_lower for kw in _SUMMARY_KEYWORDS
@@ -179,7 +221,7 @@ def heuristic_classify(
     # 3) KNOWLEDGE_RAG (取り込み/分析/雑談以外のナレッジ探索)
     from solomon.rag.classifier import is_knowledge_query
 
-    if is_knowledge_query(prompt):
+    if is_knowledge_query(prompt) and not is_graph_ingest_request(prompt):
         return IntentClassification(
             intent="KNOWLEDGE_RAG",
             confidence=0.85,
@@ -207,9 +249,9 @@ def heuristic_classify(
         extracted_args={},
         needs_clarification=True,
         clarification_prompt=(
-            "ご依頼の内容を『S3 パスを取り込む』『テーブルをサマリーする』"
-            "『テーブルからダッシュボードを作る』『ナレッジ検索』"
-            "のいずれかで教えてください。"
+            "ご依頼の内容を『S3 パスを取り込む』『ファイルをナレッジグラフに追加』"
+            "『テーブルをサマリーする』『テーブルからダッシュボードを作る』"
+            "『ナレッジ検索』のいずれかで教えてください。"
         ),
         reasoning="no heuristic matched",
     )
@@ -248,6 +290,16 @@ def build_dispatch_plan(
                 skip_child=True,
             )
         args.setdefault("target_schema", "demo")
+        if args.get("graph_ingest") and not args.get("node_fields"):
+            return DispatchPlan(
+                intent=intent,
+                child_crew="none",
+                inputs={},
+                response_markdown=build_graph_ingest_clarification(
+                    key=str(args.get("key") or "")
+                ),
+                skip_child=True,
+            )
         return DispatchPlan(
             intent=intent,
             child_crew="ingestion",

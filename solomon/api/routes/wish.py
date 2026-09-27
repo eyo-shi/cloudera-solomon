@@ -36,6 +36,8 @@ from solomon.api.state import SessionTurn, get_store
 from solomon.ingestion.crew import kickoff_ingestion
 from solomon.rag.crew import kickoff_knowledge_rag
 from solomon.router import DispatchPlan, RouterResult, kickoff_router
+from solomon.router.graph_ingest import build_graph_ingest_clarification
+from solomon.router.s3_columns import peek_s3_column_names
 from solomon.api.setup_checks import llm_not_configured_payload
 from solomon.transport.llm_factory import build_llm_pair
 from solomon.transport.logging import get_logger
@@ -112,6 +114,28 @@ async def post_wish(
             # 2) skip_child (CHITCHAT / clarify / UNKNOWN) は response_markdown を流す
             if plan.skip_child:
                 md = router_result.response_markdown or plan.response_markdown or ""
+                extracted = router_result.classification.extracted_args or {}
+                if extracted.get("awaiting_node_fields"):
+                    bucket = str(extracted.get("bucket") or "")
+                    key = str(extracted.get("key") or "")
+                    columns = await asyncio.to_thread(
+                        peek_s3_column_names, user_ctx, bucket, key
+                    )
+                    md = build_graph_ingest_clarification(
+                        key=key, column_names=columns
+                    )
+                    get_store().update_entity_memory(
+                        session.session_id,
+                        {
+                            "pending_graph_ingest": {
+                                "bucket": bucket,
+                                "key": key,
+                                "target_schema": extracted.get(
+                                    "target_schema", "demo"
+                                ),
+                            }
+                        },
+                    )
                 if md:
                     response_md_parts.append(md)
                     yield sse_token(md)
@@ -128,6 +152,8 @@ async def post_wish(
                     bucket=str(plan.inputs.get("bucket", "")),
                     key=str(plan.inputs.get("key", "")),
                     target_schema=str(plan.inputs.get("target_schema") or "demo"),
+                    node_fields=plan.inputs.get("node_fields"),
+                    graph_ingest=bool(plan.inputs.get("graph_ingest")),
                     llm_light=llm_light,
                     llm_strong=llm_strong,
                     artifacts_created=artifacts_created,
@@ -295,6 +321,8 @@ async def _handle_ingest(
     bucket: str,
     key: str,
     target_schema: str,
+    node_fields: Any = None,
+    graph_ingest: bool = False,
     llm_light: Optional[Any],
     llm_strong: Optional[Any],
     artifacts_created: list[str],
@@ -310,9 +338,14 @@ async def _handle_ingest(
         )
         return
 
-    yield sse_step(
-        "IngestionCrew", "running", f"s3://{bucket}/{key} を取り込みます..."
-    )
+    step_msg = f"s3://{bucket}/{key} を取り込みます..."
+    if graph_ingest and node_fields:
+        joined = ", ".join(str(f) for f in node_fields)
+        step_msg = (
+            f"s3://{bucket}/{key} を取り込み、"
+            f"ナレッジグラフに追加します (ノード: {joined})..."
+        )
+    yield sse_step("IngestionCrew", "running", step_msg)
 
     # UserContext を持ち込む session_id つきの派生を用意
     scoped_ctx = UserContext(
@@ -333,6 +366,8 @@ async def _handle_ingest(
                 bucket=bucket,
                 key=key,
                 target_schema=target_schema,
+                node_fields=node_fields,
+                graph_ingest=graph_ingest,
                 llm_light=llm_light,
                 llm_strong=llm_strong,
             )
@@ -376,6 +411,7 @@ async def _handle_ingest(
                 "last_table": fq,
                 "last_s3_path": f"s3://{bucket}/{key}",
                 "last_ossie_path": report.get("ossie_yaml_path"),
+                "pending_graph_ingest": None,
             },
         )
         yield sse_artifact(

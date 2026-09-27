@@ -73,6 +73,61 @@ def test_build_router_crew_has_two_tasks_sequential() -> None:
 # ------------------------------------------------------------------ #
 # heuristic_classify
 # ------------------------------------------------------------------ #
+def test_heuristic_graph_ingest_without_node_fields_asks_clarify() -> None:
+    c = heuristic_classify(
+        "s3://demo-bucket/data/customers.csv を取り込んでナレッジグラフに追加して"
+    )
+    assert c.intent == "INGEST"
+    assert c.needs_clarification is True
+    assert c.extracted_args.get("awaiting_node_fields") is True
+    assert "ノード" in (c.clarification_prompt or "")
+
+
+def test_heuristic_graph_ingest_with_node_fields() -> None:
+    c = heuristic_classify(
+        "s3://demo-bucket/data/customers.csv を取り込み、"
+        "customer_id, product_name をノードにしてナレッジグラフに追加"
+    )
+    assert c.intent == "INGEST"
+    assert c.needs_clarification is False
+    assert c.extracted_args.get("graph_ingest") is True
+    assert c.extracted_args.get("node_fields") == ["customer_id", "product_name"]
+
+
+def test_heuristic_graph_ingest_pending_fields_reply() -> None:
+    c = heuristic_classify(
+        "customer_id, product_name",
+        entity_memory={
+            "pending_graph_ingest": {
+                "bucket": "demo-bucket",
+                "key": "data/customers.csv",
+            }
+        },
+    )
+    assert c.intent == "INGEST"
+    assert c.needs_clarification is False
+    assert c.extracted_args["bucket"] == "demo-bucket"
+    assert c.extracted_args["node_fields"] == ["customer_id", "product_name"]
+
+
+def test_dispatch_plan_graph_ingest_passes_node_fields() -> None:
+    classification = IntentClassification(
+        intent="INGEST",
+        confidence=0.9,
+        extracted_args={
+            "bucket": "b",
+            "key": "k.csv",
+            "target_schema": "demo",
+            "graph_ingest": True,
+            "node_fields": ["customer_id"],
+        },
+    )
+    plan = build_dispatch_plan(classification)
+    assert plan.child_crew == "ingestion"
+    assert plan.skip_child is False
+    assert plan.inputs["node_fields"] == ["customer_id"]
+
+
 def test_heuristic_ingest_with_s3_uri() -> None:
     c = heuristic_classify(
         "s3://demo-bucket/2024/sales.xlsx を取り込んでテーブルにして"

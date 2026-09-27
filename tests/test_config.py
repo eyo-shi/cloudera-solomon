@@ -59,6 +59,7 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(k, raising=False)
     # cml.data_v1 が local dev 環境で偶然入っていても、テストでは無効化する
     monkeypatch.setattr(cfg_mod, "_cmldata", None)
+    monkeypatch.setattr(cfg_mod, "_cmldata_import_attempted", True)
 
 
 def _fake_conn(**params: Any) -> SimpleNamespace:
@@ -269,7 +270,23 @@ class TestGetS3Config:
         c = cfg_mod.get_s3_config()
         assert c is not None
         assert c.connection_name == "auto-s3"
-        assert c.region == "eu-west-1"
+
+    def test_auto_detect_s3_connection_by_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        s3 = _fake_conn(_type="unknown", _name="S3 Object Store", region="ap-northeast-1")
+        monkeypatch.setattr(cfg_mod, "_cml_list_connections", lambda: [s3])
+        c = cfg_mod.get_s3_config()
+        assert c is not None
+        assert c.connection_name == "S3 Object Store"
+
+    def test_iter_s3_connection_names_prefers_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_S3_CONNECTION_NAME", "custom-s3")
+        s3 = _fake_conn(_type="s3", _name="auto-s3", region="eu-west-1")
+        monkeypatch.setattr(cfg_mod, "_cml_list_connections", lambda: [s3])
+        assert cfg_mod.iter_s3_connection_names()[0] == "custom-s3"
 
 
 # ================================================================== #

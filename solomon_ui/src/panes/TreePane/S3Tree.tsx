@@ -38,10 +38,16 @@ export function S3Tree({ bucket, filter }: S3TreeProps) {
     <ul className="tree-list" onClick={() => setMenuFor(null)}>
       <li className="tree-node">
         <div
-          className="tree-row tree-row--schema"
+          className="tree-row tree-row--schema tree-row--bucket"
           onClick={() => setRootExpanded((v) => !v)}
         >
-          <span className="tree-caret">{rootExpanded ? "▾" : "▸"}</span>
+          <span
+            className={
+              "tree-caret" + (rootExpanded ? " tree-caret--expanded" : "")
+            }
+          >
+            &gt;
+          </span>
           <span className="tree-label">{bucket}</span>
         </div>
         {rootExpanded && (
@@ -131,7 +137,13 @@ function S3PrefixList({
               className="tree-row tree-row--schema"
               onClick={() => toggleSub(sp)}
             >
-              <span className="tree-caret">{isOpen ? "▾" : "▸"}</span>
+              <span
+                className={
+                  "tree-caret" + (isOpen ? " tree-caret--expanded" : "")
+                }
+              >
+                &gt;
+              </span>
               <span className="tree-label" title={sp}>
                 {label || sp}
               </span>

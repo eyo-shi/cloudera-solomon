@@ -19,7 +19,7 @@ export function TabBar() {
   const closeTab = useTabStore((s) => s.closeTab);
 
   if (tabs.length === 0) {
-    return null;
+    return <div className="tab-bar tab-bar--empty" aria-hidden="true" />;
   }
   return (
     <div className="tab-bar">

@@ -95,10 +95,35 @@ export function TreePane() {
       </div>
 
       <div className="tree-body explorer-body">
-        {mode === "tables" && <ExploreView filter={filter} />}
-        {mode === "storage" && <StorageView filter={filter} />}
-        {mode === "graph" && <GraphView filter={filter} />}
-        {mode === "search" && <SearchView filter={filter} />}
+        {/* モード切替でアンマウントしない (Storage のフォルダ展開状態を保持) */}
+        <section
+          className="explorer-panel"
+          aria-hidden={mode !== "tables"}
+          hidden={mode !== "tables"}
+        >
+          <ExploreView filter={filter} />
+        </section>
+        <section
+          className="explorer-panel"
+          aria-hidden={mode !== "storage"}
+          hidden={mode !== "storage"}
+        >
+          <StorageView filter={filter} />
+        </section>
+        <section
+          className="explorer-panel"
+          aria-hidden={mode !== "graph"}
+          hidden={mode !== "graph"}
+        >
+          <GraphView filter={filter} />
+        </section>
+        <section
+          className="explorer-panel"
+          aria-hidden={mode !== "search"}
+          hidden={mode !== "search"}
+        >
+          <SearchView filter={filter} />
+        </section>
       </div>
     </div>
   );

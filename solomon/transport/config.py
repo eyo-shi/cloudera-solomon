@@ -41,10 +41,23 @@ _logger = get_logger(__name__)
 
 # ----- Data Connections: optional import -----------------------------
 # CML カーネル環境では pre-install されているが、local dev では入らない。
-try:  # pragma: no cover — cml 環境でしか import できない
-    import cml.data_v1 as _cmldata  # type: ignore
-except ImportError:
-    _cmldata = None  # type: ignore[assignment]
+# Application 起動直後など import タイミング差を吸収するため lazy に読む。
+_cmldata: Any | None = None
+_cmldata_import_attempted = False
+
+
+def _ensure_cmldata() -> Any | None:
+    global _cmldata, _cmldata_import_attempted
+    if _cmldata_import_attempted:
+        return _cmldata
+    _cmldata_import_attempted = True
+    try:  # pragma: no cover — cml 環境でしか import できない
+        import cml.data_v1 as cmldata  # type: ignore
+
+        _cmldata = cmldata
+    except ImportError:
+        _cmldata = None
+    return _cmldata
 
 
 # ------------------------------------------------------------------ #
@@ -178,10 +191,11 @@ def _parse_verify_ssl(raw: Optional[str]) -> Any:
 
 def _cml_list_connections() -> list[Any]:
     """``cml.data_v1.list_connections`` を optional に呼ぶ。"""
-    if _cmldata is None:
+    cmldata = _ensure_cmldata()
+    if cmldata is None:
         return []
     try:
-        conns = _cmldata.list_connections()  # type: ignore[attr-defined]
+        conns = cmldata.list_connections()  # type: ignore[attr-defined]
     except Exception as e:  # noqa: BLE001
         _logger.debug("cml_data.list_connections_failed", error=str(e))
         return []
@@ -190,10 +204,11 @@ def _cml_list_connections() -> list[Any]:
 
 def _cml_get_connection(name: str) -> Optional[Any]:
     """``cml.data_v1.get_connection(name)`` を optional に呼ぶ。"""
-    if _cmldata is None:
+    cmldata = _ensure_cmldata()
+    if cmldata is None:
         return None
     try:
-        return _cmldata.get_connection(name)  # type: ignore[attr-defined]
+        return cmldata.get_connection(name)  # type: ignore[attr-defined]
     except Exception as e:  # noqa: BLE001
         _logger.debug(
             "cml_data.get_connection_failed", name=name, error=str(e)
@@ -208,6 +223,52 @@ def _conn_type(conn: Any) -> str:
         if isinstance(v, str) and v:
             return v.lower()
     return ""
+
+
+_S3_CONN_TYPES = frozenset(
+    {
+        "s3",
+        "aws_s3",
+        "object_store",
+        "object-store",
+        "s3_object_store",
+        "s3-object-store",
+    }
+)
+
+
+def _is_s3_connection(conn: Any) -> bool:
+    if _conn_type(conn) in _S3_CONN_TYPES:
+        return True
+    name = (getattr(conn, "name", None) or "").lower()
+    return "object store" in name or name.startswith("s3")
+
+
+def cml_data_available() -> bool:
+    return _ensure_cmldata() is not None
+
+
+def idbroker_configured() -> bool:
+    return _env("SOLOMON_IDBROKER_URL") is not None
+
+
+def iter_s3_connection_names() -> list[str]:
+    """S3 Data Connection 名の試行順 (env → auto-detect → 既定名)。"""
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def add(raw: str | None) -> None:
+        text = (raw or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            names.append(text)
+
+    add(_env("SOLOMON_S3_CONNECTION_NAME"))
+    for conn in _cml_list_connections():
+        if _is_s3_connection(conn):
+            add(getattr(conn, "name", None))
+    add("S3 Object Store")
+    return names
 
 
 def _conn_params(conn: Any) -> dict[str, Any]:
@@ -346,7 +407,7 @@ def get_s3_config() -> Optional[S3Config]:
 
     if conn is None:
         for c in _cml_list_connections():
-            if _conn_type(c) in ("s3", "aws_s3", "object_store"):
+            if _is_s3_connection(c):
                 conn = c
                 name = getattr(c, "name", None) or name
                 _logger.info(
@@ -369,7 +430,7 @@ def get_s3_config() -> Optional[S3Config]:
     # env only (IDBroker が credentials を出す前提)
     region = _env("AWS_REGION") or "us-east-1"
     endpoint = _env("SOLOMON_S3_ENDPOINT_URL")
-    return S3Config(region=region, connection_name=None, endpoint_url=endpoint)
+    return S3Config(region=region, connection_name=name, endpoint_url=endpoint)
 
 
 # ------------------------------------------------------------------ #

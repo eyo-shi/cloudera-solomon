@@ -9,7 +9,7 @@
  *   parquet     -> スキーマ + サンプル行数
  *   その他      -> フォーマット + head_bytes を表示
  */
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useFilePreview } from "../../../api/files";
 import type { FilePreviewResponse, TabDescriptor } from "../../../types";
 
@@ -47,9 +47,7 @@ export function FilePreviewTab({ tab }: Props) {
   return (
     <div className="tab-content">
       <div className="tab-meta">
-        <code>
-          s3://{bucket}/{key}
-        </code>
+        <FilePathBreadcrumb bucket={bucket} objectKey={key} />
         <span className="meta-badge">{data.format ?? "?"}</span>
         {data.encoding && <span className="meta-badge">{data.encoding}</span>}
         {data.total_size !== undefined && (
@@ -237,6 +235,42 @@ function ParquetBody({ data }: { data: FilePreviewResponse }) {
         </tbody>
       </table>
     </>
+  );
+}
+
+// ---------------- path breadcrumb ---------------- //
+
+function FilePathBreadcrumb({
+  bucket,
+  objectKey,
+}: {
+  bucket: string;
+  objectKey: string;
+}) {
+  const segments = [bucket, ...objectKey.split("/").filter(Boolean)];
+  return (
+    <nav className="file-path-breadcrumb" aria-label="File path">
+      {segments.map((segment, index) => (
+        <Fragment key={`${index}-${segment}`}>
+          {index > 0 && (
+            <span className="file-path-breadcrumb__sep" aria-hidden="true">
+              &gt;
+            </span>
+          )}
+          <span
+            className={
+              "file-path-breadcrumb__part" +
+              (index === segments.length - 1
+                ? " file-path-breadcrumb__part--leaf"
+                : "")
+            }
+            title={segment}
+          >
+            {segment}
+          </span>
+        </Fragment>
+      ))}
+    </nav>
   );
 }
 

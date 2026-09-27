@@ -199,6 +199,8 @@ def make_load_neo4j_graph_task(agent: Any, context: list[Task]) -> Task:
             "catalog / target_schema / resolved_table / columns / bucket / key / "
             "format / sheet / header_row / meta_kv / row_count_hint を前段タスクから"
             "集約して渡す。system_name は meta_kv または S3 key から推定可。"
+            "Crew inputs に node_fields (カンマ区切り) がある場合は、その列名を "
+            "graph_node ロールとして Neo4jGraphLoadTool に渡す。"
             "NEO4J_URI 未設定時は skipped=true, reason を返し、Crew 全体は失敗させない。"
             "副作用ありのため max_retries=0。"
         ),

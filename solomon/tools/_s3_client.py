@@ -4,20 +4,25 @@ Tool 実装 (:mod:`solomon.tools.s3` など) が薄く共通利用する。
 
 認証 (優先順):
 
-1. ``SOLOMON_IDBROKER_URL`` 設定時 — Knox JWT を IDBroker で STS 資格情報に交換
-   (:func:`solomon.tools._idbroker.get_or_fetch_credentials`)。ユーザー単位の権限。
-2. 未設定時 — CML Data Connection の ``get_base_connection()`` (Session と同じ経路)。
+1. ``SOLOMON_IDBROKER_URL`` 未設定時 — CML Data Connection の
+   ``get_base_connection()`` (Session と同じ経路) を複数候補名で試行。
+2. ``SOLOMON_IDBROKER_URL`` 設定時 — Knox JWT を IDBroker で STS 資格情報に交換。
 
 region / endpoint_url は :mod:`solomon.transport.config` の :func:`get_s3_config`
 から取得する (Data Connection 由来 or env fallback)。
 """
 from __future__ import annotations
 
-import os
-from typing import Any, Optional, Union
+from typing import Any, Union
 from urllib.parse import urlparse
 
-from solomon.transport.config import S3Config, _cml_get_connection, get_s3_config
+from solomon.transport.config import (
+    _cml_get_connection,
+    cml_data_available,
+    get_s3_config,
+    idbroker_configured,
+    iter_s3_connection_names,
+)
 from solomon.transport.errors import ErrorCode, err
 from solomon.transport.logging import get_logger
 from solomon.transport.user_context import UserContext
@@ -49,32 +54,62 @@ def parse_s3_uri(uri: str) -> tuple[str, str]:
     return parsed.netloc, parsed.path.lstrip("/")
 
 
-def _try_s3_client_from_cml_connection(cfg: Optional[S3Config]) -> Any | None:
+def _try_s3_client_from_cml_connections() -> tuple[Any | None, list[str]]:
     """CML Data Connection の boto3 client (Session の get_base_connection 相当)。"""
-    if cfg is None or not cfg.connection_name:
-        return None
-    conn = _cml_get_connection(cfg.connection_name)
-    if conn is None:
-        return None
-    getter = getattr(conn, "get_base_connection", None)
-    if not callable(getter):
-        return None
-    try:
-        client = getter()
-    except Exception as exc:  # noqa: BLE001
-        _logger.warning(
-            "s3.cml_connection_client_failed",
-            connection_name=cfg.connection_name,
-            error=str(exc),
+    tried: list[str] = []
+    if not cml_data_available():
+        return None, tried
+
+    for name in iter_s3_connection_names():
+        tried.append(name)
+        conn = _cml_get_connection(name)
+        if conn is None:
+            continue
+        getter = getattr(conn, "get_base_connection", None)
+        if not callable(getter):
+            _logger.debug(
+                "s3.cml_connection_missing_get_base_connection",
+                connection_name=name,
+            )
+            continue
+        try:
+            client = getter()
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning(
+                "s3.cml_connection_client_failed",
+                connection_name=name,
+                error=str(exc),
+            )
+            continue
+        if client is None:
+            continue
+        _logger.info("s3.using_cml_data_connection", connection_name=name)
+        return client, tried
+
+    return None, tried
+
+
+def _cml_s3_unavailable_error(tried: list[str]) -> dict[str, Any]:
+    if not cml_data_available():
+        return err(
+            ErrorCode.S3_ASSUMEROLE_FAILED,
+            "cml.data_v1 is not available in this runtime. "
+            "Set SOLOMON_S3_CONNECTION_NAME and ensure cml.data_v1 is installed, "
+            "or configure SOLOMON_IDBROKER_URL.",
         )
-        return None
-    if client is None:
-        return None
-    _logger.debug(
-        "s3.using_cml_data_connection",
-        connection_name=cfg.connection_name,
+    if tried:
+        joined = ", ".join(tried)
+        return err(
+            ErrorCode.S3_ASSUMEROLE_FAILED,
+            "Could not obtain S3 credentials from CML Data Connection "
+            f"(tried: {joined}). Set SOLOMON_S3_CONNECTION_NAME=S3 Object Store "
+            "or configure SOLOMON_IDBROKER_URL.",
+        )
+    return err(
+        ErrorCode.S3_ASSUMEROLE_FAILED,
+        "No S3 Data Connection found. Set SOLOMON_S3_CONNECTION_NAME=S3 Object Store "
+        "or configure SOLOMON_IDBROKER_URL.",
     )
-    return client
 
 
 def s3_client_for_user(user_ctx: UserContext) -> Union[Any, dict[str, Any]]:
@@ -83,10 +118,11 @@ def s3_client_for_user(user_ctx: UserContext) -> Union[Any, dict[str, Any]]:
         return err(ErrorCode.S3_ASSUMEROLE_FAILED, "boto3 is not installed")
 
     cfg = get_s3_config()
-    if not os.environ.get("SOLOMON_IDBROKER_URL"):
-        cml_client = _try_s3_client_from_cml_connection(cfg)
+    if not idbroker_configured():
+        cml_client, tried = _try_s3_client_from_cml_connections()
         if cml_client is not None:
             return cml_client
+        return _cml_s3_unavailable_error(tried)
 
     creds = get_or_fetch_credentials(user_ctx)
     if isinstance(creds, dict):

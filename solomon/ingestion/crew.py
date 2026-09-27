@@ -165,6 +165,8 @@ def kickoff_ingestion(
     bucket: str,
     key: str,
     target_schema: str,
+    node_fields: Optional[list[str]] = None,
+    graph_ingest: bool = False,
     llm_light: Optional[Any] = None,
     llm_strong: Optional[Any] = None,
 ) -> dict[str, Any]:
@@ -194,13 +196,15 @@ def kickoff_ingestion(
             request_id=user_ctx.request_id,
         )
         try:
-            result = crew.kickoff(
-                inputs={
-                    "bucket": bucket,
-                    "key": key,
-                    "target_schema": target_schema,
-                }
-            )
+            inputs: dict[str, Any] = {
+                "bucket": bucket,
+                "key": key,
+                "target_schema": target_schema,
+            }
+            if graph_ingest and node_fields:
+                inputs["node_fields"] = ", ".join(node_fields)
+                inputs["graph_ingest"] = "true"
+            result = crew.kickoff(inputs=inputs)
         except Exception as e:  # noqa: BLE001
             _logger.error(
                 "ingestion.crew_exception",
