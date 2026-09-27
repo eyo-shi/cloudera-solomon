@@ -84,14 +84,14 @@ export function GraphCanvas({
             label: "data(label)",
             "text-valign": "center",
             "text-halign": "center",
-            "font-size": 10,
+            "font-size": "10px",
             "text-wrap": "wrap",
-            "text-max-width": 80,
-            width: 56,
-            height: 56,
+            "text-max-width": "80px",
+            width: "56px",
+            height: "56px",
             "background-color": "data(color)",
             color: "#fff",
-            "border-width": 2,
+            "border-width": "2px",
             "border-color": "#fff",
           },
         },
@@ -99,23 +99,23 @@ export function GraphCanvas({
           selector: "node:selected",
           style: {
             "border-color": "#fbbf24",
-            "border-width": 3,
+            "border-width": "3px",
           },
         },
         {
           selector: "edge",
           style: {
             label: "data(label)",
-            "font-size": 9,
+            "font-size": "9px",
             "curve-style": "bezier",
             "target-arrow-shape": "triangle",
-            width: 2,
+            width: "2px",
             "line-color": "#94a3b8",
             "target-arrow-color": "#94a3b8",
             color: "#64748b",
             "text-background-color": "#fff",
             "text-background-opacity": 0.85,
-            "text-background-padding": 2,
+            "text-background-padding": "2px",
           },
         },
         {
@@ -123,7 +123,7 @@ export function GraphCanvas({
           style: {
             "line-color": "#f59e0b",
             "target-arrow-color": "#f59e0b",
-            width: 3,
+            width: "3px",
           },
         },
       ],
@@ -204,12 +204,12 @@ export function GraphCanvas({
               <span className="graph-detail-key">Label</span>
               <span>{selection.label}</span>
             </div>
-            {selection.extra?.labels && (
+            {selection.extra?.labels != null ? (
               <div className="graph-detail-row">
                 <span className="graph-detail-key">Labels</span>
                 <span>{String(selection.extra.labels)}</span>
               </div>
-            )}
+            ) : null}
             {selection.kind === "edge" && selection.extra && (
               <>
                 <div className="graph-detail-row">
