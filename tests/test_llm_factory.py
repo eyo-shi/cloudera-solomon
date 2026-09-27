@@ -63,7 +63,11 @@ class TestApplyPrefix:
         [
             ("cai", "llama-3-8b-instruct", "openai/llama-3-8b-instruct"),
             ("openai", "gpt-4o", "openai/gpt-4o"),
-            ("anthropic", "claude-3-5-haiku-latest", "anthropic/claude-3-5-haiku-latest"),
+            (
+                "anthropic",
+                "claude-haiku-4-5-20251001",
+                "anthropic/claude-haiku-4-5-20251001",
+            ),
             (
                 "bedrock",
                 "anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -141,8 +145,8 @@ class TestBuildLLM:
         stub_config(
             cfg_mod.LLMConfig(
                 provider="anthropic",
-                model_light="claude-3-5-haiku-latest",
-                model_strong="claude-3-5-sonnet-latest",
+                model_light="claude-haiku-4-5-20251001",
+                model_strong="claude-sonnet-4-5-20250929",
                 api_base=None,
                 api_key="sk-ant-xxx",
             )
@@ -150,7 +154,7 @@ class TestBuildLLM:
         obj = llm_factory.build_llm("light")
         assert obj is not None
         k = spy_llm.last_kwargs
-        assert k["model"] == "anthropic/claude-3-5-haiku-latest"
+        assert k["model"] == "anthropic/claude-haiku-4-5-20251001"
         assert k["api_key"] == "sk-ant-xxx"
         assert "base_url" not in k
         assert "aws_region_name" not in k
@@ -180,7 +184,7 @@ class TestBuildLLM:
         stub_config(
             cfg_mod.LLMConfig(
                 provider="bedrock",
-                model_light="anthropic.claude-3-5-haiku-20241022-v1:0",
+                model_light="anthropic.claude-haiku-4-5",
                 model_strong="anthropic.claude-sonnet-4-20250514-v1:0",
                 api_base=None,
                 api_key=None,

@@ -438,9 +438,9 @@ def get_s3_config() -> Optional[S3Config]:
 # ------------------------------------------------------------------ #
 _DEFAULT_LIGHT_MODEL: dict[str, str] = {
     "cai": "llama-3-8b-instruct",
-    "anthropic": "claude-3-5-haiku-latest",
+    "anthropic": "claude-haiku-4-5-20251001",
     "openai": "gpt-4o-mini",
-    "bedrock": "anthropic.claude-3-5-haiku-20241022-v1:0",
+    "bedrock": "anthropic.claude-haiku-4-5",
 }
 _DEFAULT_STRONG_MODEL: dict[str, str] = {
     "cai": "llama-3-70b-instruct",

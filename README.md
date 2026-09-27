@@ -185,7 +185,7 @@ Ingestion 完了後に Ossie dataset が OpenSearch にインデックスされ�
 | `SOLOMON_LLM_PROVIDER` | 必須 env | 任意 env |
 |---|---|---|
 | `cai` (default) | `CAI_INFERENCE_BASE_URL`, `CAI_INFERENCE_API_KEY` | `SOLOMON_LLM_ROUTER_MODEL` (default `llama-3-8b-instruct`), `SOLOMON_LLM_ANALYTICS_MODEL` (default `llama-3-70b-instruct`) |
-| `anthropic` | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL`, `SOLOMON_LLM_ROUTER_MODEL` (default `claude-3-5-haiku-latest`), `SOLOMON_LLM_ANALYTICS_MODEL` (default `claude-3-5-sonnet-latest`) |
+| `anthropic` | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL`, `SOLOMON_LLM_ROUTER_MODEL` (default `claude-haiku-4-5-20251001`), `SOLOMON_LLM_ANALYTICS_MODEL` (default `claude-sonnet-4-5-20250929`) |
 | `openai` | `OPENAI_API_KEY` | `OPENAI_BASE_URL`, `SOLOMON_LLM_ROUTER_MODEL` (default `gpt-4o-mini`), `SOLOMON_LLM_ANALYTICS_MODEL` (default `gpt-4o`) |
 | `bedrock` | `AWS_REGION` (or `SOLOMON_AWS_REGION`, IAM role 前提) | `SOLOMON_LLM_ROUTER_MODEL`, `SOLOMON_LLM_ANALYTICS_MODEL` |
 

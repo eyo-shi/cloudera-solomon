@@ -341,7 +341,7 @@ class TestGetLLMConfig:
         assert c.provider == "anthropic"
         assert c.api_key == "sk-ant-xxx"
         assert c.api_base is None
-        assert c.model_light == "claude-3-5-haiku-latest"
+        assert c.model_light == "claude-haiku-4-5-20251001"
 
     def test_anthropic_optional_base_url(
         self, monkeypatch: pytest.MonkeyPatch
