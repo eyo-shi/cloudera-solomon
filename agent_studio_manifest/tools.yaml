@@ -603,7 +603,8 @@ tools:
     {''description'': None, ''type'': ''Union[int, NoneType]''}, ''meta_kv'': {''description'': None, ''type'': ''list[dict[str,
     Any]]''}, ''row_count_hint'': {''description'': None, ''type'': ''Union[int, NoneType]''}, ''system_name'': {''description'':
     ''System 名 (省略時は S3 key / meta_kv / schema から推定)'', ''type'': ''Union[str, NoneType]''}, ''ossie_path'': {''description'':
-    ''Ossie YAML 相対パス (Document リンク用)'', ''type'': ''Union[str, NoneType]''}}
+    ''Ossie YAML 相対パス (Document リンク用)'', ''type'': ''Union[str, NoneType]''}, ''node_fields'': {''description'': ''ナレッジグラフ上で
+    entity ノードとして扱う列名'', ''type'': ''Union[list[str], NoneType]''}}
 
     Tool Description: Load ingestion metadata into Neo4j as graph nodes and relationships. Creates Dataset, Column, SourceFile,
     Schema, System, Document, and optional MetadataEntry nodes, then links them with HAS_COLUMN, IN_SCHEMA, SOURCED_FROM,
@@ -702,6 +703,15 @@ tools:
         default: null
         description: Ossie YAML 相対パス (Document リンク用)
         title: Ossie Path
+      node_fields:
+        anyOf:
+        - items:
+            type: string
+          type: array
+        - type: 'null'
+        default: null
+        description: ナレッジグラフ上で entity ノードとして扱う列名
+        title: Node Fields
     required:
     - schema
     - table

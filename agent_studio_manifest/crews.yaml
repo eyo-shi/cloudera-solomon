@@ -162,7 +162,8 @@ crews:
     agent: graph_loader
     description: create_iceberg_table 完了後、Neo4jGraphLoadTool を使って取り込みメタデータを Neo4j へ反映せよ。System / Document ノードも作成する。catalog
       / target_schema / resolved_table / columns / bucket / key / format / sheet / header_row / meta_kv / row_count_hint を前段タスクから集約して渡す。system_name
-      は meta_kv または S3 key から推定可。NEO4J_URI 未設定時は skipped=true, reason を返し、Crew 全体は失敗させない。副作用ありのため max_retries=0。
+      は meta_kv または S3 key から推定可。Crew inputs に node_fields (カンマ区切り) がある場合は、その列名を graph_node ロールとして Neo4jGraphLoadTool に渡す。NEO4J_URI
+      未設定時は skipped=true, reason を返し、Crew 全体は失敗させない。副作用ありのため max_retries=0。
     expected_output: LoadNeo4jGraphResult の JSON。dataset_id, source_id, system_id, system_name, document_ids, neo4j_uri, counts,
       skipped, reason を含む。
     output_model: LoadNeo4jGraphResult
