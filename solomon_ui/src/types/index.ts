@@ -121,6 +121,8 @@ export interface FilePreviewResponse {
   // CSV
   delimiter?: string;
   columns?: string[];
+  header?: string[];
+  has_header?: boolean;
   rows?: unknown[][];
   // Excel
   primary_sheet?: string;

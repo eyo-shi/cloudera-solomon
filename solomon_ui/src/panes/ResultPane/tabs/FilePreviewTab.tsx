@@ -45,7 +45,7 @@ export function FilePreviewTab({ tab }: Props) {
   }
 
   return (
-    <div className="tab-content">
+    <div className="tab-content tab-content--file-preview">
       <div className="tab-meta">
         <FilePathBreadcrumb bucket={bucket} objectKey={key} />
         <span className="meta-badge">{data.format ?? "?"}</span>
@@ -71,7 +71,12 @@ function FormatBody({
   switch (data.format) {
     case "csv":
     case "tsv":
-      return <CsvBody columns={data.columns ?? []} rows={data.rows ?? []} />;
+      return (
+        <CsvBody
+          columns={data.columns ?? data.header ?? []}
+          rows={data.rows ?? []}
+        />
+      );
     case "json":
       return <JsonBody value={data.json} />;
     case "jsonl":

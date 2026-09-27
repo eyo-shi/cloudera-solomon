@@ -109,9 +109,40 @@ _DASHBOARD_KEYWORDS = (
 )
 _CHITCHAT_KEYWORDS = (
     "こんにちは", "こんばんは", "おはよう", "ありがとう", "ヘルプ",
-    "使い方", "何ができ", "hello", "hi ", "help",
+    "使い方", "何ができ", "hello", "hi", "hey", "help", "thanks", "thank you",
 )
+_TASK_KEYWORDS = _INGEST_KEYWORDS + _SUMMARY_KEYWORDS + _DASHBOARD_KEYWORDS
 _PRONOUN_KEYWORDS = ("その", "そのテーブル", "さっき", "先ほど", "that", "the same")
+
+
+def _looks_like_casual_chat(prompt: str) -> bool:
+    """データ操作タスクではなく、短い一般会話とみなせるか。"""
+    text = prompt.strip()
+    if not text or len(text) > 300:
+        return False
+    if _S3_URI_RE.search(text):
+        return False
+    if is_graph_ingest_request(text):
+        return False
+    lower = text.lower()
+    if any(kw in text or kw in lower for kw in _TASK_KEYWORDS):
+        return False
+    from solomon.rag.classifier import is_knowledge_query
+
+    if is_knowledge_query(text):
+        return False
+    return True
+
+
+def build_chitchat_plan(*, prompt: str) -> DispatchPlan:
+    """CHITCHAT / 一般会話用の DispatchPlan。"""
+    return DispatchPlan(
+        intent="CHITCHAT",
+        child_crew="chitchat",
+        inputs={"prompt": prompt},
+        response_markdown="",
+        skip_child=False,
+    )
 
 
 def heuristic_classify(
@@ -237,12 +268,22 @@ def heuristic_classify(
         return IntentClassification(
             intent="CHITCHAT",
             confidence=0.8,
-            extracted_args={},
+            extracted_args={"prompt": prompt.strip()},
             needs_clarification=False,
             reasoning="chitchat keyword",
         )
 
-    # 5) UNKNOWN
+    # 5) 短い一般会話 -> CHITCHAT (LLM 応答)
+    if _looks_like_casual_chat(prompt):
+        return IntentClassification(
+            intent="CHITCHAT",
+            confidence=0.7,
+            extracted_args={"prompt": prompt.strip()},
+            needs_clarification=False,
+            reasoning="casual chat heuristic",
+        )
+
+    # 6) UNKNOWN
     return IntentClassification(
         intent="UNKNOWN",
         confidence=0.3,
@@ -352,15 +393,8 @@ def build_dispatch_plan(
         )
 
     if intent == "CHITCHAT":
-        return DispatchPlan(
-            intent=intent,
-            child_crew="none",
-            inputs={},
-            response_markdown=(
-                "Solomon です。S3 パスを取り込む、テーブルサマリー / ダッシュボード、"
-                "ナレッジ検索 (Neo4j / OpenSearch / SQL) ができます。何をしましょうか?"
-            ),
-            skip_child=True,
+        return build_chitchat_plan(
+            prompt=str(args.get("prompt") or args.get("question") or "")
         )
 
     # UNKNOWN fallback
@@ -420,6 +454,24 @@ def kickoff_router(
     resolved_mode = _resolve_mode(mode)
     sid = session_id or user_ctx.session_id or "unknown"
     entity_memory = entity_memory or {}
+
+    # グラフ取り込みの聞き返し (pending + フィールド名のみの回答) は LLM/ヒューリスティック
+    # 共通で最優先。LLM 経路だと「order_id, plant_code」だけの短い返答が UNKNOWN になる。
+    pending_ingest = resolve_pending_graph_ingest(prompt, entity_memory)
+    if pending_ingest:
+        classification = IntentClassification(
+            intent="INGEST",
+            confidence=0.92,
+            extracted_args=pending_ingest,
+            needs_clarification=False,
+            reasoning="resolved pending_graph_ingest with node_fields",
+        )
+        plan = build_dispatch_plan(classification)
+        return RouterResult(
+            classification=classification,
+            plan=plan,
+            response_markdown=plan.response_markdown,
+        )
 
     if resolved_mode == "heuristic" or llm_light is None:
         _logger.info(
@@ -565,4 +617,5 @@ __all__ = [
     "kickoff_router",
     "heuristic_classify",
     "build_dispatch_plan",
+    "build_chitchat_plan",
 ]

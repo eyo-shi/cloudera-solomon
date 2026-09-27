@@ -192,6 +192,18 @@ async def upload_file(
     }
 
 
+def _is_s3_folder_marker(key: str, prefix: str, subfolders: set[str]) -> bool:
+    """CommonPrefixes と重複する ``key/`` 終端のフォルダマーカーを除外する。"""
+    rel = key[len(prefix) :] if key.startswith(prefix) else key
+    if not rel:
+        return True
+    if rel.endswith("/"):
+        return True
+    if key in subfolders or f"{key}/" in subfolders:
+        return True
+    return False
+
+
 # ------------------------------------------------------------------ #
 # /api/files/list
 # ------------------------------------------------------------------ #
@@ -216,6 +228,8 @@ def list_objects(
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=map_s3_error(e, bucket, prefix)) from e
 
+    subfolders = [p["Prefix"] for p in resp.get("CommonPrefixes", [])]
+    subfolder_set = set(subfolders)
     objects = [
         {
             "key": o["Key"],
@@ -225,8 +239,8 @@ def list_objects(
             else str(o.get("LastModified", "")),
         }
         for o in resp.get("Contents", [])
+        if not _is_s3_folder_marker(str(o.get("Key", "")), prefix, subfolder_set)
     ]
-    subfolders = [p["Prefix"] for p in resp.get("CommonPrefixes", [])]
     return {
         "bucket": bucket,
         "prefix": prefix,
@@ -369,6 +383,7 @@ def _preview_csv(
         "quotechar": sniff.get("quotechar"),
         "has_header": bool(sniff.get("has_header")),
         "header": header,
+        "columns": header,
         "rows": data_rows,
         "row_count": len(data_rows),
     }
@@ -396,6 +411,7 @@ def _preview_csv_fallback(
         "quotechar": '"',
         "has_header": True,
         "header": header,
+        "columns": header,
         "rows": all_rows[1 : rows + 1],
         "row_count": max(0, len(all_rows) - 1),
     }

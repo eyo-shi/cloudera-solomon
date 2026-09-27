@@ -121,4 +121,56 @@ def _parse_json_lenient(text: Any) -> Optional[dict[str, Any]]:
     return value if isinstance(value, dict) else None
 
 
-__all__ = ["try_json_completion"]
+def try_text_completion(
+    messages: list[dict[str, str]],
+    *,
+    model: Optional[str] = None,
+    max_tokens: int = 512,
+    temperature: float = 0.7,
+    timeout: float = 30.0,
+) -> Optional[str]:
+    """LiteLLM でテキスト応答を返す。失敗時は ``None``。"""
+    try:
+        import litellm  # type: ignore
+    except ImportError:
+        _logger.debug("llm.litellm_not_installed")
+        return None
+
+    cfg = get_llm_config()
+    if cfg is None:
+        _logger.debug("llm.config_missing")
+        return None
+
+    resolved_model = model or cfg.model_light
+    prefixed = _apply_prefix(cfg.provider, resolved_model)
+
+    kwargs: dict[str, Any] = {
+        "model": prefixed,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "timeout": timeout,
+    }
+    if cfg.api_base:
+        kwargs["api_base"] = cfg.api_base
+    if cfg.api_key:
+        kwargs["api_key"] = cfg.api_key
+    if cfg.provider == "bedrock" and cfg.aws_region:
+        kwargs["aws_region_name"] = cfg.aws_region
+
+    try:
+        resp = litellm.completion(**kwargs)  # type: ignore[attr-defined]
+        content = resp["choices"][0]["message"]["content"]  # type: ignore[index]
+    except Exception as e:  # noqa: BLE001
+        _logger.warning(
+            "llm.text_completion_failed", provider=cfg.provider, error=str(e)
+        )
+        return None
+
+    if not isinstance(content, str):
+        return None
+    stripped = content.strip()
+    return stripped or None
+
+
+__all__ = ["try_json_completion", "try_text_completion"]

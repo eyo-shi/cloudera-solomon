@@ -11,7 +11,7 @@ Intent は 6 分類:
   * ``ANALYZE_SUMMARY``   — 既存テーブルへの Markdown サマリー要求
   * ``ANALYZE_DASHBOARD`` — 既存テーブルへのダッシュボード生成要求
   * ``KNOWLEDGE_RAG``     — Agentic RAG (Neo4j / OpenSearch / Lakehouse)
-  * ``CHITCHAT``          — 挨拶・雑談・ヘルプ (子 Crew は起動しない)
+  * ``CHITCHAT``          — 挨拶・雑談・一般会話 (LLM 応答)
   * ``UNKNOWN``           — 判定不能。needs_clarification=True で聞き返す
 
 ``extracted_args`` には子 Crew に渡すべき引数を LLM が抜いてくる:
@@ -89,6 +89,7 @@ class DispatchPlan(BaseModel):
         "analytics_summary",
         "analytics_dashboard",
         "knowledge_rag",
+        "chitchat",
         "none",
     ]
     inputs: dict[str, Any] = Field(default_factory=dict)

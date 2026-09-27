@@ -98,7 +98,8 @@ function S3PrefixList({
   if (error) return <p className="tree-error tree-child">S3 一覧失敗</p>;
 
   const subs = data?.subfolders ?? [];
-  const objs = data?.objects ?? [];
+  const subSet = new Set(subs);
+  const objs = (data?.objects ?? []).filter((o) => !isS3FolderMarker(o.key, prefix, subSet));
   const f = filter.toLowerCase();
   const filteredSubs = f
     ? subs.filter((s) => s.toLowerCase().includes(f))
@@ -183,6 +184,19 @@ function S3PrefixList({
       )}
     </ul>
   );
+}
+
+/** S3 のフォルダマーカー (key が `/` 終端) をファイル一覧から除外する。 */
+function isS3FolderMarker(
+  key: string,
+  prefix: string,
+  subfolders: Set<string>,
+): boolean {
+  const rel = key.slice(prefix.length);
+  if (!rel) return true;
+  if (rel.endsWith("/")) return true;
+  if (subfolders.has(key) || subfolders.has(`${key}/`)) return true;
+  return false;
 }
 
 // ---------------------- Object right-click menu ----------------------

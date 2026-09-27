@@ -31,11 +31,13 @@ from solomon.analytics.crew import (
     kickoff_analytics_summary,
 )
 from solomon.api.auth import get_user_context
+from solomon.chat.conversation import generate_chitchat_reply
 from solomon.api.sse import sse_artifact, sse_done, sse_error, sse_step, sse_token
 from solomon.api.state import SessionTurn, get_store
 from solomon.ingestion.crew import kickoff_ingestion
 from solomon.rag.crew import kickoff_knowledge_rag
 from solomon.router import DispatchPlan, RouterResult, kickoff_router
+from solomon.router.crew import build_chitchat_plan
 from solomon.router.graph_ingest import build_graph_ingest_clarification
 from solomon.router.s3_columns import peek_s3_column_names
 from solomon.api.setup_checks import llm_not_configured_payload
@@ -110,8 +112,12 @@ async def post_wish(
             )
 
             plan = router_result.plan
+            if router_result.classification.intent == "CHITCHAT" and (
+                plan.skip_child or plan.child_crew != "chitchat"
+            ):
+                plan = build_chitchat_plan(prompt=body.prompt)
 
-            # 2) skip_child (CHITCHAT / clarify / UNKNOWN) は response_markdown を流す
+            # 2) skip_child (clarify / UNKNOWN) は response_markdown を流す
             if plan.skip_child:
                 md = router_result.response_markdown or plan.response_markdown or ""
                 extracted = router_result.classification.extracted_args or {}
@@ -199,6 +205,15 @@ async def post_wish(
                     question=str(plan.inputs.get("question") or body.prompt),
                     llm_strong=llm_strong,
                     artifacts_created=artifacts_created,
+                    response_md_parts=response_md_parts,
+                    error_holder=error_holder,
+                ):
+                    yield chunk
+            elif plan.child_crew == "chitchat":
+                async for chunk in _handle_chitchat(
+                    request=request,
+                    session_id=session.session_id,
+                    prompt=str(plan.inputs.get("prompt") or body.prompt),
                     response_md_parts=response_md_parts,
                     error_holder=error_holder,
                 ):
@@ -307,6 +322,65 @@ def _run_router(
             response_markdown=result.response_markdown,
         )
     return result
+
+
+# ------------------------------------------------------------------ #
+# Chitchat path
+# ------------------------------------------------------------------ #
+def _conversation_history(session_id: str, *, limit: int = 6) -> list[tuple[str, str]]:
+    """直近ターンを (user, assistant) のペアで返す (現在ターンは未含む)。"""
+    sess = get_store().get_session(session_id)
+    if sess is None:
+        return []
+    pairs: list[tuple[str, str]] = []
+    for turn in sess.turns[-limit:]:
+        user_text = (turn.prompt or "").strip()
+        assistant_text = (turn.response_markdown or "").strip()
+        if user_text and assistant_text:
+            pairs.append((user_text, assistant_text))
+    return pairs
+
+
+async def _handle_chitchat(
+    *,
+    request: Request,
+    session_id: str,
+    prompt: str,
+    response_md_parts: list[str],
+    error_holder: list[Optional[str]],
+) -> AsyncIterator[dict]:
+    """一般会話 (CHITCHAT) — LLM で自然な返答を生成する。"""
+    yield sse_step("Chat", "running", "返答を生成しています...")
+
+    def _run() -> str:
+        return generate_chitchat_reply(
+            prompt,
+            history=_conversation_history(session_id),
+        )
+
+    task = asyncio.create_task(asyncio.to_thread(_run))
+    while not task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+        except asyncio.TimeoutError:
+            if await request.is_disconnected():
+                task.cancel()
+                return
+            yield sse_step("Chat", "running", "返答を生成しています...")
+
+    try:
+        reply = await task
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        _logger.error("wish.chitchat_failed", session_id=session_id, error=str(e))
+        error_holder[0] = "CHITCHAT_FAILED"
+        yield sse_error("CHITCHAT_FAILED", f"会話応答の生成に失敗しました: {e}")
+        return
+
+    response_md_parts.append(reply)
+    yield sse_token(reply)
+    yield sse_step("Chat", "done", "返答しました。")
 
 
 # ------------------------------------------------------------------ #

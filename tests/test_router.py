@@ -179,9 +179,15 @@ def test_heuristic_chitchat() -> None:
 
 
 def test_heuristic_unknown() -> None:
-    c = heuristic_classify("今日の天気は?")
+    c = heuristic_classify("x" * 301)
     assert c.intent == "UNKNOWN"
     assert c.needs_clarification is True
+
+
+def test_heuristic_casual_weather_is_chitchat() -> None:
+    c = heuristic_classify("今日の天気は?")
+    assert c.intent == "CHITCHAT"
+    assert c.needs_clarification is False
 
 
 # ------------------------------------------------------------------ #
@@ -231,14 +237,16 @@ def test_dispatch_plan_dashboard_with_table() -> None:
     assert plan.inputs["fq_table_name"] == "iceberg.demo.t"
 
 
-def test_dispatch_plan_chitchat_skips_child() -> None:
+def test_dispatch_plan_chitchat_routes_to_crew() -> None:
     classification = IntentClassification(
-        intent="CHITCHAT", confidence=0.9, extracted_args={}
+        intent="CHITCHAT",
+        confidence=0.9,
+        extracted_args={"prompt": "Hello"},
     )
     plan = build_dispatch_plan(classification)
-    assert plan.child_crew == "none"
-    assert plan.skip_child is True
-    assert plan.response_markdown  # 何か返答が入っている
+    assert plan.child_crew == "chitchat"
+    assert plan.skip_child is False
+    assert plan.inputs["prompt"] == "Hello"
 
 
 def test_dispatch_plan_needs_clarification() -> None:
@@ -272,7 +280,7 @@ def test_kickoff_router_heuristic_ingest() -> None:
     assert result.plan.inputs["bucket"] == "b"
 
 
-def test_kickoff_router_heuristic_chitchat_populates_response_markdown() -> None:
+def test_kickoff_router_heuristic_chitchat_routes_to_chitchat_crew() -> None:
     ctx = UserContext(user_name="alice", groups=[], knox_jwt=None)
     result = kickoff_router(
         user_ctx=ctx,
@@ -282,9 +290,15 @@ def test_kickoff_router_heuristic_chitchat_populates_response_markdown() -> None
         mode="heuristic",
     )
     assert result.classification.intent == "CHITCHAT"
-    assert result.plan.skip_child is True
-    assert result.response_markdown == result.plan.response_markdown
-    assert result.response_markdown  # 空でない
+    assert result.plan.skip_child is False
+    assert result.plan.child_crew == "chitchat"
+    assert result.plan.inputs.get("prompt") == "こんにちは"
+
+
+def test_heuristic_casual_chat_not_unknown() -> None:
+    c = heuristic_classify("Hello")
+    assert c.intent == "CHITCHAT"
+    assert c.needs_clarification is False
 
 
 def test_kickoff_router_auto_falls_back_to_heuristic_without_llm() -> None:
@@ -299,6 +313,38 @@ def test_kickoff_router_auto_falls_back_to_heuristic_without_llm() -> None:
     )
     # llm_light=None なら auto でも heuristic で完走する
     assert result.classification.intent == "INGEST"
+
+
+def test_kickoff_router_pending_graph_ingest_before_llm() -> None:
+    """LLM モードでも pending + フィールド回答は UNKNOWN にならず INGEST へ。"""
+    ctx = UserContext(user_name="alice", groups=[], knox_jwt=None)
+
+    class _FakeLLM:
+        """llm_light が非 None なら LLM 経路に入るダミー。"""
+
+    result = kickoff_router(
+        user_ctx=ctx,
+        prompt="order_id, plant_code, product_code, source_system, plant_type",
+        session_id="s1",
+        entity_memory={
+            "pending_graph_ingest": {
+                "bucket": "eyda-buk-edf7cfcf",
+                "key": "demo/erp_mc/production_work_orders.csv",
+            }
+        },
+        llm_light=_FakeLLM(),
+        mode="llm",
+    )
+    assert result.classification.intent == "INGEST"
+    assert result.plan.skip_child is False
+    assert result.plan.child_crew == "ingestion"
+    assert result.plan.inputs["node_fields"] == [
+        "order_id",
+        "plant_code",
+        "product_code",
+        "source_system",
+        "plant_type",
+    ]
 
 
 # ------------------------------------------------------------------ #
