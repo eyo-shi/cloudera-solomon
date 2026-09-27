@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from urllib.parse import urlparse
 
+from solomon.graph.k8s_neo4j import parse_cml_neo4j_service, resolve_bolt_uris_from_k8s
+
 _BROWSER_HOST_MARKERS = (".cloudera.site",)
 _EXTERNAL_BOLT_HOST_MARKERS = (".elb.amazonaws.com", ".amazonaws.com")
 _OPTIONAL_UNSET_VALUE = "-"
@@ -55,6 +57,14 @@ def _configured_neo4j_uri_seeds(
 ) -> list[str]:
     """Primary URI plus optional NEO4J_INTERNAL_URI / NEO4J_EXTERNAL_URI overrides."""
     seeds: list[str] = []
+    bolt_host_override = _normalize_uri_seed(os.environ.get("NEO4J_BOLT_HOST", ""))
+    if bolt_host_override:
+        if "://" in bolt_host_override:
+            seeds.append(bolt_host_override)
+        elif ":" in bolt_host_override:
+            seeds.append(f"bolt://{bolt_host_override}")
+        else:
+            seeds.append(f"bolt://{bolt_host_override}:7687")
     for candidate in (
         uri,
         internal_uri or os.environ.get("NEO4J_INTERNAL_URI", ""),
@@ -80,11 +90,18 @@ def _expand_uri_seed(seed: str) -> list[str]:
 
     if _is_cml_internal_neo4j_host(host):
         add(scheme, host)
-        parts = host.split(".")
-        service = parts[0]
-        if len(parts) >= 2 and not host.endswith(".svc.cluster.local"):
-            namespace = parts[1]
+        service, namespace = parse_cml_neo4j_service(host)
+        if service and namespace and not host.endswith(".svc.cluster.local"):
             add(scheme, f"{service}.{namespace}.svc.cluster.local")
+        if service:
+            add(scheme, service)
+            expanded.extend(
+                resolve_bolt_uris_from_k8s(
+                    service,
+                    namespace=namespace,
+                    port=port,
+                )
+            )
         return expanded
 
     if _is_browser_neo4j_host(host):
@@ -168,7 +185,10 @@ def format_neo4j_connection_help(configured_uri: str, errors: list[str]) -> str:
         "       NEO4J_EXTERNAL_URI to External Bolt (ELB) and restart Solomon\n"
         f"       Example: {external_example}\n"
         "     Do not use browser URL (*.cloudera.site) — that is not a Bolt endpoint\n"
-        "  3. After changing env vars, restart the Solomon Application (not only neo4j-launcher)\n"
-        "  4. NEO4J_PASSWORD is the password from neo4j-launcher startup\n"
-        "  5. NEO4J_USERNAME is usually neo4j"
+        "  3. CML Application pods may not resolve cluster DNS; Solomon auto-tries\n"
+        "     Kubernetes Service ClusterIP / Pod IP when DNS fails\n"
+        "  4. Manual override: NEO4J_BOLT_HOST=<pod-ip-or-cluster-ip> (optional)\n"
+        "  5. After changing env vars, restart the Solomon Application (not only neo4j-launcher)\n"
+        "  6. NEO4J_PASSWORD is the password from neo4j-launcher startup\n"
+        "  7. NEO4J_USERNAME is usually neo4j"
     )

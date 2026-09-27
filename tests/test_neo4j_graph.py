@@ -7,18 +7,36 @@ from solomon.graph.neo4j_loader import ColumnGraphNode, IngestionGraphPayload
 from solomon.tools.neo4j_graph import Neo4jGraphLoadTool
 
 
-def test_iter_neo4j_connection_uris_internal_host() -> None:
+def test_iter_neo4j_connection_uris_internal_host(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.neo4j_connect.resolve_bolt_uris_from_k8s",
+        lambda *args, **kwargs: [],
+    )
     uri = "bolt://cml-neo4j-abc.mlx-user-123:7687"
     candidates = iter_neo4j_connection_uris(uri)
     assert uri in candidates
     assert any(".svc.cluster.local" in c for c in candidates)
-    assert "bolt://cml-neo4j-abc:7687" not in candidates
+    assert "bolt://cml-neo4j-abc:7687" in candidates
+
+
+def test_iter_neo4j_connection_uris_prefers_bolt_host_override(monkeypatch) -> None:
+    monkeypatch.setenv("NEO4J_BOLT_HOST", "10.42.1.17")
+    monkeypatch.setattr(
+        "solomon.graph.neo4j_connect.resolve_bolt_uris_from_k8s",
+        lambda *args, **kwargs: [],
+    )
+    candidates = iter_neo4j_connection_uris("bolt://cml-neo4j-abc.mlx-user-123:7687")
+    assert candidates[0] == "bolt://10.42.1.17:7687"
 
 
 def test_iter_neo4j_connection_uris_includes_external_env(monkeypatch) -> None:
     monkeypatch.setenv(
         "NEO4J_EXTERNAL_URI",
         "bolt://abc.elb.amazonaws.com:7687",
+    )
+    monkeypatch.setattr(
+        "solomon.graph.neo4j_connect.resolve_bolt_uris_from_k8s",
+        lambda *args, **kwargs: [],
     )
     uri = "bolt://cml-neo4j-abc.mlx-user-123:7687"
     candidates = iter_neo4j_connection_uris(uri)
