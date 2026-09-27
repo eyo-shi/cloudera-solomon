@@ -2,10 +2,10 @@
  * Graph (Neo4j) ビュー — Node Labels / Relationship Types / Property Keys。
  * クリックで中央ペインに Graph 可視化タブを開く。
  */
-import { useEffect, useMemo } from "react";
-import { SetupGuideError } from "../../api/client";
+import { useMemo } from "react";
+import { isSetupGuideError } from "../../api/client";
 import { useGraphSchema } from "../../api/graph";
-import { useChatStore } from "../../stores/chatStore";
+import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 import { useTabStore } from "../../stores/tabStore";
 import type { GraphQueryType } from "../../types";
 
@@ -21,14 +21,8 @@ function filterList(items: string[], filter: string): string[] {
 
 export function GraphView({ filter }: GraphViewProps) {
   const { data, isLoading, error } = useGraphSchema();
-  const setSetupError = useChatStore((s) => s.setSetupError);
   const openTab = useTabStore((s) => s.openTab);
-
-  useEffect(() => {
-    if (error instanceof SetupGuideError) {
-      setSetupError(error);
-    }
-  }, [error, setSetupError]);
+  useReportSetupGuideError(error);
 
   const labels = useMemo(
     () => filterList(data?.node_labels ?? [], filter),
@@ -58,7 +52,7 @@ export function GraphView({ filter }: GraphViewProps) {
   }
 
   if (isLoading) return <p className="explorer-placeholder">Loading schema…</p>;
-  if (error instanceof SetupGuideError) {
+  if (isSetupGuideError(error)) {
     return (
       <p className="explorer-placeholder">
         Neo4j 未設定です。右ペインの設定手順を確認してください。

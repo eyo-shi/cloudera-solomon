@@ -11,5 +11,6 @@
   * :mod:`.ossie`      — ``/api/ossie/*``   (Ossie YAML)
   * :mod:`.artifacts`  — ``/api/artifacts/*`` (ResultPane タブの成果物)
   * :mod:`.sessions`   — ``/api/sessions/*``  (会話履歴 + entity memory)
+  * :mod:`.setup`      — ``/api/setup/*``  (Deploy 後の設定プローブ)
   * :mod:`.wish`       — ``/api/wish``     (SSE — Crew 実行のストリーム)
 """

@@ -32,6 +32,18 @@ export class SetupGuideError extends Error {
   }
 }
 
+/** react-query 経由でも SetupGuideError を判定する。 */
+export function isSetupGuideError(error: unknown): error is SetupGuideError {
+  if (error instanceof SetupGuideError) return true;
+  if (!error || typeof error !== "object") return false;
+  const e = error as Partial<SetupGuideError>;
+  return (
+    e.name === "SetupGuideError" &&
+    typeof e.errorCode === "string" &&
+    typeof e.instruction === "string"
+  );
+}
+
 /** サーバー応答から SetupGuide 用のフィールドを取り出す (見つからなければ null)。 */
 export function parseSetupGuidePayload(
   payload: unknown,

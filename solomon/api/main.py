@@ -35,6 +35,7 @@ from solomon.api.routes import (
     query as query_route,
     search as search_route,
     sessions as sessions_route,
+    setup as setup_route,
     wish as wish_route,
 )
 from solomon.transport.logging import configure_logging, get_logger
@@ -127,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(ossie_route.router)
     app.include_router(artifacts_route.router)
     app.include_router(sessions_route.router)
+    app.include_router(setup_route.router)
     app.include_router(wish_route.router)
 
     # SPA (React + Vite ビルド成果物) を / から配信する。

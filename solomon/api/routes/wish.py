@@ -36,7 +36,7 @@ from solomon.api.state import SessionTurn, get_store
 from solomon.ingestion.crew import kickoff_ingestion
 from solomon.rag.crew import kickoff_knowledge_rag
 from solomon.router import DispatchPlan, RouterResult, kickoff_router
-from solomon.transport.config import get_llm_config
+from solomon.api.setup_checks import llm_not_configured_payload
 from solomon.transport.llm_factory import build_llm_pair
 from solomon.transport.logging import get_logger
 from solomon.transport.user_context import (
@@ -70,20 +70,9 @@ async def post_wish(
     """
     # LLM 未設定なら SSE を開かず 503 で早期リターン (UI が SetupGuide 表示)。
     # env 変更 → Application 再起動で解消する運用。
-    if get_llm_config() is None:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error_code": "LLM_NOT_CONFIGURED",
-                "message": "LLM プロバイダが設定されていません。",
-                "instruction": (
-                    "Project → Settings → Advanced → Environment Variables に "
-                    "SOLOMON_LLM_PROVIDER (cai / anthropic / openai / bedrock) と、"
-                    "選択したプロバイダに必要な API キー / エンドポイントを設定し、"
-                    "Application を再起動してください。"
-                ),
-            },
-        )
+    llm_setup = llm_not_configured_payload()
+    if llm_setup is not None:
+        return JSONResponse(status_code=503, content=llm_setup)
 
     store = get_store()
     sid = body.session_id or user_ctx.session_id

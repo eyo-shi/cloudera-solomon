@@ -90,6 +90,58 @@ function guideFor(errorCode: string): GuideDetails {
           "Project → Settings → Advanced → Environment Variables から Application を Restart",
         ],
       };
+    case "NEO4J_NOT_CONFIGURED":
+      return {
+        title: "Neo4j への接続情報が未設定です",
+        envList: [
+          {
+            name: "NEO4J_URI",
+            hint: "neo4j-launcher Application Log の Internal / External Bolt URI",
+          },
+          {
+            name: "NEO4J_USERNAME",
+            hint: "通常 neo4j",
+          },
+          {
+            name: "NEO4J_PASSWORD",
+            hint: "neo4j-launcher Application Log の Password",
+          },
+          {
+            name: "NEO4J_EXTERNAL_URI",
+            hint: "Internal DNS が失敗する場合の ELB URI (任意)",
+          },
+        ],
+        extraSteps: [
+          "Applications ページで neo4j-launcher が Running であることを確認",
+          "Application Log から Bolt URI と Password をコピー",
+          "Project → Settings → Advanced → Environment Variables に設定",
+          "Solomon Application を Restart",
+        ],
+      };
+    case "OPENSEARCH_NOT_CONFIGURED":
+      return {
+        title: "Semantic Search (OpenSearch) への接続情報が未設定です",
+        envList: [
+          {
+            name: "SOLOMON_OPENSEARCH_CONNECTION_NAME",
+            hint: "Site Administration → Data Connections で登録した OpenSearch connection 名",
+          },
+          {
+            name: "SOLOMON_OPENSEARCH_ENDPOINT",
+            hint: "Data Connections を使わない場合のエンドポイント URL",
+          },
+          {
+            name: "SOLOMON_OPENSEARCH_NAMESPACE",
+            hint: "インデックス namespace (default: solomon)",
+          },
+        ],
+        extraSteps: [
+          "Data Hub で Semantic Search for AWS を Provision",
+          "Site Administration → Data Connections で OpenSearch connection を登録",
+          "Project → Settings → Advanced → Environment Variables に設定",
+          "Solomon Application を Restart",
+        ],
+      };
     default:
       return {
         title: "セットアップが必要です",

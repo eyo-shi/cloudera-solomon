@@ -8,6 +8,8 @@
  * カードとして表示し、Project → Settings → Environment で env を追加して
  * Application を再起動する手順を提示する。
  */
+import { useLlmSetupProbe } from "../../api/setup";
+import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 import { useChatStore } from "../../stores/chatStore";
 import { MessageList } from "./MessageList";
 import { PromptInput } from "./PromptInput";
@@ -17,6 +19,8 @@ import { useWishStream } from "./useWishStream";
 
 export function ChatPane() {
   const wish = useWishStream();
+  const { error: llmSetupError } = useLlmSetupProbe();
+  useReportSetupGuideError(llmSetupError);
   const setupError = useChatStore((s) => s.setupError);
   const setSetupError = useChatStore((s) => s.setSetupError);
   return (

@@ -55,9 +55,36 @@ def test_openapi_paths_exposed(client: TestClient) -> None:
         "/api/ossie/{fq}",
         "/api/artifacts/{artifact_id}",
         "/api/sessions/{session_id}",
+        "/api/setup/llm",
         "/api/wish",
     ]:
         assert expected in paths, f"missing route: {expected}"
+
+
+def test_setup_llm_ok_when_configured(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "solomon.api.routes.setup.llm_not_configured_payload",
+        lambda: None,
+    )
+    r = client.get("/api/setup/llm")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}
+
+
+def test_setup_llm_not_configured(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "solomon.api.routes.setup.llm_not_configured_payload",
+        lambda: {
+            "error_code": "LLM_NOT_CONFIGURED",
+            "message": "LLM プロバイダが設定されていません。",
+            "instruction": "set env vars",
+        },
+    )
+    r = client.get("/api/setup/llm")
+    assert r.status_code == 503
+    assert r.json()["detail"]["error_code"] == "LLM_NOT_CONFIGURED"
 
 
 # ------------------------------------------------------------------ #

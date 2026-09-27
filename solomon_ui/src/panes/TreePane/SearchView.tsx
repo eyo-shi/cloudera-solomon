@@ -1,8 +1,9 @@
 /**
  * Search (Semantic Search) ビュー — OpenSearch インデックス済みドキュメント一覧。
  */
-import { SetupGuideError } from "../../api/client";
+import { isSetupGuideError } from "../../api/client";
 import { useSearchDocuments } from "../../api/search";
+import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 
 interface SearchViewProps {
   filter: string;
@@ -10,12 +11,13 @@ interface SearchViewProps {
 
 export function SearchView({ filter }: SearchViewProps) {
   const { data, isLoading, error } = useSearchDocuments(filter);
+  useReportSetupGuideError(error);
 
   if (isLoading) return <p className="explorer-placeholder">Loading documents…</p>;
-  if (error instanceof SetupGuideError) {
+  if (isSetupGuideError(error)) {
     return (
       <p className="explorer-placeholder">
-        Semantic Search 未設定です。Data Connection または環境変数を確認してください。
+        Semantic Search 未設定です。右ペインの設定手順を確認してください。
       </p>
     );
   }
