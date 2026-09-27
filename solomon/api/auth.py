@@ -15,7 +15,7 @@ from typing import Annotated, Iterator, Optional
 
 from fastapi import Depends, Header, HTTPException, Request
 
-from solomon.transport.auth import build_user_context_from_headers
+from solomon.transport.auth import build_user_context_from_headers, is_authenticated_context
 from solomon.transport.user_context import (
     UserContext,
     reset_user_context,
@@ -40,8 +40,11 @@ def get_user_context(
       非依存経路で呼びやすいように分離)
     """
     headers = _extract_headers(request)
+    cookies = {k: v for k, v in request.cookies.items()}
     return build_user_context_from_headers(
-        headers, session_id=x_solomon_session_id
+        headers,
+        session_id=x_solomon_session_id,
+        cookies=cookies,
     )
 
 
@@ -53,14 +56,14 @@ def require_user_context(
     デモ環境で anonymous を許すなら :func:`get_user_context` を使う。
     Trino / S3 を叩くエンドポイントは基本これに置く。
     """
-    if not ctx.knox_jwt:
+    if not is_authenticated_context(ctx):
         raise HTTPException(
             status_code=401,
             detail={
                 "error_code": "AUTH_MISSING",
                 "message": (
-                    "Knox JWT is required. Access this app via the Workbench "
-                    "Application URL so that Knox forwards a bearer token."
+                    "Authentication is required. Open Solomon from the Workbench "
+                    "Application URL while signed in (Knox session / remote-user)."
                 ),
             },
         )

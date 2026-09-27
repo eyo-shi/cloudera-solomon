@@ -26,7 +26,10 @@ from solomon.transport import (
     reset_user_context,
     set_user_context,
 )
-from solomon.transport.auth import _decode_jwt_payload_unverified
+from solomon.transport.auth import (
+    _decode_jwt_payload_unverified,
+    is_authenticated_context,
+)
 
 
 # ---------- helpers ----------
@@ -105,6 +108,26 @@ class TestExtractJwt:
         assert extract_jwt({}) is None
         assert extract_jwt({"Content-Type": "application/json"}) is None
 
+    def test_cdsw_session_cookie(self):
+        token = _fake_jwt({"sub": "alice"})
+        assert extract_jwt({}, cookies={"_cdswuserstoken": token}) == token
+
+    def test_cookie_header_fallback(self):
+        token = _fake_jwt({"sub": "bob"})
+        cookie = f"_basusertoken={token}; _ga=1"
+        assert extract_jwt({"Cookie": cookie}) == token
+
+    def test_header_wins_over_cookie(self):
+        header_token = _fake_jwt({"sub": "header"})
+        cookie_token = _fake_jwt({"sub": "cookie"})
+        assert (
+            extract_jwt(
+                {"Authorization": f"Bearer {header_token}"},
+                cookies={"_cdswuserstoken": cookie_token},
+            )
+            == header_token
+        )
+
 
 class TestDecodeJwt:
     def test_decode_valid_payload(self):
@@ -143,6 +166,37 @@ class TestBuildUserContext:
         assert ctx.user_name == "anonymous"
         assert ctx.groups == ()
         assert ctx.knox_jwt is None
+
+    def test_remote_user_header(self):
+        token = _fake_jwt({"sub": "ignored"})
+        ctx = build_user_context_from_headers(
+            {
+                "remote-user": "workbench-user",
+                "Authorization": f"Bearer {token}",
+            }
+        )
+        assert ctx.user_name == "workbench-user"
+        assert ctx.knox_jwt == token
+
+    def test_opaque_cdsw_cookie_token(self):
+        opaque = "a" * 40
+        assert extract_jwt({}, cookies={"_cdswuserstoken": opaque}) == opaque
+
+
+class TestIsAuthenticatedContext:
+    def test_jwt_is_enough(self):
+        ctx = UserContext(user_name="alice", knox_jwt="tok")
+        assert is_authenticated_context(ctx) is True
+
+    def test_remote_user_in_cml_app_mode(self, monkeypatch):
+        monkeypatch.setenv("CDSW_APP_PORT", "8090")
+        ctx = UserContext(user_name="workbench-user")
+        assert is_authenticated_context(ctx) is True
+
+    def test_anonymous_not_authenticated(self, monkeypatch):
+        monkeypatch.setenv("CDSW_APP_PORT", "8090")
+        ctx = UserContext(user_name="anonymous")
+        assert is_authenticated_context(ctx) is False
 
 
 class TestBearerHeader:
