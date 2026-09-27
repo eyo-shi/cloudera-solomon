@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from typing import Iterable
 
-from solomon.transport.llm import try_text_completion
+from solomon.transport.llm import try_text_completion, try_text_completion_async
 from solomon.transport.logging import get_logger
 
 _logger = get_logger(__name__)
@@ -73,9 +74,40 @@ def generate_chitchat_reply(
 ) -> str:
     """一般会話の返答を生成する。LLM 不可時は :func:`fallback_chitchat_reply`。"""
     messages = _build_messages(prompt, history)
-    reply = try_text_completion(messages, max_tokens=512, temperature=0.7)
+    reply = try_text_completion(
+        messages, max_tokens=512, temperature=0.7, timeout=15.0
+    )
     if reply and reply.strip():
         return reply.strip()
     fb = fallback_chitchat_reply(prompt)
     _logger.info("chat.conversation.fallback", prompt_len=len(prompt))
     return fb
+
+
+async def generate_chitchat_reply_async(
+    prompt: str,
+    *,
+    history: Iterable[tuple[str, str]] | None = None,
+) -> str:
+    """非同期版。CHITCHAT SSE パスから呼ぶ (スレッドプールを使わない)。"""
+    messages = _build_messages(prompt, history)
+    started = time.monotonic()
+    _logger.info("chat.conversation.llm_start", prompt_len=len(prompt))
+    reply = await try_text_completion_async(
+        messages, max_tokens=512, temperature=0.7, timeout=15.0
+    )
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    if reply and reply.strip():
+        _logger.info(
+            "chat.conversation.llm_done",
+            prompt_len=len(prompt),
+            reply_len=len(reply.strip()),
+            elapsed_ms=elapsed_ms,
+        )
+        return reply.strip()
+    _logger.warning(
+        "chat.conversation.fallback",
+        prompt_len=len(prompt),
+        elapsed_ms=elapsed_ms,
+    )
+    return fallback_chitchat_reply(prompt)

@@ -31,7 +31,10 @@ from solomon.analytics.crew import (
     kickoff_analytics_summary,
 )
 from solomon.api.auth import get_user_context
-from solomon.chat.conversation import generate_chitchat_reply
+from solomon.chat.conversation import (
+    fallback_chitchat_reply,
+    generate_chitchat_reply_async,
+)
 from solomon.api.sse import sse_artifact, sse_done, sse_error, sse_step, sse_token
 from solomon.api.state import SessionTurn, get_store
 from solomon.ingestion.crew import kickoff_ingestion
@@ -327,6 +330,9 @@ def _run_router(
 # ------------------------------------------------------------------ #
 # Chitchat path
 # ------------------------------------------------------------------ #
+_CHITCHAT_LLM_TIMEOUT_SEC = 20.0
+
+
 def _conversation_history(session_id: str, *, limit: int = 6) -> list[tuple[str, str]]:
     """直近ターンを (user, assistant) のペアで返す (現在ターンは未含む)。"""
     sess = get_store().get_session(session_id)
@@ -352,33 +358,30 @@ async def _handle_chitchat(
     """一般会話 (CHITCHAT) — LLM で自然な返答を生成する。"""
     yield sse_step("Chat", "running", "返答を生成しています...")
 
-    def _run() -> str:
-        return generate_chitchat_reply(
-            prompt,
-            history=_conversation_history(session_id),
-        )
-
-    task = asyncio.create_task(asyncio.to_thread(_run))
-    while not task.done():
-        try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
-        except asyncio.TimeoutError:
-            if await request.is_disconnected():
-                task.cancel()
-                return
-            yield sse_step("Chat", "running", "返答を生成しています...")
-
+    history = _conversation_history(session_id)
     try:
-        reply = await task
+        reply = await asyncio.wait_for(
+            generate_chitchat_reply_async(prompt, history=history),
+            timeout=_CHITCHAT_LLM_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        _logger.warning("wish.chitchat_timeout", session_id=session_id)
+        reply = fallback_chitchat_reply(prompt)
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001
         _logger.error("wish.chitchat_failed", session_id=session_id, error=str(e))
-        error_holder[0] = "CHITCHAT_FAILED"
-        yield sse_error("CHITCHAT_FAILED", f"会話応答の生成に失敗しました: {e}")
+        reply = fallback_chitchat_reply(prompt)
+
+    if await request.is_disconnected():
         return
 
     response_md_parts.append(reply)
+    _logger.info(
+        "wish.chitchat_token",
+        session_id=session_id,
+        reply_len=len(reply),
+    )
     yield sse_token(reply)
     yield sse_step("Chat", "done", "返答しました。")
 

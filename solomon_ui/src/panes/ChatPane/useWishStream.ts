@@ -20,11 +20,18 @@ export interface UseWishStream {
   cancel: () => void;
 }
 
+function isAbortError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  return err instanceof Error && err.name === "AbortError";
+}
+
 export function useWishStream(): UseWishStream {
   const controllerRef = useRef<AbortController | null>(null);
+  const userCancelledRef = useRef(false);
   const appendUser = useChatStore((s) => s.appendUser);
   const appendSolomon = useChatStore((s) => s.appendSolomon);
   const appendToLastSolomon = useChatStore((s) => s.appendToLastSolomon);
+  const removeLastEmptySolomon = useChatStore((s) => s.removeLastEmptySolomon);
   const addStep = useChatStore((s) => s.addStep);
   const clearSteps = useChatStore((s) => s.clearSteps);
   const setStreaming = useChatStore((s) => s.setStreaming);
@@ -34,10 +41,12 @@ export function useWishStream(): UseWishStream {
   const sessionId = useSessionStore((s) => s.sessionId);
 
   const cancel = useCallback(() => {
+    userCancelledRef.current = true;
     controllerRef.current?.abort();
     controllerRef.current = null;
     setStreaming(false);
-  }, [setStreaming]);
+    clearSteps();
+  }, [clearSteps, setStreaming]);
 
   const send = useCallback(
     async (prompt: string, files: File[] = []) => {
@@ -46,6 +55,7 @@ export function useWishStream(): UseWishStream {
 
       clearSteps();
       setStreaming(true);
+      userCancelledRef.current = false;
 
       const controller = new AbortController();
       controllerRef.current = controller;
@@ -121,6 +131,9 @@ export function useWishStream(): UseWishStream {
             );
           },
           onError: (e) => {
+            if (isAbortError(e) || userCancelledRef.current) {
+              return;
+            }
             if (e instanceof SetupGuideError) {
               addSetupError(e);
               appendToLastSolomon(
@@ -133,6 +146,11 @@ export function useWishStream(): UseWishStream {
           onClose: () => {
             setStreaming(false);
             controllerRef.current = null;
+            if (userCancelledRef.current) {
+              removeLastEmptySolomon();
+              userCancelledRef.current = false;
+              return;
+            }
             // token / error が 1 件も来ず空バブルのまま終わった場合のフォールバック
             const lastSolomon = [...useChatStore.getState().messages]
               .reverse()
@@ -150,6 +168,7 @@ export function useWishStream(): UseWishStream {
       appendUser,
       appendSolomon,
       appendToLastSolomon,
+      removeLastEmptySolomon,
       addStep,
       addArtifactToLastSolomon,
       clearSteps,

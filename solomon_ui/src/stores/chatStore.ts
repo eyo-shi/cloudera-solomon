@@ -44,6 +44,7 @@ interface ChatState {
   appendUser: (text: string, attachments?: ChatAttachment[]) => string;
   appendSolomon: (text: string, opts?: { artifactIds?: string[]; errorCode?: string }) => string;
   appendToLastSolomon: (delta: string) => void;
+  removeLastEmptySolomon: () => void;
   addStep: (step: StepEntry) => void;
   clearSteps: () => void;
   setStreaming: (v: boolean) => void;
@@ -123,6 +124,15 @@ export const useChatStore = create<ChatState>((set) => ({
       const next = [...s.messages];
       next[realIdx] = { ...next[realIdx], text: next[realIdx].text + delta };
       return { messages: next };
+    });
+  },
+  removeLastEmptySolomon: () => {
+    set((s) => {
+      const idx = [...s.messages].reverse().findIndex((m) => m.role === "solomon");
+      if (idx < 0) return s;
+      const realIdx = s.messages.length - 1 - idx;
+      if (s.messages[realIdx].text.trim()) return s;
+      return { messages: s.messages.filter((_, i) => i !== realIdx) };
     });
   },
   addStep: (step) => set((s) => ({ steps: [...s.steps, step] })),
