@@ -9,10 +9,11 @@
  * react-arborist に渡す tree は state で保持し、schema を開くたびに
  * `useTables` で子を差し込む (レイジーロード)。
  */
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { SetupGuideError } from "../../api/client";
+import { useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { isSetupGuideError } from "../../api/client";
 import { useSchemas, useTables } from "../../api/catalog";
 import { fetchTablePreview } from "../../api/query";
+import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 import { useTabStore } from "../../stores/tabStore";
 import { useChatStore } from "../../stores/chatStore";
 import { NodeMenu } from "./NodeMenu";
@@ -43,15 +44,9 @@ export function CatalogTree({ catalog, filter }: CatalogTreeProps) {
 
   const openTab = useTabStore((s) => s.openTab);
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt);
-  const setSetupError = useChatStore((s) => s.setSetupError);
 
   // Trino 未設定 (HTTP 503 → SetupGuideError) は ChatPane の SetupGuide カードに委譲する。
-  // TreePane 上では空状態のプレースホルダを出しつつ、カードで設定手順を提示する。
-  useEffect(() => {
-    if (error instanceof SetupGuideError) {
-      setSetupError(error);
-    }
-  }, [error, setSetupError]);
+  useReportSetupGuideError(error);
 
   const filteredSchemas = useMemo(() => {
     const schemas = data?.schemas ?? [];
@@ -84,8 +79,8 @@ export function CatalogTree({ catalog, filter }: CatalogTreeProps) {
   }
 
   if (isLoading) return <p className="placeholder">Loading schemas…</p>;
-  if (error instanceof SetupGuideError) {
-    // ChatPane 側で SetupGuide カードが表示される (上の useEffect 経由)
+  if (isSetupGuideError(error)) {
+    // ChatPane 側で SetupGuide カードが表示される
     return (
       <p className="placeholder">
         Trino 未設定です。右ペインの設定手順を確認してください。

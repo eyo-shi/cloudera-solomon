@@ -7,6 +7,19 @@ from urllib.parse import urlparse
 
 _BROWSER_HOST_MARKERS = (".cloudera.site",)
 _EXTERNAL_BOLT_HOST_MARKERS = (".elb.amazonaws.com", ".amazonaws.com")
+_OPTIONAL_UNSET_VALUE = "-"
+_PLACEHOLDER_MARKERS = ("replace_from_application_log", "replace_from_neo4j")
+
+
+def _normalize_uri_seed(raw: str | None) -> str | None:
+    """CML optional env の ``-`` や placeholder を接続候補から除外する。"""
+    text = (raw or "").strip()
+    if not text or text == _OPTIONAL_UNSET_VALUE:
+        return None
+    lowered = text.lower()
+    if any(marker in lowered for marker in _PLACEHOLDER_MARKERS):
+        return None
+    return text
 
 
 def _is_browser_neo4j_host(host: str) -> bool:
@@ -40,14 +53,14 @@ def _configured_neo4j_uri_seeds(
     *,
     internal_uri: str | None = None,
 ) -> list[str]:
-    """Primary URI plus optional NEO4J_EXTERNAL_URI / NEO4J_INTERNAL_URI overrides."""
+    """Primary URI plus optional NEO4J_INTERNAL_URI / NEO4J_EXTERNAL_URI overrides."""
     seeds: list[str] = []
     for candidate in (
         uri,
-        os.environ.get("NEO4J_EXTERNAL_URI", ""),
         internal_uri or os.environ.get("NEO4J_INTERNAL_URI", ""),
+        os.environ.get("NEO4J_EXTERNAL_URI", ""),
     ):
-        text = (candidate or "").strip()
+        text = _normalize_uri_seed(candidate)
         if text and text not in seeds:
             seeds.append(text)
     return seeds
@@ -129,14 +142,18 @@ def validate_neo4j_uri_for_ingest(uri: str) -> None:
         )
 
 
+def _env_example(name: str, fallback: str) -> str:
+    return _normalize_uri_seed(os.environ.get(name, "")) or fallback
+
+
 def format_neo4j_connection_help(configured_uri: str, errors: list[str]) -> str:
-    internal_example = (
-        os.environ.get("NEO4J_INTERNAL_URI", "").strip()
-        or "bolt://cml-neo4j-<hash>.mlx-user-<id>:7687"
+    internal_example = _env_example(
+        "NEO4J_INTERNAL_URI",
+        "bolt://cml-neo4j-<hash>.mlx-user-<id>:7687",
     )
-    external_example = (
-        os.environ.get("NEO4J_EXTERNAL_URI", "").strip()
-        or "bolt://<lb-id>.<region>.elb.amazonaws.com:7687"
+    external_example = _env_example(
+        "NEO4J_EXTERNAL_URI",
+        "bolt://<lb-id>.<region>.elb.amazonaws.com:7687",
     )
     attempts = "\n".join(errors) if errors else "  (no attempts recorded)"
     return (

@@ -4,9 +4,9 @@
  * MessageList / StepIndicator が render する。
  *
  * Deploy 後の設定不足 (LLM / Trino / CDV) を示す HTTP 503 が返った場合は、
- * chatStore.setupError に格納された :class:`SetupGuideError` を SetupGuide
+ * chatStore.setupErrors に格納された :class:`SetupGuideError` を SetupGuide
  * カードとして表示し、Project → Settings → Environment で env を追加して
- * Application を再起動する手順を提示する。
+ * Application を再起動する手順を提示する。カードはユーザーが ✕ するまで残る。
  */
 import { useLlmSetupProbe } from "../../api/setup";
 import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
@@ -21,8 +21,8 @@ export function ChatPane() {
   const wish = useWishStream();
   const { error: llmSetupError } = useLlmSetupProbe();
   useReportSetupGuideError(llmSetupError);
-  const setupError = useChatStore((s) => s.setupError);
-  const setSetupError = useChatStore((s) => s.setSetupError);
+  const setupErrors = useChatStore((s) => s.setupErrors);
+  const removeSetupError = useChatStore((s) => s.removeSetupError);
   return (
     <div className="chat-pane">
       <div className="chat-pane__header">
@@ -39,12 +39,13 @@ export function ChatPane() {
       <div className="chat-scroll">
         <MessageList />
         <StepIndicator />
-        {setupError && (
+        {setupErrors.map((error) => (
           <SetupGuide
-            error={setupError}
-            onDismiss={() => setSetupError(null)}
+            key={error.errorCode}
+            error={error}
+            onDismiss={() => removeSetupError(error.errorCode)}
           />
-        )}
+        ))}
       </div>
       <PromptInput wish={wish} />
     </div>

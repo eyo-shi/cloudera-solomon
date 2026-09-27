@@ -3,9 +3,10 @@
  * スキーマ選択 → フラットなテーブル一覧。検索・ホバーツールチップ・ダブルクリックで中央表示。
  */
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { SetupGuideError } from "../../api/client";
+import { isSetupGuideError } from "../../api/client";
 import { useSchemas, useTables } from "../../api/catalog";
 import { fetchTablePreview } from "../../api/query";
+import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 import { useChatStore } from "../../stores/chatStore";
 import { useTabStore } from "../../stores/tabStore";
 import { IconDatabase, IconTableGrid } from "./ExplorerIcons";
@@ -39,15 +40,10 @@ export function ExploreView({ filter }: ExploreViewProps) {
 
   const openTab = useTabStore((s) => s.openTab);
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt);
-  const setSetupError = useChatStore((s) => s.setSetupError);
 
   const schemas = data?.schemas ?? [];
 
-  useEffect(() => {
-    if (error instanceof SetupGuideError) {
-      setSetupError(error);
-    }
-  }, [error, setSetupError]);
+  useReportSetupGuideError(error);
 
   // 初回のみ: default スキーマがあれば自動選択、なければ先頭
   useEffect(() => {
@@ -70,7 +66,7 @@ export function ExploreView({ filter }: ExploreViewProps) {
   }
 
   if (isLoading) return <p className="explorer-placeholder">Loading…</p>;
-  if (error instanceof SetupGuideError) {
+  if (isSetupGuideError(error)) {
     return (
       <p className="explorer-placeholder">
         Trino 未設定です。右ペインの設定手順を確認してください。

@@ -25,6 +25,15 @@ def test_iter_neo4j_connection_uris_includes_external_env(monkeypatch) -> None:
     assert "bolt://abc.elb.amazonaws.com:7687" in candidates
 
 
+def test_iter_neo4j_connection_uris_skips_unset_optional_env(monkeypatch) -> None:
+    monkeypatch.setenv("NEO4J_EXTERNAL_URI", "-")
+    monkeypatch.setenv("NEO4J_INTERNAL_URI", "-")
+    uri = "bolt://abc.elb.amazonaws.com:7687"
+    candidates = iter_neo4j_connection_uris(uri)
+    assert candidates == ["bolt://abc.elb.amazonaws.com:7687"]
+    assert "bolt://-:7687" not in candidates
+
+
 def test_validate_neo4j_uri_rejects_browser_url() -> None:
     try:
         validate_neo4j_uri_for_ingest("bolt://neo4j-launcher-abc.cloudera.site:7687")

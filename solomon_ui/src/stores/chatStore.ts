@@ -31,8 +31,8 @@ interface ChatState {
   streaming: boolean;
   /** TreePane 等から prompt を予約する。PromptInput が読み取って textarea に反映。 */
   pendingPrompt: string | null;
-  /** Deploy 後の設定不足 (LLM / Trino / CDV) を UI に伝える 503 由来のエラー。 */
-  setupError: SetupGuideError | null;
+  /** Deploy 後の設定不足 (LLM / Trino / CDV 等) — ユーザーが ✕ するまで保持。 */
+  setupErrors: SetupGuideError[];
   setPendingPrompt: (t: string | null) => void;
   appendUser: (text: string) => string;
   appendSolomon: (text: string, opts?: { artifactIds?: string[]; errorCode?: string }) => string;
@@ -41,7 +41,8 @@ interface ChatState {
   clearSteps: () => void;
   setStreaming: (v: boolean) => void;
   addArtifactToLastSolomon: (artifactId: string) => void;
-  setSetupError: (e: SetupGuideError | null) => void;
+  addSetupError: (e: SetupGuideError) => void;
+  removeSetupError: (errorCode: string) => void;
 }
 
 let _seq = 0;
@@ -55,9 +56,17 @@ export const useChatStore = create<ChatState>((set) => ({
   steps: [],
   streaming: false,
   pendingPrompt: null,
-  setupError: null,
+  setupErrors: [],
   setPendingPrompt: (t) => set({ pendingPrompt: t }),
-  setSetupError: (e) => set({ setupError: e }),
+  addSetupError: (e) =>
+    set((s) => {
+      if (s.setupErrors.some((x) => x.errorCode === e.errorCode)) return s;
+      return { setupErrors: [...s.setupErrors, e] };
+    }),
+  removeSetupError: (errorCode) =>
+    set((s) => ({
+      setupErrors: s.setupErrors.filter((x) => x.errorCode !== errorCode),
+    })),
   appendUser: (text) => {
     const id = mid();
     set((s) => ({

@@ -28,7 +28,7 @@ export function useWishStream(): UseWishStream {
   const clearSteps = useChatStore((s) => s.clearSteps);
   const setStreaming = useChatStore((s) => s.setStreaming);
   const addArtifactToLastSolomon = useChatStore((s) => s.addArtifactToLastSolomon);
-  const setSetupError = useChatStore((s) => s.setSetupError);
+  const addSetupError = useChatStore((s) => s.addSetupError);
   const openTab = useTabStore((s) => s.openTab);
   const sessionId = useSessionStore((s) => s.sessionId);
 
@@ -44,8 +44,6 @@ export function useWishStream(): UseWishStream {
       if (!trimmed) return;
       appendUser(trimmed);
       clearSteps();
-      // 新しい送信で前回の SetupGuide は隠す (今回の応答で再度出れば新規表示される)
-      setSetupError(null);
       setStreaming(true);
       // Solomon 側のバブルは token / artifact が来る前に空で用意
       appendSolomon("");
@@ -93,14 +91,14 @@ export function useWishStream(): UseWishStream {
             // LLM / Trino 未設定などの 503 は SetupGuide カードで表示する。
             // 中身の空 Solomon バブルは残ってしまうと違和感が強いので、
             // このバブルにも短い案内を書いて紐付けを分かりやすくする。
-            setSetupError(e);
+            addSetupError(e);
             appendToLastSolomon(
               `\n\n[${e.errorCode}] ${e.message}\n\n(設定手順は下のカードを参照)`,
             );
           },
           onError: (e) => {
             if (e instanceof SetupGuideError) {
-              setSetupError(e);
+              addSetupError(e);
               appendToLastSolomon(
                 `\n\n[${e.errorCode}] ${e.message}\n\n(設定手順は下のカードを参照)`,
               );
@@ -132,7 +130,7 @@ export function useWishStream(): UseWishStream {
       addArtifactToLastSolomon,
       clearSteps,
       setStreaming,
-      setSetupError,
+      addSetupError,
       sessionId,
       openTab,
     ],

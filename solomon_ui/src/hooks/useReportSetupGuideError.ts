@@ -6,11 +6,11 @@ import { isSetupGuideError } from "../api/client";
 import { useChatStore } from "../stores/chatStore";
 
 export function useReportSetupGuideError(error: unknown) {
-  const setSetupError = useChatStore((s) => s.setSetupError);
+  const addSetupError = useChatStore((s) => s.addSetupError);
 
   useEffect(() => {
     if (isSetupGuideError(error)) {
-      setSetupError(error);
+      addSetupError(error);
     }
-  }, [error, setSetupError]);
+  }, [error, addSetupError]);
 }
