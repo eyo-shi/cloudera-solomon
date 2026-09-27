@@ -96,19 +96,40 @@ export function IconSemanticSearch({ active }: { active?: boolean }) {
       viewBox="0 0 24 24"
       aria-hidden="true"
     >
-      <circle cx="10" cy="10" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.75" />
-      <path
-        d="M14.5 14.5L19 19"
+      {/* Indexed document */}
+      <rect
+        x="3.5"
+        y="5"
+        width="9"
+        height="14"
+        rx="1.5"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.75"
+      />
+      <path
+        d="M6 9h5M6 12h4M6 15h5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinecap="round"
+      />
+      {/* Embedding / similarity cluster */}
+      <circle cx="16.5" cy="8.5" r="1.6" fill="currentColor" />
+      <circle cx="19.5" cy="13.5" r="1.6" fill="currentColor" />
+      <circle cx="14.5" cy="16.5" r="1.6" fill="currentColor" />
+      <path
+        d="M16.5 8.5L19.5 13.5M19.5 13.5L14.5 16.5M14.5 16.5L16.5 8.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.35"
         strokeLinecap="round"
       />
       <path
-        d="M8 10h4M10 8v4"
+        d="M12.5 12h1.5"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.5"
+        strokeWidth="1.35"
         strokeLinecap="round"
       />
     </svg>

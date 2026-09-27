@@ -2,7 +2,7 @@
  * 左ペイン: データ Explorer（Tables / Storage / Graph / Search 切替）。
  *
  * 上部アイコンで各データソースを切替。
- * Search タブ: 表示ラベル "Search"、ツールチップ / aria-label "Semantic Search"。
+ * Search タブ: アイコンのみ。ツールチップ / aria-label は "Semantic Search"。
  */
 import { useState } from "react";
 import { ExploreView } from "./ExploreView";
@@ -71,7 +71,7 @@ export function TreePane() {
         <button
           type="button"
           className={
-            "explorer-toolbar__btn explorer-toolbar__btn--labeled" +
+            "explorer-toolbar__btn" +
             (mode === "search" ? " explorer-toolbar__btn--active" : "")
           }
           aria-label="Semantic Search"
@@ -79,7 +79,6 @@ export function TreePane() {
           onClick={() => setMode("search")}
         >
           <IconSemanticSearch active={mode === "search"} />
-          <span className="explorer-toolbar__label">Search</span>
         </button>
       </div>
 
