@@ -73,13 +73,18 @@ def make_locate_s3_object_task(agent: Any) -> Task:
 def make_sniff_format_task(agent: Any, context: list[Task]) -> Task:
     return Task(
         description=(
-            "前段で確定した S3 オブジェクトのフォーマットを判定せよ。"
-            "手順: (a) S3GetRangeTool で先頭 1MB を取り、MagicByteTool で"
-            " format を確定。 (b) csv/tsv なら CSVSnifferTool で encoding と"
-            " delimiter を確定。 (c) xlsx/xls なら ExcelHeaderDetectTool で"
-            " header_row と sheet を確定。 (d) parquet なら ParquetMetaTool"
-            " でスキーマを確認。判定不能なら supported=false + reason を返し、"
-            "以降のタスクは実行しない。"
+            "前段で確定した S3 オブジェクト (bucket={bucket}, key={key}) の"
+            "フォーマットを判定せよ。"
+            "手順: (a) S3GetRangeTool で bucket={bucket}, key={key} の先頭 1MB"
+            " を取り、MagicByteTool で format を確定。"
+            " (b) csv/tsv なら CSVSnifferTool に必ず bucket={bucket}, "
+            "key={key} を渡して encoding と delimiter を確定"
+            " (content_b64 を LLM が改変しないよう S3 直読みを使う)。"
+            " (c) xlsx/xls なら ExcelHeaderDetectTool で header_row と sheet"
+            " を確定。 (d) parquet なら ParquetMetaTool に bucket={bucket}, "
+            "key={key} を渡してスキーマを確認。"
+            "判定不能なら supported=false + reason を返し、以降のタスクは"
+            "実行しない。"
         ),
         expected_output=(
             "SniffFormatResult の JSON。format, encoding, delimiter, sheet, "
@@ -98,8 +103,10 @@ def make_sniff_format_task(agent: Any, context: list[Task]) -> Task:
 def make_extract_dataframe_task(agent: Any, context: list[Task]) -> Task:
     return Task(
         description=(
-            "DataFramePreviewTool を使って先頭 200 行を DataFrame として読み"
-            "込み、列ごとにサンプル値 50 個と preview_rows を返せ。"
+            "DataFramePreviewTool を使って bucket={bucket}, key={key} から"
+            "先頭 200 行を DataFrame として読み込み、列ごとにサンプル値 50 個"
+            "と preview_rows を返せ。bucket/key に unknown や placeholder を"
+            "使ってはいけない (Crew inputs の値をそのまま渡す)。"
             "SniffFormat の encoding / delimiter / sheet / header_row を"
             "そのまま渡すこと。列名の空白は除去し、NaN は None に置換する。"
         ),
@@ -110,7 +117,7 @@ def make_extract_dataframe_task(agent: Any, context: list[Task]) -> Task:
         agent=agent,
         context=context,
         output_json=ExtractDataFrameResult,
-        max_retries=1,
+        max_retries=2,
     )
 
 

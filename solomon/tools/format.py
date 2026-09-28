@@ -144,8 +144,82 @@ class MagicByteTool(BaseSolomonTool):
 # CSVSnifferTool
 # ------------------------------------------------------------------ #
 class CSVSnifferArgs(BaseModel):
-    content_b64: str = Field(..., description="先頭バイト列 (base64)")
+    content_b64: Optional[str] = Field(
+        None,
+        description="先頭バイト列 (base64)。S3 直読みが使える場合は bucket+key を優先。",
+    )
+    bucket: Optional[str] = Field(
+        None, description="S3 バケット名 (content_b64 の代わりに先頭を直読み)"
+    )
+    key: Optional[str] = Field(None, description="S3 オブジェクトキー")
     max_sample_bytes: int = Field(65536, ge=1024, le=1_048_576)
+
+
+def _decode_csv_sample(raw: bytes) -> tuple[str, str] | dict[str, Any]:
+    """CSV サンプル bytes を (encoding, text) にデコード。失敗時は err dict。"""
+    encoding = "utf-8"
+    if raw.startswith(_UTF8_BOM):
+        raw = raw[len(_UTF8_BOM) :]
+        encoding = "utf-8-sig"
+    try:
+        return encoding, raw.decode(encoding)
+    except UnicodeDecodeError:
+        try:
+            from charset_normalizer import from_bytes  # type: ignore
+        except ImportError:
+            return err(
+                ErrorCode.FORMAT_ENCODING_UNKNOWN,
+                "charset-normalizer is required for non-UTF8 CSV",
+            )
+        result = from_bytes(raw).best()
+        if result is None:
+            return err(
+                ErrorCode.FORMAT_ENCODING_UNKNOWN,
+                "could not detect encoding",
+            )
+        encoding = result.encoding or "utf-8"
+        return encoding, str(result)
+
+
+def _guess_csv_delimiter(text: str) -> str:
+    """csv.Sniffer 失敗時の区切り文字フォールバック。"""
+    first_lines = text.splitlines()[:5]
+    for delim in (",", "\t", ";", "|"):
+        if not first_lines:
+            break
+        counts = [ln.count(delim) for ln in first_lines]
+        if counts[0] >= 1 and all(c == counts[0] for c in counts):
+            return delim
+    return ","
+
+
+def _sniff_csv_text(text: str) -> dict[str, Any]:
+    """CSV/TSV テキストから encoding/delimiter/header/preview を返す。"""
+    sample = text[:8192]
+    delimiter = ","
+    quotechar = '"'
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",\t;|")
+        delimiter = dialect.delimiter
+        quotechar = dialect.quotechar
+    except csv.Error:
+        delimiter = _guess_csv_delimiter(text)
+
+    has_header = False
+    try:
+        has_header = csv.Sniffer().has_header(sample)
+    except csv.Error:
+        pass
+
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter, quotechar=quotechar)
+    rows = list(reader)[:20]
+    return {
+        "delimiter": delimiter,
+        "quotechar": quotechar,
+        "has_header": has_header,
+        "preview_rows": rows,
+        "preview_row_count": len(rows),
+    }
 
 
 class CSVSnifferTool(BaseSolomonTool):
@@ -154,7 +228,9 @@ class CSVSnifferTool(BaseSolomonTool):
     name: str = "csv_sniff"
     description: str = (
         "Detect encoding, delimiter, quotechar and whether the first row is a "
-        "header for a CSV/TSV sample. Returns preview rows."
+        "header for a CSV/TSV sample. Prefer bucket+key to read the first "
+        "max_sample_bytes from S3 directly (avoids corrupted base64 from LLM). "
+        "Alternatively pass content_b64 from s3_get_range."
     )
     args_schema: type[BaseModel] = CSVSnifferArgs
     requires_auth: bool = False
@@ -162,65 +238,42 @@ class CSVSnifferTool(BaseSolomonTool):
     def run(
         self,
         user_ctx: Optional[UserContext],
-        content_b64: str,
+        content_b64: Optional[str] = None,
+        bucket: Optional[str] = None,
+        key: Optional[str] = None,
         max_sample_bytes: int = 65536,
         **_: Any,
     ) -> dict[str, Any]:
-        try:
-            raw = base64.b64decode(content_b64, validate=True)[:max_sample_bytes]
-        except Exception:  # noqa: BLE001
-            return err(ErrorCode.FORMAT_CORRUPT, "content_b64 is not valid base64")
-
-        # BOM 剥がし + encoding 判定
-        encoding = "utf-8"
-        if raw.startswith(_UTF8_BOM):
-            raw = raw[len(_UTF8_BOM) :]
-            encoding = "utf-8-sig"
-        try:
-            text = raw.decode(encoding)
-        except UnicodeDecodeError:
-            # charset-normalizer に頼る
+        raw: bytes
+        if bucket and key:
+            client = s3_client_for_user(user_ctx)
+            if isinstance(client, dict):
+                return client
+            end = max_sample_bytes - 1
             try:
-                from charset_normalizer import from_bytes  # type: ignore
-            except ImportError:
-                return err(
-                    ErrorCode.FORMAT_ENCODING_UNKNOWN,
-                    "charset-normalizer is required for non-UTF8 CSV",
+                resp = client.get_object(
+                    Bucket=bucket, Key=key, Range=f"bytes=0-{end}"
                 )
-            result = from_bytes(raw).best()
-            if result is None:
-                return err(
-                    ErrorCode.FORMAT_ENCODING_UNKNOWN,
-                    "could not detect encoding",
-                )
-            encoding = result.encoding or "utf-8"
-            text = str(result)
-
-        try:
-            dialect = csv.Sniffer().sniff(text[:8192], delimiters=",\t;|")
-        except csv.Error:
+                raw = resp["Body"].read()
+            except Exception as e:  # noqa: BLE001
+                return map_s3_error(e, bucket, key)
+        elif content_b64:
+            try:
+                raw = base64.b64decode(content_b64, validate=True)[:max_sample_bytes]
+            except Exception:  # noqa: BLE001
+                return err(ErrorCode.FORMAT_CORRUPT, "content_b64 is not valid base64")
+        else:
             return err(
                 ErrorCode.FORMAT_CORRUPT,
-                "csv.Sniffer could not detect a delimiter",
+                "provide bucket+key or content_b64",
             )
-        has_header = False
-        try:
-            has_header = csv.Sniffer().has_header(text[:8192])
-        except csv.Error:
-            pass
 
-        reader = csv.reader(io.StringIO(text), dialect=dialect)
-        rows = list(reader)[:20]
-        return ok(
-            {
-                "encoding": encoding,
-                "delimiter": dialect.delimiter,
-                "quotechar": dialect.quotechar,
-                "has_header": has_header,
-                "preview_rows": rows,
-                "preview_row_count": len(rows),
-            }
-        )
+        decoded = _decode_csv_sample(raw)
+        if isinstance(decoded, dict):
+            return decoded
+        encoding, text = decoded
+        sniffed = _sniff_csv_text(text)
+        return ok({"encoding": encoding, **sniffed})
 
 
 # ------------------------------------------------------------------ #

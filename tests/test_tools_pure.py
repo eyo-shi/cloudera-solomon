@@ -129,6 +129,39 @@ class TestCSVSnifferTool:
         assert result["status"] == "error"
         assert result["error_code"] == "FORMAT_CORRUPT"
 
+    def test_missing_source(self) -> None:
+        result = self.tool.run(user_ctx=None)
+        assert result["status"] == "error"
+        assert result["error_code"] == "FORMAT_CORRUPT"
+
+    def test_japanese_csv_content(self) -> None:
+        csv_text = (
+            "order_id,plant_code,source_system,plant_type\n"
+            "WO-001,MCC-NG-01,erp_mc,旧・三菱化学\n"
+            "WO-002,MCC-PET-01,erp_mr,continuous\n"
+        )
+        result = self.tool.run(
+            user_ctx=None, content_b64=_b64(csv_text.encode("utf-8"))
+        )
+        assert result["status"] == "ok"
+        assert result["delimiter"] == ","
+        assert result["preview_row_count"] == 3
+
+    def test_delimiter_fallback_when_sniffer_fails(self, monkeypatch) -> None:
+        import csv as csv_mod
+
+        def _fail_sniff(*_a, **_k):
+            raise csv_mod.Error("forced")
+
+        monkeypatch.setattr(csv_mod.Sniffer, "sniff", _fail_sniff)
+        csv_text = "a,b,c\n1,2,3\n4,5,6\n"
+        result = self.tool.run(
+            user_ctx=None, content_b64=_b64(csv_text.encode("utf-8"))
+        )
+        assert result["status"] == "ok"
+        assert result["delimiter"] == ","
+        assert result["preview_row_count"] == 3
+
 
 # ------------------------------------------------------------------ #
 # TypeInferTool
