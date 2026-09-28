@@ -76,14 +76,14 @@ _logger = get_logger(__name__)
 def build_ingestion_crew(
     llm_light: Optional[Any] = None,
     llm_strong: Optional[Any] = None,
-    memory: bool = True,
+    memory: bool = False,
 ) -> Crew:
     """Ingestion Crew を組み立てる。
 
     :param llm_light: 軽量モデル (S3Scout / FormatSniffer / OssieDrafter)。
     :param llm_strong: 精度重視モデル (SchemaDrafter / TableCreator)。
-    :param memory: Crew.ai の短期メモリを有効化するか。ユニットテストでは
-        False にしてクリーンに走らせる。
+    :param memory: Crew.ai の Chroma 短期メモリ。Solomon は session
+        ``entity_memory`` を自前管理するため default False (CHROMA_OPENAI_API_KEY 不要)。
     """
     # Agents
     s3_scout = make_s3_scout_agent(llm=llm_light)
@@ -185,7 +185,7 @@ def kickoff_ingestion(
     token = set_user_context(user_ctx)
     try:
         crew = build_ingestion_crew(
-            llm_light=llm_light, llm_strong=llm_strong, memory=True
+            llm_light=llm_light, llm_strong=llm_strong, memory=False
         )
         _logger.info(
             "ingestion.kickoff",

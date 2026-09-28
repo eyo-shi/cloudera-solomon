@@ -67,12 +67,13 @@ _logger = get_logger(__name__)
 # ------------------------------------------------------------------ #
 def build_router_crew(
     llm_light: Optional[Any] = None,
-    memory: bool = True,
+    memory: bool = False,
 ) -> Crew:
     """Router Crew を組み立てる (2 タスク Sequential)。
 
     :param llm_light: 軽量モデル (Router / Dispatcher 共通)。
-    :param memory: Crew.ai の短期メモリ有効化フラグ。テストでは False。
+    :param memory: Crew.ai の Chroma 短期メモリ。Solomon は session
+        ``entity_memory`` を自前管理するため default False。
     """
     classifier = make_intent_classifier_agent(llm=llm_light)
     dispatcher = make_dispatcher_agent(llm=llm_light)
@@ -514,7 +515,7 @@ def kickoff_router(
     # LLM 経路
     token = set_user_context(user_ctx)
     try:
-        crew = build_router_crew(llm_light=llm_light, memory=True)
+        crew = build_router_crew(llm_light=llm_light, memory=False)
         _logger.info(
             "router.llm_kickoff",
             user=user_ctx.user_name,

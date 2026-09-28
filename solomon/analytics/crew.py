@@ -72,13 +72,13 @@ _logger = get_logger(__name__)
 def build_analytics_summary_crew(
     llm_light: Optional[Any] = None,
     llm_strong: Optional[Any] = None,
-    memory: bool = True,
+    memory: bool = False,
 ) -> Crew:
     """Summary パスの Analytics Crew を組み立てる (Sequential 2 タスク)。
 
     :param llm_light: 軽量モデル (TableInspector)。
     :param llm_strong: 精度重視モデル (SummaryWriter)。
-    :param memory: Crew.ai の短期メモリを有効化するか。
+    :param memory: Crew.ai の Chroma 短期メモリ (Solomon では default False)。
     """
     inspector = make_table_inspector_agent(llm=llm_light)
     writer = make_summary_writer_agent(llm=llm_strong)
@@ -133,7 +133,7 @@ def kickoff_analytics_summary(
     token = set_user_context(user_ctx)
     try:
         crew = build_analytics_summary_crew(
-            llm_light=llm_light, llm_strong=llm_strong, memory=True
+            llm_light=llm_light, llm_strong=llm_strong, memory=False
         )
         _logger.info(
             "analytics_summary.kickoff",
@@ -212,7 +212,7 @@ def _safe_repr(result: Any) -> str:
 def build_analytics_dashboard_crew(
     llm_light: Optional[Any] = None,
     llm_strong: Optional[Any] = None,
-    memory: bool = True,
+    memory: bool = False,
 ) -> Crew:
     """Dashboard パスの Analytics Crew を組み立てる (Sequential 4 タスク)。
 
@@ -226,7 +226,7 @@ def build_analytics_dashboard_crew(
     :param llm_light: 軽量モデル (TableInspector / VizPlanner)。
     :param llm_strong: 精度重視モデル (DashboardBuilder — API 呼び出し順序を
         誤らないため強めのモデル推奨)。
-    :param memory: Crew.ai の短期メモリを有効化するか。
+    :param memory: Crew.ai の Chroma 短期メモリ (Solomon では default False)。
     """
     inspector = make_table_inspector_agent(llm=llm_light)
     planner = make_viz_planner_agent(llm=llm_light)
@@ -286,7 +286,7 @@ def kickoff_analytics_dashboard(
     token = set_user_context(user_ctx)
     try:
         crew = build_analytics_dashboard_crew(
-            llm_light=llm_light, llm_strong=llm_strong, memory=True
+            llm_light=llm_light, llm_strong=llm_strong, memory=False
         )
         _logger.info(
             "analytics_dashboard.kickoff",
