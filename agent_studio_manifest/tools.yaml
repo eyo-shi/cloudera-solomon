@@ -213,26 +213,44 @@ tools:
   class_path: solomon.tools.format.CSVSnifferTool
   description: 'Tool Name: csv_sniff
 
-    Tool Arguments: {''content_b64'': {''description'': ''先頭バイト列 (base64)'', ''type'': ''str''}, ''max_sample_bytes'': {''description'':
+    Tool Arguments: {''content_b64'': {''description'': ''先頭バイト列 (base64)。S3 直読みが使える場合は bucket+key を優先。'', ''type'': ''Union[str,
+    NoneType]''}, ''bucket'': {''description'': ''S3 バケット名 (content_b64 の代わりに先頭を直読み)'', ''type'': ''Union[str, NoneType]''},
+    ''key'': {''description'': ''S3 オブジェクトキー'', ''type'': ''Union[str, NoneType]''}, ''max_sample_bytes'': {''description'':
     None, ''type'': ''int''}}
 
-    Tool Description: Detect encoding, delimiter, quotechar and whether the first row is a header for a CSV/TSV sample. Returns
-    preview rows.'
+    Tool Description: Detect encoding, delimiter, quotechar and whether the first row is a header for a CSV/TSV sample. Prefer
+    bucket+key to read the first max_sample_bytes from S3 directly (avoids corrupted base64 from LLM). Alternatively pass
+    content_b64 from s3_get_range.'
   requires_auth: false
   args_schema:
     properties:
       content_b64:
-        description: 先頭バイト列 (base64)
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: 先頭バイト列 (base64)。S3 直読みが使える場合は bucket+key を優先。
         title: Content B64
-        type: string
+      bucket:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: S3 バケット名 (content_b64 の代わりに先頭を直読み)
+        title: Bucket
+      key:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: S3 オブジェクトキー
+        title: Key
       max_sample_bytes:
         default: 65536
         maximum: 1048576
         minimum: 1024
         title: Max Sample Bytes
         type: integer
-    required:
-    - content_b64
     title: CSVSnifferArgs
     type: object
 - name: dataframe_preview

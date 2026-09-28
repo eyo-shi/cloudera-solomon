@@ -94,27 +94,33 @@ crews:
     guardrail: null
   - name: sniff_format
     agent: format_sniffer
-    description: '前段で確定した S3 オブジェクトのフォーマットを判定せよ。手順: (a) S3GetRangeTool で先頭 1MB を取り、MagicByteTool で format を確定。 (b) csv/tsv
-      なら CSVSnifferTool で encoding と delimiter を確定。 (c) xlsx/xls なら ExcelHeaderDetectTool で header_row と sheet を確定。 (d) parquet
-      なら ParquetMetaTool でスキーマを確認。判定不能なら supported=false + reason を返し、以降のタスクは実行しない。'
+    description: '前段で確定した S3 オブジェクト (bucket={bucket}, key={key}) のフォーマットを判定せよ。手順: (a) S3GetRangeTool で bucket={bucket}, key={key}
+      の先頭 1MB を取り、MagicByteTool で format を確定。 (b) csv/tsv なら CSVSnifferTool に必ず bucket={bucket}, key={key} を渡して encoding と
+      delimiter を確定 (content_b64 を LLM が改変しないよう S3 直読みを使う)。 (c) xlsx/xls なら ExcelHeaderDetectTool で header_row と sheet を確定。
+      (d) parquet なら ParquetMetaTool に bucket={bucket}, key={key} を渡してスキーマを確認。判定不能なら supported=false + reason を返し、以降のタスクは実行しない。'
     expected_output: SniffFormatResult の JSON。format, encoding, delimiter, sheet, header_row, supported, reason を含む。
     output_model: SniffFormatResult
-    inputs: []
+    inputs:
+    - bucket
+    - key
     context:
     - locate_s3_object
     max_retries: 1
     guardrail: null
   - name: extract_data_frame
     agent: format_sniffer
-    description: DataFramePreviewTool を使って先頭 200 行を DataFrame として読み込み、列ごとにサンプル値 50 個と preview_rows を返せ。SniffFormat の encoding
-      / delimiter / sheet / header_row をそのまま渡すこと。列名の空白は除去し、NaN は None に置換する。
+    description: DataFramePreviewTool を使って bucket={bucket}, key={key} から先頭 200 行を DataFrame として読み込み、列ごとにサンプル値 50 個と preview_rows
+      を返せ。bucket/key に unknown や placeholder を使ってはいけない (Crew inputs の値をそのまま渡す)。SniffFormat の encoding / delimiter / sheet
+      / header_row をそのまま渡すこと。列名の空白は除去し、NaN は None に置換する。
     expected_output: ExtractDataFrameResult の JSON。columns[{name, sample_values}], preview_rows, row_count_preview, full_row_count_hint
       を含む。
     output_model: ExtractDataFrameResult
-    inputs: []
+    inputs:
+    - bucket
+    - key
     context:
     - sniff_format
-    max_retries: 1
+    max_retries: 2
     guardrail: null
   - name: propose_schema_and_name
     agent: schema_drafter
