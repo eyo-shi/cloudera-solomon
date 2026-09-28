@@ -150,7 +150,7 @@ def test_side_effect_tasks_have_zero_retries() -> None:
     crew = build_ingestion_crew(memory=False)
     tasks = list(getattr(crew, "tasks", []))
     _, _, _, _, t_check, t_create, t_graph, t_ossie, t_index, _ = tasks
-    assert getattr(t_check, "max_retries", None) == 0
+    assert getattr(t_check, "max_retries", None) == 1
     assert getattr(t_create, "max_retries", None) == 0
     assert getattr(t_graph, "max_retries", None) == 0
     assert getattr(t_ossie, "max_retries", None) == 0
@@ -214,6 +214,21 @@ def test_guardrail_rejects_bad_output() -> None:
     ok_, msg = conflict_permissions_guardrail("not a dict")
     assert ok_ is False
     assert msg is not None
+
+
+def test_guardrail_accepts_task_output_wrapper() -> None:
+    class _TaskOutput:
+        pydantic = None
+        json_dict = {
+            "has_conflict": False,
+            "has_create_priv": True,
+            "resolved_table": "production_work_orders",
+        }
+        raw = None
+
+    ok_, msg = conflict_permissions_guardrail(_TaskOutput())
+    assert ok_ is True
+    assert msg is None
 
 
 # ------------------------------------------------------------------ #

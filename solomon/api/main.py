@@ -17,6 +17,11 @@ FastAPI が ``/api/*`` を提供し、``/`` は ``solomon/api/static/`` の SPA
 from __future__ import annotations
 
 import os
+
+from solomon.transport.crewai_bootstrap import configure_crewai_runtime
+
+configure_crewai_runtime()
+
 from pathlib import Path
 from typing import Any
 

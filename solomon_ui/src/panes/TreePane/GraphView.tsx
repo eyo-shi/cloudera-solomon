@@ -1,12 +1,12 @@
 /**
- * Graph (Neo4j) ビュー — Node Labels / Relationship Types / Property Keys。
- * クリックで中央ペインに Graph 可視化タブを開く。
+ * Graph (Neo4j) ビュー — Database information 風スキーマブラウザ。
  */
 import { useMemo } from "react";
 import { isSetupGuideError } from "../../api/client";
 import { useGraphSchema } from "../../api/graph";
+import { labelColor } from "../../graph/colors";
 import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
-import { useTabStore } from "../../stores/tabStore";
+import { useGraphStore } from "../../stores/graphStore";
 import type { GraphQueryType } from "../../types";
 
 interface GraphViewProps {
@@ -21,7 +21,7 @@ function filterList(items: string[], filter: string): string[] {
 
 export function GraphView({ filter }: GraphViewProps) {
   const { data, isLoading, error } = useGraphSchema();
-  const openTab = useTabStore((s) => s.openTab);
+  const appendSidebarQuery = useGraphStore((s) => s.appendSidebarQuery);
   useReportSetupGuideError(error);
 
   const labels = useMemo(
@@ -37,18 +37,11 @@ export function GraphView({ filter }: GraphViewProps) {
     [data?.property_keys, filter],
   );
 
-  function openGraph(
+  function dispatch(
     queryType: GraphQueryType,
-    title: string,
-    ref: Record<string, string | number | undefined>,
-    dedupeKey: string,
+    ref: { label?: string; rel_type?: string; property_key?: string },
   ) {
-    openTab({
-      title,
-      kind: "graph",
-      ref: { query_type: queryType, title, ...ref },
-      dedupeKey,
-    });
+    appendSidebarQuery({ queryType, ...ref });
   }
 
   if (isLoading) return <p className="explorer-placeholder">Loading schema…</p>;
@@ -63,92 +56,80 @@ export function GraphView({ filter }: GraphViewProps) {
 
   const empty =
     labels.length === 0 && relTypes.length === 0 && propKeys.length === 0;
+  const nodeTotal = data?.node_count ?? labels.length;
+  const relTotal = data?.relationship_count ?? relTypes.length;
 
   return (
     <div className="explorer-view explorer-view--graph">
-      <div className="explorer-section-head">
-        <span className="explorer-section-title">Graph</span>
+      <div className="graph-db-info">
+        <h3 className="graph-db-info__title">Database information</h3>
+
+        {empty && (
+          <p className="explorer-placeholder">グラフスキーマが空です</p>
+        )}
+
+        {labels.length > 0 && (
+          <section className="graph-db-section">
+            <div className="graph-db-section__head">Nodes ({nodeTotal})</div>
+            <div className="graph-db-section__chips">
+              <span className="graph-chip graph-chip--wildcard">*</span>
+              {labels.map((label) => (
+                <button
+                  key={label}
+                  type="button"
+                  className="graph-chip graph-chip--node graph-chip--btn"
+                  style={{ backgroundColor: labelColor(label) }}
+                  onClick={() => dispatch("label", { label })}
+                  title={`Explore :${label}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {relTypes.length > 0 && (
+          <section className="graph-db-section">
+            <div className="graph-db-section__head">
+              Relationships ({relTotal})
+            </div>
+            <div className="graph-db-section__chips">
+              <span className="graph-chip graph-chip--rel">*</span>
+              {relTypes.map((relType) => (
+                <button
+                  key={relType}
+                  type="button"
+                  className="graph-chip graph-chip--rel graph-chip--btn"
+                  onClick={() => dispatch("relationship", { rel_type: relType })}
+                  title={`Explore :${relType}`}
+                >
+                  {relType}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {propKeys.length > 0 && (
+          <section className="graph-db-section">
+            <div className="graph-db-section__head">Property keys</div>
+            <div className="graph-db-section__chips">
+              {propKeys.map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  className="graph-chip graph-chip--prop graph-chip--btn"
+                  onClick={() => dispatch("property", { property_key: key })}
+                  title={`Explore property ${key}`}
+                >
+                  {key}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
-
-      {empty && (
-        <p className="explorer-placeholder">グラフスキーマが空です</p>
-      )}
-
-      <SchemaSection
-        title="Node Labels"
-        count={labels.length}
-        items={labels}
-        onSelect={(label) =>
-          openGraph(
-            "label",
-            label,
-            { label },
-            `graph:label:${label}`,
-          )
-        }
-      />
-      <SchemaSection
-        title="Relationship Types"
-        count={relTypes.length}
-        items={relTypes}
-        onSelect={(relType) =>
-          openGraph(
-            "relationship",
-            relType,
-            { rel_type: relType },
-            `graph:rel:${relType}`,
-          )
-        }
-      />
-      <SchemaSection
-        title="Property Keys"
-        count={propKeys.length}
-        items={propKeys}
-        onSelect={(key) =>
-          openGraph(
-            "property",
-            key,
-            { property_key: key },
-            `graph:prop:${key}`,
-          )
-        }
-      />
     </div>
-  );
-}
-
-function SchemaSection({
-  title,
-  count,
-  items,
-  onSelect,
-}: {
-  title: string;
-  count: number;
-  items: string[];
-  onSelect: (item: string) => void;
-}) {
-  if (items.length === 0) return null;
-  return (
-    <section className="graph-schema-section">
-      <div className="graph-schema-section__head">
-        <span className="graph-schema-section__title">{title}</span>
-        <span className="explorer-section-count">({count})</span>
-      </div>
-      <ul className="graph-schema-list">
-        {items.map((item) => (
-          <li key={item}>
-            <button
-              type="button"
-              className="graph-schema-item"
-              onClick={() => onSelect(item)}
-              title={`Explore ${title}: ${item}`}
-            >
-              {item}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }

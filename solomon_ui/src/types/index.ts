@@ -61,6 +61,8 @@ export interface GraphSchemaResponse {
   node_labels: string[];
   relationship_types: string[];
   property_keys: string[];
+  node_count?: number;
+  relationship_count?: number;
 }
 export interface GraphQueryResponse {
   query_type: GraphQueryType;

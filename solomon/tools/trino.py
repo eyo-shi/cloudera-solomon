@@ -13,9 +13,10 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from solomon.transport.errors import ErrorCode, err, ok
+from solomon.tools._schema_args import coalesce_schema_field
 from solomon.transport.logging import get_logger
 from solomon.transport.tool_base import BaseSolomonTool
 from solomon.transport.user_context import UserContext
@@ -169,6 +170,11 @@ class TrinoMetaArgs(BaseModel):
     include_stats: bool = Field(True, description="SHOW STATS の結果を含める")
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_schema(cls, data: Any) -> Any:
+        return coalesce_schema_field(data)
 
 
 class TrinoMetaTool(BaseSolomonTool):

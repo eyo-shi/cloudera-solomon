@@ -9,7 +9,7 @@
  *
  * バケット直下だけを最初にロードし、subfolder を展開したら都度 useS3List。
  */
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useS3List } from "../../api/files";
 import { useTabStore } from "../../stores/tabStore";
 import { useChatStore } from "../../stores/chatStore";
@@ -20,7 +20,45 @@ interface S3TreeProps {
   filter: string;
 }
 
+interface ActiveFileSelection {
+  bucket: string;
+  key: string;
+}
+
+function useActiveFileSelection(): ActiveFileSelection | null {
+  return useTabStore((s) => {
+    const tab = s.tabs.find((t) => t.id === s.activeId);
+    if (tab?.kind !== "file_preview") return null;
+    const bucket = tab.ref.bucket;
+    const key = tab.ref.key;
+    if (typeof bucket !== "string" || typeof key !== "string") return null;
+    return { bucket, key };
+  });
+}
+
+/** 選択ファイルの祖先 prefix (末尾 `/` 付き) を列挙する。 */
+function prefixesAlongKey(key: string): string[] {
+  const parts = key.split("/").filter(Boolean);
+  if (parts.length <= 1) return [];
+  const prefixes: string[] = [];
+  let acc = "";
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    acc += `${parts[i]}/`;
+    prefixes.push(acc);
+  }
+  return prefixes;
+}
+
 export function S3Tree({ bucket, filter }: S3TreeProps) {
+  const selection = useActiveFileSelection();
+  const isSelectedInBucket = selection?.bucket === bucket;
+  const selectedKey = isSelectedInBucket ? selection!.key : null;
+  const autoExpandPrefixes = useMemo(
+    () =>
+      selectedKey ? new Set(prefixesAlongKey(selectedKey)) : new Set<string>(),
+    [selectedKey],
+  );
+
   const [menuFor, setMenuFor] = useState<
     | {
         x: number;
@@ -34,11 +72,18 @@ export function S3Tree({ bucket, filter }: S3TreeProps) {
   >(null);
   const [rootExpanded, setRootExpanded] = useState(false);
 
+  useEffect(() => {
+    if (isSelectedInBucket) setRootExpanded(true);
+  }, [isSelectedInBucket, selectedKey]);
+
   return (
     <ul className="tree-list" onClick={() => setMenuFor(null)}>
       <li className="tree-node">
         <div
-          className="tree-row tree-row--schema tree-row--bucket"
+          className={
+            "tree-row tree-row--schema tree-row--bucket" +
+            (isSelectedInBucket ? " tree-row--path" : "")
+          }
           onClick={() => setRootExpanded((v) => !v)}
         >
           <span
@@ -55,6 +100,8 @@ export function S3Tree({ bucket, filter }: S3TreeProps) {
             bucket={bucket}
             prefix=""
             filter={filter}
+            selectedKey={selectedKey}
+            autoExpandPrefixes={autoExpandPrefixes}
             onContextObject={(x, y, key, name) =>
               setMenuFor({ x, y, kind: "object", bucket, key, name })
             }
@@ -81,6 +128,8 @@ interface S3PrefixListProps {
   bucket: string;
   prefix: string;
   filter: string;
+  selectedKey: string | null;
+  autoExpandPrefixes: Set<string>;
   onContextObject: (x: number, y: number, key: string, name: string) => void;
 }
 
@@ -88,6 +137,8 @@ function S3PrefixList({
   bucket,
   prefix,
   filter,
+  selectedKey,
+  autoExpandPrefixes,
   onContextObject,
 }: S3PrefixListProps) {
   const { data, isLoading, error } = useS3List(bucket, prefix);
@@ -99,7 +150,9 @@ function S3PrefixList({
 
   const subs = data?.subfolders ?? [];
   const subSet = new Set(subs);
-  const objs = (data?.objects ?? []).filter((o) => !isS3FolderMarker(o.key, prefix, subSet));
+  const objs = (data?.objects ?? []).filter((o) =>
+    !isS3FolderMarker(o.key, prefix, subSet),
+  );
   const f = filter.toLowerCase();
   const filteredSubs = f
     ? subs.filter((s) => s.toLowerCase().includes(f))
@@ -108,6 +161,11 @@ function S3PrefixList({
     ? objs.filter((o) => o.key.toLowerCase().includes(f))
     : objs;
 
+  const containsSelection =
+    selectedKey != null &&
+    (selectedKey.startsWith(prefix) ||
+      filteredObjs.some((o) => o.key === selectedKey));
+
   function toggleSub(p: string) {
     setOpenSub((prev) => {
       const next = new Set(prev);
@@ -115,6 +173,10 @@ function S3PrefixList({
       else next.add(p);
       return next;
     });
+  }
+
+  function isSubOpen(sp: string): boolean {
+    return openSub.has(sp) || autoExpandPrefixes.has(sp);
   }
 
   function openFilePreview(bucket: string, key: string) {
@@ -128,14 +190,25 @@ function S3PrefixList({
   }
 
   return (
-    <ul className="tree-child-list">
+    <ul
+      className={
+        "tree-child-list" +
+        (containsSelection ? " tree-child-list--guided" : "")
+      }
+    >
       {filteredSubs.map((sp) => {
         const label = sp.slice(prefix.length).replace(/\/$/, "");
-        const isOpen = openSub.has(sp);
+        const isOpen = isSubOpen(sp);
+        const onSelectedPath =
+          selectedKey != null &&
+          (selectedKey.startsWith(sp) || selectedKey === sp);
         return (
           <li key={sp} className="tree-node">
             <div
-              className="tree-row tree-row--schema"
+              className={
+                "tree-row tree-row--schema" +
+                (onSelectedPath ? " tree-row--path" : "")
+              }
               onClick={() => toggleSub(sp)}
             >
               <span
@@ -154,6 +227,8 @@ function S3PrefixList({
                 bucket={bucket}
                 prefix={sp}
                 filter={filter}
+                selectedKey={selectedKey}
+                autoExpandPrefixes={autoExpandPrefixes}
                 onContextObject={onContextObject}
               />
             )}
@@ -162,10 +237,15 @@ function S3PrefixList({
       })}
       {filteredObjs.map((o) => {
         const name = o.key.slice(prefix.length) || o.key;
+        const isSelected = selectedKey === o.key;
         return (
           <li
             key={o.key}
-            className="tree-row tree-row--table"
+            className={
+              "tree-row tree-row--table" +
+              (isSelected ? " tree-row--selected" : "")
+            }
+            aria-current={isSelected ? "true" : undefined}
             onClick={() => openFilePreview(bucket, o.key)}
             onContextMenu={(e) => {
               e.preventDefault();

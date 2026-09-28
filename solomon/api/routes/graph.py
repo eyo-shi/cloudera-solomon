@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from solomon.api.auth import require_user_context
 from solomon.graph import browse
 from solomon.graph.config import get_neo4j_config
-from solomon.graph.models import GraphQueryResponse, GraphSchemaResponse
+from solomon.graph.models import CypherRequest, GraphQueryResponse, GraphSchemaResponse
 from solomon.graph.session import Neo4jSessionError
 from solomon.transport.user_context import UserContext
 
@@ -133,6 +133,20 @@ def graph_entity(
     _require_neo4j_or_503()
     try:
         return browse.visualize_entity_hint(hint, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        _handle_browse_error(exc)
+
+
+@router.post("/cypher", response_model=GraphQueryResponse)
+def graph_execute_cypher(
+    body: CypherRequest,
+    user_ctx: Annotated[UserContext, Depends(require_user_context)],
+) -> GraphQueryResponse:
+    """Read-only Cypher を実行 (Graph タブのクエリ入力用)。"""
+    _ = user_ctx
+    _require_neo4j_or_503()
+    try:
+        return browse.execute_read_cypher(body.cypher, limit=body.limit)
     except Exception as exc:  # noqa: BLE001
         _handle_browse_error(exc)
 

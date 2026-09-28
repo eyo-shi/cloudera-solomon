@@ -16,6 +16,10 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from solomon.transport.crewai_bootstrap import configure_crewai_runtime
+
+configure_crewai_runtime()
+
 from solomon.ingestion.agents import (
     make_format_sniffer_agent,
     make_graph_loader_agent,

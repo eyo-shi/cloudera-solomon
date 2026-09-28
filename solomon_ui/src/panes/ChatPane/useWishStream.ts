@@ -12,6 +12,7 @@ import { uploadChatFile } from "../../api/files";
 import { streamWish } from "../../api/wish";
 import { useChatStore, type ChatAttachment } from "../../stores/chatStore";
 import { useSessionStore } from "../../stores/sessionStore";
+import { ensureGraphTab, useGraphStore } from "../../stores/graphStore";
 import { useTabStore } from "../../stores/tabStore";
 import type { ArtifactType, WishEvent } from "../../types";
 
@@ -105,12 +106,25 @@ export function useWishStream(): UseWishStream {
                 break;
               case "artifact":
                 addArtifactToLastSolomon(evt.data.id);
-                openTab({
-                  title: titleFor(evt.data.type, evt.data.ref),
-                  kind: evt.data.type,
-                  ref: { ...evt.data.ref, artifact_id: evt.data.id },
-                  dedupeKey: `art:${evt.data.id}`,
-                });
+                if (evt.data.type === "graph") {
+                  const hint = String(
+                    evt.data.ref.entity_hint ??
+                      evt.data.ref.title ??
+                      "",
+                  );
+                  if (hint) {
+                    useGraphStore.getState().appendEntityQuery(hint);
+                  } else {
+                    ensureGraphTab();
+                  }
+                } else {
+                  openTab({
+                    title: titleFor(evt.data.type, evt.data.ref),
+                    kind: evt.data.type,
+                    ref: { ...evt.data.ref, artifact_id: evt.data.id },
+                    dedupeKey: `art:${evt.data.id}`,
+                  });
+                }
                 break;
               case "error":
                 appendToLastSolomon(
@@ -218,7 +232,7 @@ function titleFor(kind: ArtifactType, ref: Record<string, unknown>): string {
     case "file_preview":
       return String(ref.key ?? "File").split("/").slice(-1)[0] || "File";
     case "graph":
-      return String(ref.title ?? "Graph");
+      return "Graph";
     default:
       return "Result";
   }

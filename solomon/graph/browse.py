@@ -188,13 +188,37 @@ def fetch_schema() -> GraphSchemaResponse:
                 "RETURN propertyKey ORDER BY propertyKey"
             )
         ]
+        node_count = session.run("MATCH (n) RETURN count(n) AS c").single()["c"]
+        rel_count = session.run("MATCH ()-[r]->() RETURN count(r) AS c").single()["c"]
         return GraphSchemaResponse(
             node_labels=labels,
             relationship_types=rel_types,
             property_keys=prop_keys,
+            node_count=int(node_count or 0),
+            relationship_count=int(rel_count or 0),
         )
 
     return with_read_session(_execute)
+
+
+_READ_FORBIDDEN = re.compile(
+    r"\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|LOAD\s+CSV|FOREACH|CALL\s*\{)\b",
+    re.IGNORECASE,
+)
+
+
+def execute_read_cypher(cypher: str, *, limit: int = 100) -> GraphQueryResponse:
+    """Read-only Cypher を実行して Graph 可視化を返す。"""
+    text = cypher.strip().rstrip(";")
+    if not text:
+        raise ValueError("Cypher query is empty")
+    if _READ_FORBIDDEN.search(text):
+        raise ValueError("Only read-only Cypher queries are allowed")
+    if re.search(r"\bLIMIT\b", text, re.IGNORECASE):
+        graph = _run_collect(text, {}, limit=limit)
+    else:
+        graph = _run_collect(f"{text} LIMIT $limit", {"limit": limit}, limit=limit)
+    return _response("entity", text, graph)
 
 
 def query_by_label(label: str, limit: int = 100) -> GraphQueryResponse:
@@ -302,4 +326,5 @@ __all__ = [
     "query_by_property_key",
     "query_neighborhood",
     "visualize_entity_hint",
+    "execute_read_cypher",
 ]

@@ -4,24 +4,8 @@
  */
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
 import { useEffect, useRef, useState } from "react";
+import { primaryNodeColor } from "../../../graph/colors";
 import type { GraphEdgeDTO, GraphNodeDTO } from "../../../types";
-
-const LABEL_COLORS: Record<string, string> = {
-  System: "#2563eb",
-  Dataset: "#059669",
-  Column: "#7c3aed",
-  Document: "#d97706",
-  SourceFile: "#64748b",
-  Schema: "#0891b2",
-  MetadataEntry: "#be185d",
-};
-
-function nodeColor(labels: string[]): string {
-  for (const label of labels) {
-    if (LABEL_COLORS[label]) return LABEL_COLORS[label];
-  }
-  return "#475569";
-}
 
 function toElements(
   nodes: GraphNodeDTO[],
@@ -33,7 +17,7 @@ function toElements(
       label: n.caption,
       labels: n.labels.join(", "),
       primaryLabel: n.labels[0] ?? "Node",
-      color: nodeColor(n.labels),
+      color: primaryNodeColor(n.labels),
       properties: n.properties,
     },
   }));

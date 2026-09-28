@@ -56,7 +56,7 @@ function TabRenderer({ tabId }: { tabId: string }) {
     case "file_preview":
       return <FilePreviewTab tab={tab} />;
     case "graph":
-      return <GraphTab tab={tab} />;
+      return <GraphTab />;
     default:
       return <p className="placeholder">未対応のタブ種別</p>;
   }

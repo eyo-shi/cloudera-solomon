@@ -132,15 +132,11 @@ def inspect_table_guardrail(
     テーブル未存在 / SELECT 権限なしの場合、SummaryWriter を呼ばずに終了する。
     (LLM トークンの無駄と、ユーザーへの誤解を招くサマリーの生成を防ぐ)。
     """
-    if isinstance(output, TableInspectionResult):
-        result = output
-    elif isinstance(output, dict):
-        try:
-            result = TableInspectionResult.model_validate(output)
-        except Exception:  # noqa: BLE001
-            return False, f"guardrail: could not parse output: {output!r}"
-    else:
-        return False, f"guardrail: unexpected output type: {type(output).__name__}"
+    from solomon.transport.guardrail import parse_guardrail_model
+
+    result, err_msg = parse_guardrail_model(output, TableInspectionResult)
+    if result is None:
+        return False, err_msg
 
     if not result.exists:
         return False, (
@@ -272,17 +268,11 @@ def ensure_cdv_running_guardrail(
 
     Crew.ai の guardrail 契約は ``(ok, feedback)``。ok=False で後段が走らない。
     """
-    if isinstance(output, CDVStartupResult):
-        result = output
-    elif isinstance(output, dict):
-        try:
-            result = CDVStartupResult.model_validate(output)
-        except Exception:  # noqa: BLE001
-            return False, f"guardrail: could not parse CDVStartupResult: {output!r}"
-    else:
-        return False, (
-            f"guardrail: unexpected CDVStartupResult type: {type(output).__name__}"
-        )
+    from solomon.transport.guardrail import parse_guardrail_model
+
+    result, err_msg = parse_guardrail_model(output, CDVStartupResult)
+    if result is None:
+        return False, err_msg
 
     if not result.running:
         return False, (

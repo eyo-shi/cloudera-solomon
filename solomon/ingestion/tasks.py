@@ -155,6 +155,9 @@ def make_check_conflict_and_permissions_task(agent: Any, context: list[Task]) ->
         description=(
             "propose_schema_and_name の結果を受け、TableExistsTool で最終的な"
             "衝突チェックと、TrinoMetaTool で CREATE 権限確認を行え。"
+            "両 Tool には必ず catalog, schema (= propose の target_schema), "
+            "table (= propose の proposed_table_name) を渡すこと。"
+            "schema 引数は必須 (target_schema を schema にマップして渡す)。"
             "衝突がある (かつ overwrite=false) 場合は has_conflict=true と"
             "error_code=SCHEMA_NAME_CONFLICT を、CREATE 不可なら"
             " has_create_priv=false と error_code=PERM_CREATE_DENIED を返せ。"
@@ -167,7 +170,7 @@ def make_check_conflict_and_permissions_task(agent: Any, context: list[Task]) ->
         agent=agent,
         context=context,
         output_json=ConflictAndPermissionsResult,
-        max_retries=0,  # 副作用なしだが再試行しても状態は変わらない
+        max_retries=1,
     )
 
 
@@ -306,16 +309,11 @@ def conflict_permissions_guardrail(
     Crew.ai の Task には ``guardrail`` パラメータがあり、``(ok, feedback)``
     を返す関数を受け取る。ok=False で Crew は次タスクに進まず停止する。
     """
-    # output は Pydantic モデル or dict のどちらでも扱えるように
-    if isinstance(output, ConflictAndPermissionsResult):
-        result = output
-    elif isinstance(output, dict):
-        try:
-            result = ConflictAndPermissionsResult.model_validate(output)
-        except Exception:  # noqa: BLE001
-            return False, f"guardrail: could not parse output: {output!r}"
-    else:
-        return False, f"guardrail: unexpected output type: {type(output).__name__}"
+    from solomon.transport.guardrail import parse_guardrail_model
+
+    result, err_msg = parse_guardrail_model(output, ConflictAndPermissionsResult)
+    if result is None:
+        return False, err_msg
 
     if result.has_conflict:
         return False, (

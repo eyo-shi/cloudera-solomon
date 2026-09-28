@@ -43,6 +43,13 @@ class GraphSchemaResponse(BaseModel):
     node_labels: list[str] = Field(default_factory=list)
     relationship_types: list[str] = Field(default_factory=list)
     property_keys: list[str] = Field(default_factory=list)
+    node_count: int = 0
+    relationship_count: int = 0
+
+
+class CypherRequest(BaseModel):
+    cypher: str = Field(..., min_length=1, max_length=4096)
+    limit: int = Field(100, ge=1, le=500)
 
 
 class GraphQueryResponse(BaseModel):

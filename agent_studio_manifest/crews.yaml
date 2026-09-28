@@ -140,16 +140,17 @@ crews:
     guardrail: null
   - name: conflict_and_permissions
     agent: iceberg_table_creator
-    description: propose_schema_and_name の結果を受け、TableExistsTool で最終的な衝突チェックと、TrinoMetaTool で CREATE 権限確認を行え。衝突がある (かつ overwrite=false)
-      場合は has_conflict=true とerror_code=SCHEMA_NAME_CONFLICT を、CREATE 不可なら has_create_priv=false と error_code=PERM_CREATE_DENIED
-      を返せ。どちらも問題ないときのみ後続タスクに進める (Crew.ai の guardrail)。
+    description: propose_schema_and_name の結果を受け、TableExistsTool で最終的な衝突チェックと、TrinoMetaTool で CREATE 権限確認を行え。両 Tool には必ず catalog,
+      schema (= propose の target_schema), table (= propose の proposed_table_name) を渡すこと。schema 引数は必須 (target_schema を schema
+      にマップして渡す)。衝突がある (かつ overwrite=false) 場合は has_conflict=true とerror_code=SCHEMA_NAME_CONFLICT を、CREATE 不可なら has_create_priv=false
+      と error_code=PERM_CREATE_DENIED を返せ。どちらも問題ないときのみ後続タスクに進める (Crew.ai の guardrail)。
     expected_output: ConflictAndPermissionsResult の JSON。has_conflict, has_create_priv, resolved_table, error_code, message
       を含む。
     output_model: ConflictAndPermissionsResult
     inputs: []
     context:
     - propose_schema_and_name
-    max_retries: 0
+    max_retries: 1
     guardrail: solomon.ingestion.tasks.conflict_permissions_guardrail
   - name: create_iceberg_table
     agent: iceberg_table_creator

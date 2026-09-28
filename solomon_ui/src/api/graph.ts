@@ -20,6 +20,18 @@ export function graphQueryKey(
   return ["graph", "query", queryType, params] as const;
 }
 
+export function labelCypher(label: string): string {
+  return `MATCH (n:\`${label}\`) RETURN n LIMIT 25;`;
+}
+
+export function relationshipCypher(relType: string): string {
+  return `MATCH p=()-[:${relType}]->() RETURN p LIMIT 25;`;
+}
+
+export function propertyCypher(key: string): string {
+  return `MATCH (n) WHERE n.${key} IS NOT NULL RETURN DISTINCT "node" AS entity, n.${key} AS ${key} LIMIT 25;`;
+}
+
 export async function fetchGraphQuery(
   queryType: GraphQueryType,
   params: Record<string, string | number | undefined>,
@@ -27,19 +39,19 @@ export async function fetchGraphQuery(
   switch (queryType) {
     case "label":
       return apiFetch<GraphQueryResponse>(
-        `/api/graph/nodes?label=${encodeURIComponent(String(params.label ?? ""))}`,
+        `/api/graph/nodes?label=${encodeURIComponent(String(params.label ?? ""))}&limit=25`,
       );
     case "relationship":
       return apiFetch<GraphQueryResponse>(
-        `/api/graph/relationships?type=${encodeURIComponent(String(params.rel_type ?? ""))}`,
+        `/api/graph/relationships?type=${encodeURIComponent(String(params.rel_type ?? ""))}&limit=25`,
       );
     case "property":
       return apiFetch<GraphQueryResponse>(
-        `/api/graph/properties?key=${encodeURIComponent(String(params.property_key ?? ""))}`,
+        `/api/graph/properties?key=${encodeURIComponent(String(params.property_key ?? ""))}&limit=25`,
       );
     case "neighborhood":
       return apiFetch<GraphQueryResponse>(
-        `/api/graph/neighborhood/${encodeURIComponent(String(params.node_id ?? ""))}?depth=${params.depth ?? 1}`,
+        `/api/graph/neighborhood/${encodeURIComponent(String(params.node_id ?? ""))}?depth=${params.depth ?? 1}&limit=25`,
       );
     case "entity":
       return apiFetch<GraphQueryResponse>(
@@ -48,6 +60,16 @@ export async function fetchGraphQuery(
     default:
       throw new Error(`Unsupported graph query type: ${queryType}`);
   }
+}
+
+export async function executeGraphCypher(
+  cypher: string,
+): Promise<GraphQueryResponse> {
+  return apiFetch<GraphQueryResponse>("/api/graph/cypher", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cypher, limit: 25 }),
+  });
 }
 
 export function useGraphQuery(
