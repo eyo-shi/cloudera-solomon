@@ -9,6 +9,12 @@
 import { useCallback, useRef } from "react";
 import { SetupGuideError } from "../../api/client";
 import { uploadChatFile } from "../../api/files";
+import {
+  refreshAllExplorers,
+  refreshCatalogExplorer,
+  refreshGraphSchema,
+  refreshStorageExplorer,
+} from "../../api/explorerRefresh";
 import { streamWish } from "../../api/wish";
 import { useChatStore, type ChatAttachment } from "../../stores/chatStore";
 import { useSessionStore } from "../../stores/sessionStore";
@@ -73,6 +79,7 @@ export function useWishStream(): UseWishStream {
             s3Uri: r.s3_uri,
             size: r.size,
           }));
+          void refreshStorageExplorer();
         } catch (e) {
           setStreaming(false);
           controllerRef.current = null;
@@ -106,6 +113,7 @@ export function useWishStream(): UseWishStream {
                 break;
               case "artifact":
                 addArtifactToLastSolomon(evt.data.id);
+                refreshExplorerForArtifact(evt.data.type);
                 if (evt.data.type === "graph") {
                   const hint = String(
                     evt.data.ref.entity_hint ??
@@ -135,6 +143,7 @@ export function useWishStream(): UseWishStream {
                 if (evt.data.session_id) {
                   setSessionId(evt.data.session_id);
                 }
+                void refreshAllExplorers();
                 break;
             }
           },
@@ -217,6 +226,22 @@ function buildPromptWithAttachments(
     return `${uris[0]} を取り込んでナレッジグラフに追加して`;
   }
   return `以下のファイルを取り込んでテーブルを作って:\n${uriBlock}`;
+}
+
+function refreshExplorerForArtifact(kind: ArtifactType): void {
+  switch (kind) {
+    case "graph":
+      void refreshGraphSchema();
+      break;
+    case "table_preview":
+      void refreshCatalogExplorer();
+      break;
+    case "file_preview":
+      void refreshStorageExplorer();
+      break;
+    default:
+      break;
+  }
 }
 
 function titleFor(kind: ArtifactType, ref: Record<string, unknown>): string {

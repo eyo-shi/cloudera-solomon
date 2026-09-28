@@ -3,11 +3,13 @@
  */
 import { useMemo } from "react";
 import { isSetupGuideError } from "../../api/client";
+import { refreshGraphSchema } from "../../api/explorerRefresh";
 import { useGraphSchema } from "../../api/graph";
 import { labelColor } from "../../graph/colors";
 import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 import { useGraphStore } from "../../stores/graphStore";
 import type { GraphQueryType } from "../../types";
+import { ExplorerRefreshButton } from "./ExplorerRefreshButton";
 
 interface GraphViewProps {
   filter: string;
@@ -20,7 +22,7 @@ function filterList(items: string[], filter: string): string[] {
 }
 
 export function GraphView({ filter }: GraphViewProps) {
-  const { data, isLoading, error } = useGraphSchema();
+  const { data, isLoading, error, isFetching } = useGraphSchema();
   const appendSidebarQuery = useGraphStore((s) => s.appendSidebarQuery);
   useReportSetupGuideError(error);
 
@@ -62,7 +64,13 @@ export function GraphView({ filter }: GraphViewProps) {
   return (
     <div className="explorer-view explorer-view--graph">
       <div className="graph-db-info">
-        <h3 className="graph-db-info__title">Database information</h3>
+        <div className="graph-db-info__head">
+          <h3 className="graph-db-info__title">Database information</h3>
+          <ExplorerRefreshButton
+            isFetching={isFetching}
+            onRefresh={() => void refreshGraphSchema()}
+          />
+        </div>
 
         {empty && (
           <p className="explorer-placeholder">グラフスキーマが空です</p>

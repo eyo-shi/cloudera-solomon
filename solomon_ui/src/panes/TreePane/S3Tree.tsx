@@ -13,6 +13,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useS3List } from "../../api/files";
 import { useTabStore } from "../../stores/tabStore";
 import { useChatStore } from "../../stores/chatStore";
+import { FileTypeIcon } from "./FileTypeIcon";
+import { IconChevronToggle } from "./ExplorerIcons";
 import { NodeMenu } from "./NodeMenu";
 
 interface S3TreeProps {
@@ -86,12 +88,8 @@ export function S3Tree({ bucket, filter }: S3TreeProps) {
           }
           onClick={() => setRootExpanded((v) => !v)}
         >
-          <span
-            className={
-              "tree-caret" + (rootExpanded ? " tree-caret--expanded" : "")
-            }
-          >
-            &gt;
+          <span className="tree-caret">
+            <IconChevronToggle expanded={rootExpanded} />
           </span>
           <span className="tree-label">{bucket}</span>
         </div>
@@ -211,12 +209,8 @@ function S3PrefixList({
               }
               onClick={() => toggleSub(sp)}
             >
-              <span
-                className={
-                  "tree-caret" + (isOpen ? " tree-caret--expanded" : "")
-                }
-              >
-                &gt;
+              <span className="tree-caret">
+                <IconChevronToggle expanded={isOpen} />
               </span>
               <span className="tree-label" title={sp}>
                 {label || sp}
@@ -252,7 +246,7 @@ function S3PrefixList({
               onContextObject(e.clientX, e.clientY, o.key, name);
             }}
           >
-            <span className="tree-icon">📄</span>
+            <FileTypeIcon filename={name} />
             <span className="tree-label" title={o.key}>
               {name}
             </span>

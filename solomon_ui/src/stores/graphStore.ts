@@ -154,7 +154,6 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     set((s) => ({
       queryInput: cypher,
       panels: [
-        ...s.panels,
         {
           id: panelId,
           cypher,
@@ -164,6 +163,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           allowedViews,
           sidebarSpec: spec,
         },
+        ...s.panels,
       ],
     }));
 
@@ -178,7 +178,6 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const panelId = nextPanelId();
     set((s) => ({
       panels: [
-        ...s.panels,
         {
           id: panelId,
           cypher,
@@ -186,6 +185,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           status: "loading",
           defaultView: "graph",
         },
+        ...s.panels,
       ],
     }));
 
@@ -199,7 +199,6 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     set((s) => ({
       queryInput: cypher,
       panels: [
-        ...s.panels,
         {
           id: panelId,
           cypher,
@@ -208,6 +207,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           defaultView: "graph",
           nodeId,
         },
+        ...s.panels,
       ],
     }));
     void loadPanel(panelId, () =>
@@ -222,7 +222,6 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     set((s) => ({
       queryInput: cypher,
       panels: [
-        ...s.panels,
         {
           id: panelId,
           cypher,
@@ -231,6 +230,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           defaultView: "graph",
           entityHint,
         },
+        ...s.panels,
       ],
     }));
     void loadPanel(panelId, () =>

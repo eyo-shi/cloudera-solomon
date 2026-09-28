@@ -79,3 +79,25 @@ export function IconSearch() {
     </svg>
   );
 }
+
+/** 展開/折りたたみ chevron — Graph 結果パネルと Storage ツリーで共用。 */
+export function IconChevronToggle({
+  expanded,
+  className = "tree-caret-icon",
+}: {
+  expanded: boolean;
+  className?: string;
+}) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d={expanded ? "M4 10l4-4 4 4" : "M4 6l4 4 4-4"}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

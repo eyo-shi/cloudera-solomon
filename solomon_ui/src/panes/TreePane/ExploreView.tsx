@@ -5,10 +5,12 @@
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { isSetupGuideError } from "../../api/client";
 import { useSchemas, useTables } from "../../api/catalog";
+import { refreshCatalogExplorer } from "../../api/explorerRefresh";
 import { fetchTablePreview } from "../../api/query";
 import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 import { useChatStore } from "../../stores/chatStore";
 import { useTabStore } from "../../stores/tabStore";
+import { ExplorerRefreshButton } from "./ExplorerRefreshButton";
 import { IconDatabase, IconTableGrid } from "./ExplorerIcons";
 import { NodeMenu } from "./NodeMenu";
 import { TableColumnTooltip } from "./TableColumnTooltip";
@@ -26,7 +28,7 @@ interface TableNode {
 }
 
 export function ExploreView({ filter }: ExploreViewProps) {
-  const { data, isLoading, error, refetch } = useSchemas(CATALOG);
+  const { data, isLoading, error, isFetching } = useSchemas(CATALOG);
   const [schema, setSchema] = useState<string | null>(null);
   const [autoSelected, setAutoSelected] = useState(false);
   const [hovered, setHovered] = useState<{ fq: string; rect: DOMRect } | null>(
@@ -81,6 +83,12 @@ export function ExploreView({ filter }: ExploreViewProps) {
         <div className="explorer-section-head">
           <span className="explorer-section-title">Schemas</span>
           <span className="explorer-section-count">({schemas.length})</span>
+          <div className="explorer-section-actions">
+            <ExplorerRefreshButton
+              isFetching={isFetching}
+              onRefresh={() => void refreshCatalogExplorer()}
+            />
+          </div>
         </div>
         <ul className="explorer-table-list">
           {schemas.map((s) => (
@@ -127,7 +135,6 @@ export function ExploreView({ filter }: ExploreViewProps) {
           e.preventDefault();
           setMenuFor({ x: e.clientX, y: e.clientY, node });
         }}
-        onRefresh={() => void refetch()}
       />
 
       {hovered && (
@@ -171,7 +178,6 @@ interface SchemaTableListProps {
   onOpen: (fq: string) => void;
   onHover: (fq: string | null, el: HTMLElement | null) => void;
   onMenu: (e: ReactMouseEvent, node: TableNode) => void;
-  onRefresh: () => void;
 }
 
 function SchemaTableList({
@@ -180,9 +186,8 @@ function SchemaTableList({
   onOpen,
   onHover,
   onMenu,
-  onRefresh,
 }: SchemaTableListProps) {
-  const { data, isLoading, error, refetch } = useTables(schema, CATALOG);
+  const { data, isLoading, error, isFetching } = useTables(schema, CATALOG);
 
   const tables = useMemo(() => {
     const list = data?.tables ?? [];
@@ -204,18 +209,10 @@ function SchemaTableList({
         <span className="explorer-section-title">Tables</span>
         <span className="explorer-section-count">({tables.length})</span>
         <div className="explorer-section-actions">
-          <button
-            type="button"
-            className="explorer-action-btn"
-            aria-label="更新"
-            title="更新"
-            onClick={() => {
-              void refetch();
-              onRefresh();
-            }}
-          >
-            ↻
-          </button>
+          <ExplorerRefreshButton
+            isFetching={isFetching}
+            onRefresh={() => void refreshCatalogExplorer()}
+          />
         </div>
       </div>
       <ul className="explorer-table-list">

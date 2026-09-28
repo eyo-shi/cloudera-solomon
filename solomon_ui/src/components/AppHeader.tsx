@@ -9,8 +9,8 @@ export function AppHeader() {
           src="/cldr_corp_logo_color_rgb_101.svg"
           alt="Cloudera"
           className="app-header__logo"
-          width={197}
-          height={24}
+          width={148}
+          height={18}
         />
       </div>
     </header>

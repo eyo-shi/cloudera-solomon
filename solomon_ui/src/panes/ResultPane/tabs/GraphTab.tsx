@@ -10,14 +10,13 @@ export function GraphTab() {
   const panels = useGraphStore((s) => s.panels);
   const setQueryInput = useGraphStore((s) => s.setQueryInput);
   const runQueryInput = useGraphStore((s) => s.runQueryInput);
-  const appendNeighborhood = useGraphStore((s) => s.appendNeighborhood);
   const maximizedPanelId = useGraphStore((s) => s.maximizedPanelId);
   const stackRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const stack = stackRef.current;
     if (!stack || panels.length === 0) return;
-    stack.scrollTo({ top: stack.scrollHeight, behavior: "smooth" });
+    stack.scrollTo({ top: 0, behavior: "smooth" });
   }, [panels.length]);
 
   function onSubmit(e: FormEvent) {
@@ -66,7 +65,6 @@ export function GraphTab() {
               key={panel.id}
               panel={panel}
               isMaximized={maximizedPanelId === panel.id}
-              onExploreNeighborhood={appendNeighborhood}
             />
           );
         })}

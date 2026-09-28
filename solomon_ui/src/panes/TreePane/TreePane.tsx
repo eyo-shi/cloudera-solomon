@@ -5,6 +5,11 @@
  * Search タブ: アイコンのみ。ツールチップ / aria-label は "Semantic Search"。
  */
 import { useState } from "react";
+import {
+  refreshCatalogExplorer,
+  refreshGraphSchema,
+  refreshStorageExplorer,
+} from "../../api/explorerRefresh";
 import { ExploreView } from "./ExploreView";
 import {
   IconGraph,
@@ -25,9 +30,32 @@ const SEARCH_PLACEHOLDERS: Record<ExplorerMode, string> = {
   search: "Search indexed documents…",
 };
 
+function refreshExplorerMode(mode: ExplorerMode): void {
+  switch (mode) {
+    case "tables":
+      void refreshCatalogExplorer();
+      break;
+    case "storage":
+      void refreshStorageExplorer();
+      break;
+    case "graph":
+      void refreshGraphSchema();
+      break;
+    default:
+      break;
+  }
+}
+
 export function TreePane() {
   const [mode, setMode] = useState<ExplorerMode>("tables");
   const [filter, setFilter] = useState("");
+
+  function selectMode(next: ExplorerMode) {
+    if (next !== mode) {
+      refreshExplorerMode(next);
+    }
+    setMode(next);
+  }
 
   return (
     <div className="tree-pane">
@@ -40,7 +68,7 @@ export function TreePane() {
           }
           aria-label="Tables"
           title="Tables"
-          onClick={() => setMode("tables")}
+          onClick={() => selectMode("tables")}
         >
           <IconTables active={mode === "tables"} />
         </button>
@@ -52,7 +80,7 @@ export function TreePane() {
           }
           aria-label="Storage"
           title="Storage"
-          onClick={() => setMode("storage")}
+          onClick={() => selectMode("storage")}
         >
           <IconStorage active={mode === "storage"} />
         </button>
@@ -64,7 +92,7 @@ export function TreePane() {
           }
           aria-label="Graph"
           title="Graph"
-          onClick={() => setMode("graph")}
+          onClick={() => selectMode("graph")}
         >
           <IconGraph active={mode === "graph"} />
         </button>

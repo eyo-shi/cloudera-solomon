@@ -10,6 +10,7 @@ import {
   useGraphStore,
 } from "../../../stores/graphStore";
 import type { GraphNodeDTO } from "../../../types";
+import { IconChevronToggle } from "../../TreePane/ExplorerIcons";
 import { GraphCanvas, type GraphCanvasHandle, type GraphSelection } from "./GraphCanvas";
 import { GraphCanvasTopbar } from "./GraphCanvasTopbar";
 
@@ -18,22 +19,6 @@ export type { GraphPanelView };
 interface Props {
   panel: GraphResultPanelState;
   isMaximized?: boolean;
-  onExploreNeighborhood?: (nodeId: string) => void;
-}
-
-function IconCollapse({ collapsed }: { collapsed: boolean }) {
-  return (
-    <svg className="graph-frame__icon-svg" viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d={collapsed ? "M4 6l4 4 4-4" : "M4 10l4-4 4 4"}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 function IconMaximize({ active }: { active?: boolean }) {
@@ -196,14 +181,12 @@ function GraphResultSidebar({
   relCounts,
   nodeTotal,
   edgeTotal,
-  onExploreNeighborhood,
 }: {
   selection: GraphSelection | null;
   labelCounts: Array<{ label: string; count: number }>;
   relCounts: Array<{ type: string; count: number }>;
   nodeTotal: number;
   edgeTotal: number;
-  onExploreNeighborhood?: (nodeId: string) => void;
 }) {
   if (!selection) {
     return (
@@ -298,9 +281,9 @@ function GraphResultSidebar({
                 <button
                   type="button"
                   className="graph-detail-sidebar__copy-row"
-                  title="Copy value"
-                  aria-label={`Copy ${row.key}`}
-                  onClick={() => void copyText(row.value)}
+                  title="Copy key and value"
+                  aria-label={`Copy ${row.key}: ${row.value}`}
+                  onClick={() => void copyText(`${row.key}: ${row.value}`)}
                 >
                   <IconCopy />
                 </button>
@@ -309,15 +292,6 @@ function GraphResultSidebar({
           ))}
         </tbody>
       </table>
-      {isNode && onExploreNeighborhood && (
-        <button
-          type="button"
-          className="graph-explore-btn"
-          onClick={() => onExploreNeighborhood(selection.id)}
-        >
-          関連 Graph を探索 (1-hop)
-        </button>
-      )}
     </aside>
   );
 }
@@ -338,7 +312,6 @@ function propertyTableFromGraph(
 export function GraphResultPanel({
   panel,
   isMaximized = false,
-  onExploreNeighborhood,
 }: Props) {
   const removePanel = useGraphStore((s) => s.removePanel);
   const toggleMaximizePanel = useGraphStore((s) => s.toggleMaximizePanel);
@@ -445,7 +418,7 @@ export function GraphResultPanel({
             aria-label={collapsed ? "結果を表示" : "結果を折りたたむ"}
             onClick={onToggleCollapse}
           >
-            <IconCollapse collapsed={collapsed} />
+            <IconChevronToggle expanded={!collapsed} className="graph-frame__icon-svg" />
           </button>
           <button
             type="button"
@@ -526,7 +499,6 @@ export function GraphResultPanel({
                       relCounts={relCounts}
                       nodeTotal={nodes.length}
                       edgeTotal={edges.length}
-                      onExploreNeighborhood={onExploreNeighborhood}
                     />
                   )}
                 </div>
