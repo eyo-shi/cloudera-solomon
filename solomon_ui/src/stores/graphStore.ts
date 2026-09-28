@@ -22,6 +22,11 @@ export interface GraphResultPanel {
   error?: string;
   data?: GraphQueryResponse;
   defaultView: GraphPanelView;
+  /** 表示可能なビュー。未指定時は Graph / Table / Raw すべて。 */
+  allowedViews?: GraphPanelView[];
+  sidebarSpec?: GraphSidebarQuery;
+  nodeId?: string;
+  entityHint?: string;
 }
 
 export interface GraphSidebarQuery {
@@ -34,11 +39,15 @@ export interface GraphSidebarQuery {
 interface GraphState {
   queryInput: string;
   panels: GraphResultPanel[];
+  maximizedPanelId: string | null;
   setQueryInput: (value: string) => void;
   appendSidebarQuery: (spec: GraphSidebarQuery) => void;
   runQueryInput: () => void;
   appendNeighborhood: (nodeId: string) => void;
   appendEntityQuery: (entityHint: string) => void;
+  removePanel: (panelId: string) => void;
+  rerunPanel: (panelId: string) => void;
+  toggleMaximizePanel: (panelId: string) => void;
 }
 
 const GRAPH_TAB_KEY = "graph:workspace";
@@ -58,10 +67,37 @@ export function ensureGraphTab(): void {
   });
 }
 
+function panelLoader(panel: GraphResultPanel): () => Promise<GraphQueryResponse> {
+  if (panel.sidebarSpec) {
+    const spec = panel.sidebarSpec;
+    const params: Record<string, string | number | undefined> = {};
+    if (spec.label) params.label = spec.label;
+    if (spec.rel_type) params.rel_type = spec.rel_type;
+    if (spec.property_key) params.property_key = spec.property_key;
+    return () => fetchGraphQuery(spec.queryType, params);
+  }
+  if (panel.queryType === "neighborhood" && panel.nodeId) {
+    return () =>
+      fetchGraphQuery("neighborhood", { node_id: panel.nodeId, depth: 1 });
+  }
+  if (panel.queryType === "entity" && panel.entityHint) {
+    return () =>
+      fetchGraphQuery("entity", { entity_hint: panel.entityHint });
+  }
+  return () => executeGraphCypher(panel.cypher);
+}
+
 async function loadPanel(
   panelId: string,
   loader: () => Promise<GraphQueryResponse>,
 ): Promise<void> {
+  useGraphStore.setState((s) => ({
+    panels: s.panels.map((p) =>
+      p.id === panelId
+        ? { ...p, status: "loading" as const, error: undefined, data: undefined }
+        : p,
+    ),
+  }));
   try {
     const data = await loader();
     useGraphStore.setState((s) => ({
@@ -87,13 +123,16 @@ async function loadPanel(
 export const useGraphStore = create<GraphState>((set, get) => ({
   queryInput: "",
   panels: [],
+  maximizedPanelId: null,
 
   setQueryInput: (value) => set({ queryInput: value }),
 
   appendSidebarQuery: (spec) => {
     ensureGraphTab();
+    const panelId = nextPanelId();
     let cypher = "";
     let defaultView: GraphPanelView = "graph";
+    let allowedViews: GraphPanelView[] | undefined;
     const params: Record<string, string | number | undefined> = {};
 
     if (spec.queryType === "label" && spec.label) {
@@ -108,11 +147,10 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       cypher = propertyCypher(spec.property_key);
       params.property_key = spec.property_key;
       defaultView = "table";
+      allowedViews = ["table", "raw"];
     } else {
       return;
     }
-
-    const panelId = nextPanelId();
     set((s) => ({
       queryInput: cypher,
       panels: [
@@ -123,6 +161,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           queryType: spec.queryType,
           status: "loading",
           defaultView,
+          allowedViews,
+          sidebarSpec: spec,
         },
       ],
     }));
@@ -166,6 +206,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           queryType: "neighborhood",
           status: "loading",
           defaultView: "graph",
+          nodeId,
         },
       ],
     }));
@@ -188,11 +229,34 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           queryType: "entity",
           status: "loading",
           defaultView: "graph",
+          entityHint,
         },
       ],
     }));
     void loadPanel(panelId, () =>
       fetchGraphQuery("entity", { entity_hint: entityHint }),
     );
+  },
+
+  removePanel: (panelId) => {
+    set((s) => ({
+      panels: s.panels.filter((p) => p.id !== panelId),
+      maximizedPanelId:
+        s.maximizedPanelId === panelId ? null : s.maximizedPanelId,
+    }));
+  },
+
+  toggleMaximizePanel: (panelId) => {
+    set((s) => ({
+      maximizedPanelId:
+        s.maximizedPanelId === panelId ? null : panelId,
+    }));
+  },
+
+  rerunPanel: (panelId) => {
+    const panel = get().panels.find((p) => p.id === panelId);
+    if (!panel) return;
+    set({ queryInput: panel.cypher });
+    void loadPanel(panelId, panelLoader(panel));
   },
 }));

@@ -11,11 +11,13 @@ export function GraphTab() {
   const setQueryInput = useGraphStore((s) => s.setQueryInput);
   const runQueryInput = useGraphStore((s) => s.runQueryInput);
   const appendNeighborhood = useGraphStore((s) => s.appendNeighborhood);
+  const maximizedPanelId = useGraphStore((s) => s.maximizedPanelId);
   const stackRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (panels.length === 0) return;
-    stackRef.current?.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    const stack = stackRef.current;
+    if (!stack || panels.length === 0) return;
+    stack.scrollTo({ top: stack.scrollHeight, behavior: "smooth" });
   }, [panels.length]);
 
   function onSubmit(e: FormEvent) {
@@ -24,7 +26,7 @@ export function GraphTab() {
   }
 
   return (
-    <div className="tab-content tab-content--graph tab-content--graph-workspace">
+    <div className="tab-content tab-content--flush tab-content--graph tab-content--graph-workspace">
       <form className="graph-query-bar" onSubmit={onSubmit}>
         <span className="graph-query-bar__prompt">neo4j$</span>
         <input
@@ -44,20 +46,30 @@ export function GraphTab() {
         </button>
       </form>
 
-      <div className="graph-results-stack" ref={stackRef}>
+      <div
+        className={
+          "graph-results-stack" +
+          (maximizedPanelId ? " graph-results-stack--maximized" : "")
+        }
+        ref={stackRef}
+      >
         {panels.length === 0 && (
           <p className="graph-results-empty">
             左ペインの Node / Relationship / Property key をクリックするか、
             上のクエリを入力して実行してください。
           </p>
         )}
-        {panels.map((panel) => (
-          <GraphResultPanel
-            key={panel.id}
-            panel={panel}
-            onExploreNeighborhood={appendNeighborhood}
-          />
-        ))}
+        {panels.map((panel) => {
+          if (maximizedPanelId && panel.id !== maximizedPanelId) return null;
+          return (
+            <GraphResultPanel
+              key={panel.id}
+              panel={panel}
+              isMaximized={maximizedPanelId === panel.id}
+              onExploreNeighborhood={appendNeighborhood}
+            />
+          );
+        })}
       </div>
     </div>
   );
