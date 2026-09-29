@@ -6,6 +6,7 @@ import html
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from utils.warehouse_utils import get_connection_info, run_warehouse_supervisor
@@ -80,14 +81,35 @@ class WarehouseLauncherHandler(BaseHTTPRequestHandler):
         return
 
 
-def main() -> None:
-    port = int(os.environ.get("CDSW_APP_PORT") or "8090")
-    supervisor = threading.Thread(target=run_warehouse_supervisor, daemon=True)
-    supervisor.start()
-    server = ThreadingHTTPServer(("0.0.0.0", port), WarehouseLauncherHandler)
-    print(f"[warehouse-launcher] listening on {port}", flush=True)
-    server.serve_forever()
+class ReuseAddrHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
+def _wait_for_app_port(timeout_sec: float = 60.0) -> int:
+    """``CDSW_APP_PORT`` が正の整数になるまで待つ (CML Workbench Application)。"""
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        raw = (os.environ.get("CDSW_APP_PORT") or "").strip()
+        if raw:
+            try:
+                port = int(raw)
+            except ValueError:
+                port = 0
+            if port > 0:
+                print(f"[warehouse-launcher] CDSW_APP_PORT={port}", flush=True)
+                return port
+        time.sleep(0.5)
+    raise RuntimeError(
+        "CDSW_APP_PORT was not assigned within "
+        f"{timeout_sec:.0f}s (BrowserSvcs may log Duplicate port 0)"
+    )
 
 
 if __name__ == "__main__":
-    main()
+    port = _wait_for_app_port()
+    bind_host = os.getenv("WAREHOUSE_LAUNCHER_BIND_HOST", "127.0.0.1")
+    print(f"Starting Warehouse Launcher on {bind_host}:{port}", flush=True)
+    server = ReuseAddrHTTPServer((bind_host, port), WarehouseLauncherHandler)
+    server.daemon_threads = True
+    threading.Thread(target=run_warehouse_supervisor, daemon=True).start()
+    server.serve_forever()
