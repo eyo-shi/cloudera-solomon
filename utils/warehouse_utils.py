@@ -155,11 +155,14 @@ def _use_project_pvc(pvc_claim: str | None) -> bool:
 
 
 def _trino_config_properties() -> str:
+    # CML/K8s service routing may inject X-Forwarded-* headers. Trino rejects
+    # them with HTTP 406 unless process-forwarded is enabled (see Trino #6552).
     return "\n".join(
         [
             "coordinator=true",
             "node-scheduler.include-coordinator=true",
             "http-server.http.port=8080",
+            "http-server.process-forwarded=true",
             "discovery.uri=http://localhost:8080",
             "",
         ]
