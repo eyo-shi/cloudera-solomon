@@ -121,18 +121,14 @@ def _log_trino_startup_config() -> None:
     if cfg.internal:
         endpoint = f"{cfg.scheme}://{cfg.host}:{cfg.port}"
         print(f"[solomon] TRINO_ENDPOINT (if setting manually): {endpoint}", flush=True)
-        try:
-            import urllib.request
+        from solomon.trino.http_probe import probe_trino_info
 
-            probe = f"{endpoint.rstrip('/')}/v1/info"
-            with urllib.request.urlopen(probe, timeout=5) as resp:
-                print(
-                    f"[solomon] Trino HTTP probe OK (status={resp.status})",
-                    flush=True,
-                )
-        except Exception as exc:
+        ok, err = probe_trino_info(endpoint, timeout=5)
+        if ok:
+            print("[solomon] Trino HTTP probe OK", flush=True)
+        else:
             print(
-                f"[solomon] Trino HTTP probe FAILED for {endpoint}: {exc}. "
+                f"[solomon] Trino HTTP probe FAILED for {endpoint}: {err}. "
                 "Set TRINO_ENDPOINT from warehouse-launcher log and restart.",
                 flush=True,
             )

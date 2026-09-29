@@ -29,24 +29,30 @@ _TRINO_QUERY_TIMEOUT_S = 45.0
 
 
 def _require_trino_or_503() -> None:
-    """Trino 未設定なら 503 + guided error を投げる (UI が SetupGuide 表示)。
-
-    Data Connection (``TRINO_CONNECTION_NAME``) と env fallback の
-    どちらでも解決できないケース。呼び出し元は catalog 各エンドポイント。
-    """
+    """Trino 未設定なら 503 + guided error を投げる (UI が SetupGuide 表示)。"""
     if get_trino_config() is None:
+        from solomon.trino.mode import is_internal_trino_mode
+
+        if is_internal_trino_mode():
+            instruction = (
+                "warehouse-launcher の Status が running になるまで待ち、"
+                "Application Log の Service ClusterIP を "
+                "TRINO_ENDPOINT に設定して Solomon Application を再起動してください。"
+            )
+        else:
+            instruction = (
+                "Cloudera AI Workbench の Site Administration → Data "
+                "Connections で CDW / Trino connection を登録し、Project "
+                "→ Settings → Advanced → Environment Variables に "
+                "TRINO_CONNECTION_NAME を設定して Application を"
+                "再起動してください。"
+            )
         raise HTTPException(
             status_code=503,
             detail={
                 "error_code": "TRINO_NOT_CONFIGURED",
                 "message": "Trino / CDW への接続情報が設定されていません。",
-                "instruction": (
-                    "Cloudera AI Workbench の Site Administration → Data "
-                    "Connections で CDW / Trino connection を登録し、Project "
-                    "→ Settings → Advanced → Environment Variables に "
-                    "TRINO_CONNECTION_NAME を設定して Application を"
-                    "再起動してください。"
-                ),
+                "instruction": instruction,
             },
         )
 
@@ -54,9 +60,10 @@ def _require_trino_or_503() -> None:
 def _internal_trino_instruction() -> str:
     return (
         "warehouse-launcher の Application Log で "
-        "Solomon TRINO_ENDPOINT (if DNS fails) を確認し、"
+        "「Solomon TRINO_ENDPOINT (Service ClusterIP)」行を確認し、"
         "Project → Settings → Advanced → Environment Variables に "
-        "TRINO_ENDPOINT を設定して Solomon Application を再起動してください。"
+        "TRINO_ENDPOINT=http://<Service ClusterIP>:8080 を設定して "
+        "Solomon Application を再起動してください。"
     )
 
 

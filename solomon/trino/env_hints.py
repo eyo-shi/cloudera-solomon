@@ -19,6 +19,8 @@ def format_internal_trino_env_hints(
 
     lines: list[str] = []
     cluster = (cluster_ip or "").strip()
+    if internal_http:
+        lines.append(f"Solomon TRINO_ENDPOINT (internal DNS, preferred): {internal_http}")
     if cluster:
         lines.append(
             f"Solomon TRINO_ENDPOINT (Service ClusterIP): http://{cluster}:8080"
@@ -30,9 +32,6 @@ def format_internal_trino_env_hints(
         lines.append(
             f"Solomon TRINO_ENDPOINT (if DNS fails): http://{host_part}:{port}"
         )
-
-    if internal_http:
-        lines.append(f"Solomon internal HTTP (default): {internal_http}")
 
     pod_hosts = [
         host

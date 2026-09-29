@@ -67,3 +67,21 @@ def test_external_mode_uses_env_host(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_internal_mode_without_launcher_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TRINO_MODE", "internal")
     assert get_trino_config() is None
+
+
+def test_internal_mode_explicit_endpoint_overrides_file(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRINO_MODE", "internal")
+    monkeypatch.setenv("TRINO_ENDPOINT", "http://172.20.50.113:8080")
+    endpoints = tmp_path / "trino_endpoints.json"
+    monkeypatch.setenv("TRINO_ENDPOINTS_FILE", str(endpoints))
+    write_endpoints({"http_hosts": ["10.0.0.99:8080"]})
+    cfg = get_trino_config()
+    assert cfg is not None
+    assert cfg.internal is True
+    assert cfg.host == "172.20.50.113"
+    assert cfg.port == 8080
+    assert cfg.scheme == "http"
+    assert cfg.verify_ssl is False

@@ -6,8 +6,6 @@ import base64
 import json
 import os
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 from kubernetes import client, config
@@ -434,13 +432,7 @@ def deploy_warehouse() -> None:
             body=service,
         )
         print(f"Updated warehouse service {get_service_name()}")
-    cluster_ip = _get_service_cluster_ip()
-    if cluster_ip:
-        print(
-            f"Warehouse Trino Service ClusterIP: http://{cluster_ip}:8080 "
-            "(Kubernetes-assigned; use for Solomon TRINO_ENDPOINT if DNS fails)"
-        )
-    print(f"Warehouse Trino internal DNS: {internal_http_url()}")
+    _print_trino_endpoint_summary()
 
 
 def _list_warehouse_pods() -> list[client.V1Pod]:
@@ -643,16 +635,13 @@ def _launcher_http_probe_urls() -> list[str]:
 
 
 def _probe_trino_http(urls: list[str]) -> tuple[bool, str | None]:
+    from solomon.trino.http_probe import probe_trino_info
+
     last_error: str | None = None
     for url in urls:
-        probe = f"{url.rstrip('/')}/v1/info"
-        try:
-            with urllib.request.urlopen(probe, timeout=3) as resp:
-                if resp.status < 500:
-                    return True, None
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            last_error = f"{probe}: {exc}"
-            continue
+        ok, last_error = probe_trino_info(url, timeout=3)
+        if ok:
+            return True, None
     return False, last_error
 
 
@@ -739,6 +728,7 @@ def get_connection_info() -> dict:
         "supervisor_error": _supervisor_state.get("error"),
     }
     info["cluster_ip"] = _get_service_cluster_ip()
+    info["pod_ip"] = _pod_http_hosts()[0].partition(":")[0] if _pod_http_hosts() else None
     info["http_hosts"] = _collect_http_hosts()
     info["launcher_probe_urls"] = _launcher_http_probe_urls()
     info["internal_http"] = internal_http_url()
@@ -767,22 +757,39 @@ def _print_trino_env_hints(info: dict) -> None:
         print(line)
 
 
-def _print_early_trino_endpoint_hint() -> None:
-    print(f"Warehouse Trino internal DNS: {internal_http_url()}")
+def _print_trino_endpoint_summary() -> None:
+    """Print Solomon-facing endpoints; pod IP is shown separately and must not be confused."""
     cluster_ip = _get_service_cluster_ip()
+    pod_hosts = _pod_http_hosts()
+    internal = internal_http_url()
+    print("=== Trino endpoints ===")
+    print(f"Solomon TRINO_ENDPOINT (internal DNS, preferred): {internal}")
     if cluster_ip:
         print(
-            f"Warehouse Trino Service ClusterIP: http://{cluster_ip}:8080 "
-            "(set TRINO_ENDPOINT on Solomon if DNS fails)"
+            "Solomon TRINO_ENDPOINT (Service ClusterIP, if DNS fails): "
+            f"http://{cluster_ip}:8080"
         )
-    pod_hosts = _pod_http_hosts()
+    else:
+        print("Solomon TRINO_ENDPOINT (Service ClusterIP): not assigned yet")
     if pod_hosts:
         primary = pod_hosts[0]
         host_part, _, port_part = primary.rpartition(":")
         port = port_part if port_part.isdigit() else "8080"
         print(
-            f"Warehouse Trino pod IP (launcher only): http://{host_part}:{port}"
+            "Trino pod IP (launcher diagnostics only; do NOT set on Solomon): "
+            f"http://{host_part}:{port}"
         )
+    elif cluster_ip:
+        print(
+            "Note: In this cluster Service ClusterIP and Pod IP may both use "
+            "172.20.x.x — use the Service ClusterIP or internal DNS line above, "
+            "not the pod IP."
+        )
+    print("=======================")
+
+
+def _print_early_trino_endpoint_hint() -> None:
+    _print_trino_endpoint_summary()
 
 
 def print_connection_info() -> None:
