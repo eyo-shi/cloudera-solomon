@@ -1,15 +1,13 @@
 /**
- * テーブル Explore ビュー。スキーマ選択とフラットなテーブル一覧。
- * スキーマ選択 → フラットなテーブル一覧。検索・ホバーツールチップ・ダブルクリックで中央表示。
+ * テーブル Explore ビュー — スキーマを accordion 展開し、テーブル一覧をネスト表示。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { isSetupGuideError } from "../../api/client";
 import { useSchemas, useTables } from "../../api/catalog";
 import { refreshCatalogExplorer } from "../../api/explorerRefresh";
-import { fetchTablePreview } from "../../api/query";
 import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 import { useChatStore } from "../../stores/chatStore";
-import { useTabStore } from "../../stores/tabStore";
+import { useTablesStore } from "../../stores/tablesStore";
 import { ExplorerRefreshButton } from "./ExplorerRefreshButton";
 import { IconDatabase, IconTableGrid } from "./ExplorerIcons";
 import { NodeMenu } from "./NodeMenu";
@@ -29,8 +27,8 @@ interface TableNode {
 
 export function ExploreView({ filter }: ExploreViewProps) {
   const { data, isLoading, error, isFetching } = useSchemas(CATALOG);
-  const [schema, setSchema] = useState<string | null>(null);
-  const [autoSelected, setAutoSelected] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [initialExpandDone, setInitialExpandDone] = useState(false);
   const [hovered, setHovered] = useState<{ fq: string; rect: DOMRect } | null>(
     null,
   );
@@ -40,51 +38,40 @@ export function ExploreView({ filter }: ExploreViewProps) {
     node: TableNode;
   } | null>(null);
 
-  const openTab = useTabStore((s) => s.openTab);
+  const appendTablePreview = useTablesStore((s) => s.appendTablePreview);
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt);
 
   const schemas = data?.schemas ?? [];
-  const {
-    data: tablesData,
-    isLoading: tablesLoading,
-    error: tablesError,
-    isFetching: tablesFetching,
-  } = useTables(schema, CATALOG);
 
-  const filteredTables = useMemo(() => {
-    const list = tablesData?.tables ?? [];
-    if (!filter.trim()) return list;
+  const filteredSchemas = useMemo(() => {
+    if (!filter.trim()) return schemas;
     const f = filter.toLowerCase();
-    return list.filter(
-      (t) =>
-        t.name.toLowerCase().includes(f) ||
-        t.fq.toLowerCase().includes(f),
-    );
-  }, [tablesData, filter]);
+    return schemas.filter((s) => s.toLowerCase().includes(f));
+  }, [schemas, filter]);
 
-  const sectionCount = schema ? filteredTables.length : schemas.length;
-  const sectionBusy = schema ? tablesFetching : isFetching;
-
+  const sectionCount = schemas.length;
   useReportSetupGuideError(error);
 
-  // 初回のみ: default スキーマがあれば自動選択、なければ先頭
   useEffect(() => {
-    if (autoSelected || schemas.length === 0) return;
-    const preferred = schemas.find((s) => s.toLowerCase() === "default");
-    setSchema(preferred ?? schemas[0] ?? null);
-    setAutoSelected(true);
-  }, [schemas, autoSelected]);
+    if (initialExpandDone || schemas.length === 0) return;
+    const preferred = schemas.find((s) => s.toLowerCase() === "demo") ?? schemas[0];
+    if (preferred) {
+      setExpanded(new Set([`${CATALOG}.${preferred}`]));
+    }
+    setInitialExpandDone(true);
+  }, [schemas, initialExpandDone]);
 
-  function openTablePreview(fq: string) {
-    openTab({
-      title: fq.split(".").slice(-1)[0] ?? fq,
-      kind: "table_preview",
-      ref: { fq },
-      dedupeKey: `table:${fq}`,
+  function toggleSchema(schemaKey: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(schemaKey)) next.delete(schemaKey);
+      else next.add(schemaKey);
+      return next;
     });
-    fetchTablePreview(fq, 100).catch(() => {
-      /* タブ側で再表示 */
-    });
+  }
+
+  function openTable(fq: string) {
+    appendTablePreview(fq, 100);
   }
 
   const sectionHead = (
@@ -93,7 +80,7 @@ export function ExploreView({ filter }: ExploreViewProps) {
       <span className="explorer-section-count">({sectionCount})</span>
       <div className="explorer-section-actions">
         <ExplorerRefreshButton
-          isFetching={sectionBusy}
+          isFetching={isFetching}
           onRefresh={() => void refreshCatalogExplorer()}
         />
       </div>
@@ -102,7 +89,7 @@ export function ExploreView({ filter }: ExploreViewProps) {
 
   if (isLoading) {
     return (
-      <div className="explorer-view">
+      <div className="explorer-view explorer-view--tables">
         {sectionHead}
         <p className="explorer-placeholder">Loading…</p>
       </div>
@@ -110,7 +97,7 @@ export function ExploreView({ filter }: ExploreViewProps) {
   }
   if (isSetupGuideError(error)) {
     return (
-      <div className="explorer-view">
+      <div className="explorer-view explorer-view--tables">
         {sectionHead}
         <p className="explorer-placeholder">
           Trino 未接続です。warehouse-launcher の起動を待つか、右ペインの設定手順を確認してください。
@@ -120,88 +107,56 @@ export function ExploreView({ filter }: ExploreViewProps) {
   }
   if (error) {
     return (
-      <div className="explorer-view">
+      <div className="explorer-view explorer-view--tables">
         {sectionHead}
         <p className="explorer-error">スキーマ取得に失敗</p>
       </div>
     );
   }
 
-  if (!schema) {
-    return (
-      <div className="explorer-view">
-        {sectionHead}
-        <ul className="explorer-table-list">
-          {schemas.map((s) => (
-            <li key={s}>
-              <button
-                type="button"
-                className="explorer-table-row"
-                onClick={() => setSchema(s)}
-              >
-                <IconDatabase />
-                <span className="explorer-table-name">{s}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
-
   return (
-    <div className="explorer-view" onClick={() => setMenuFor(null)}>
+    <div
+      className="explorer-view explorer-view--tables"
+      onClick={() => setMenuFor(null)}
+    >
       {sectionHead}
 
-      <nav className="explorer-breadcrumb">
-        <button
-          type="button"
-          className="explorer-breadcrumb__back"
-          aria-label="スキーマ一覧へ戻る"
-          onClick={() => setSchema(null)}
-        >
-          ‹
-        </button>
-        <IconDatabase />
-        <span className="explorer-breadcrumb__label">{schema}</span>
-      </nav>
-
-      {tablesLoading && (
-        <p className="explorer-placeholder">Loading tables…</p>
-      )}
-      {tablesError && (
-        <p className="explorer-error">テーブル取得に失敗</p>
-      )}
-      {!tablesLoading && !tablesError && (
-        <ul className="explorer-table-list">
-          {filteredTables.map((t) => {
-            const node: TableNode = { id: t.fq, name: t.name, fq: t.fq };
-            return (
-              <li key={t.fq}>
-                <button
-                  type="button"
-                  className="explorer-table-row"
-                  onDoubleClick={() => openTablePreview(t.fq)}
-                  onMouseEnter={(e) =>
-                    setHovered({ fq: t.fq, rect: e.currentTarget.getBoundingClientRect() })
-                  }
-                  onMouseLeave={() => setHovered(null)}
-                  onContextMenu={(e) => {
+      <ul className="tree-list explorer-catalog-tree">
+        {filteredSchemas.map((schema) => {
+          const schemaKey = `${CATALOG}.${schema}`;
+          const isOpen = expanded.has(schemaKey);
+          return (
+            <li key={schemaKey} className="tree-node">
+              <button
+                type="button"
+                className="tree-row tree-row--schema explorer-tree-row"
+                onClick={() => toggleSchema(schemaKey)}
+              >
+                <span className="tree-caret">{isOpen ? "▾" : "▸"}</span>
+                <IconDatabase />
+                <span className="tree-label">{schema}</span>
+              </button>
+              {isOpen && (
+                <SchemaTables
+                  catalog={CATALOG}
+                  schema={schema}
+                  filter={filter}
+                  onOpen={openTable}
+                  onHover={(fq, rect) => setHovered({ fq, rect })}
+                  onHoverEnd={() => setHovered(null)}
+                  onMenu={(e, node) => {
                     e.preventDefault();
                     setMenuFor({ x: e.clientX, y: e.clientY, node });
                   }}
-                >
-                  <IconTableGrid />
-                  <span className="explorer-table-name">{t.name}</span>
-                </button>
-              </li>
-            );
-          })}
-          {filteredTables.length === 0 && (
-            <li className="explorer-placeholder">テーブルが見つかりません</li>
-          )}
-        </ul>
-      )}
+                />
+              )}
+            </li>
+          );
+        })}
+        {filteredSchemas.length === 0 && (
+          <li className="explorer-placeholder">スキーマが見つかりません</li>
+        )}
+      </ul>
 
       {hovered && (
         <TableColumnTooltip fq={hovered.fq} anchor={hovered.rect} />
@@ -215,7 +170,7 @@ export function ExploreView({ filter }: ExploreViewProps) {
           items={[
             {
               label: "Preview (sample 100 rows)",
-              onSelect: () => openTablePreview(menuFor.node.fq),
+              onSelect: () => openTable(menuFor.node.fq),
             },
             {
               label: "サマリーを作って",
@@ -235,5 +190,73 @@ export function ExploreView({ filter }: ExploreViewProps) {
         />
       )}
     </div>
+  );
+}
+
+interface SchemaTablesProps {
+  catalog: string;
+  schema: string;
+  filter: string;
+  onOpen: (fq: string) => void;
+  onHover: (fq: string, rect: DOMRect) => void;
+  onHoverEnd: () => void;
+  onMenu: (e: ReactMouseEvent, node: TableNode) => void;
+}
+
+function SchemaTables({
+  catalog,
+  schema,
+  filter,
+  onOpen,
+  onHover,
+  onHoverEnd,
+  onMenu,
+}: SchemaTablesProps) {
+  const { data, isLoading, error } = useTables(schema, catalog);
+  if (isLoading) {
+    return <p className="explorer-placeholder explorer-catalog-tree__loading">…</p>;
+  }
+  if (error) {
+    return <p className="tree-error explorer-catalog-tree__error">読み込み失敗</p>;
+  }
+
+  const tables = data?.tables ?? [];
+  const f = filter.trim().toLowerCase();
+  const filtered = f
+    ? tables.filter(
+        (t) =>
+          t.name.toLowerCase().includes(f) ||
+          t.fq.toLowerCase().includes(f),
+      )
+    : tables;
+
+  return (
+    <ul className="tree-child-list explorer-catalog-tree__tables">
+      {filtered.map((t) => {
+        const node: TableNode = { id: t.fq, name: t.name, fq: t.fq };
+        return (
+          <li key={t.fq}>
+            <button
+              type="button"
+              className="tree-row tree-row--table explorer-tree-row explorer-tree-row--table"
+              onClick={() => onOpen(t.fq)}
+              onMouseEnter={(e) =>
+                onHover(t.fq, e.currentTarget.getBoundingClientRect())
+              }
+              onMouseLeave={onHoverEnd}
+              onContextMenu={(e) => onMenu(e, node)}
+            >
+              <IconTableGrid />
+              <span className="tree-label" title={t.fq}>
+                {t.name}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+      {filtered.length === 0 && (
+        <li className="explorer-placeholder">テーブルが見つかりません</li>
+      )}
+    </ul>
   );
 }

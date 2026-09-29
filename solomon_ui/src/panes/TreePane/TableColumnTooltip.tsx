@@ -33,8 +33,8 @@ export function TableColumnTooltip({ fq, anchor }: Props) {
       {!isLoading && !error && columns.length > 0 && (
         <ul className="table-column-tooltip__list">
           {columns.map((c) => (
-            <li key={c.column_name}>
-              <span className="table-column-tooltip__name">{c.column_name}</span>
+            <li key={c.name}>
+              <span className="table-column-tooltip__name">{c.name}</span>
               <span className="table-column-tooltip__type">{formatType(c)}</span>
             </li>
           ))}
@@ -45,6 +45,5 @@ export function TableColumnTooltip({ fq, anchor }: Props) {
 }
 
 function formatType(c: ColumnEntry): string {
-  const nullable = c.is_nullable?.toUpperCase() === "YES" ? "?" : "";
-  return `${c.data_type}${nullable}`;
+  return c.nullable ? `${c.type}?` : c.type;
 }

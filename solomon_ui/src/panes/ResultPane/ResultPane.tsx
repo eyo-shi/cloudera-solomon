@@ -10,6 +10,7 @@ import { SQLTab } from "./tabs/SQLTab";
 import { SummaryTab } from "./tabs/SummaryTab";
 import { GraphTab } from "./tabs/GraphTab";
 import { TablePreviewTab } from "./tabs/TablePreviewTab";
+import { TablesTab } from "./tabs/TablesTab";
 
 export function ResultPane() {
   const tabs = useTabStore((s) => s.tabs);
@@ -57,6 +58,8 @@ function TabRenderer({ tabId }: { tabId: string }) {
       return <FilePreviewTab tab={tab} />;
     case "graph":
       return <GraphTab />;
+    case "tables":
+      return <TablesTab />;
     default:
       return <p className="placeholder">未対応のタブ種別</p>;
   }

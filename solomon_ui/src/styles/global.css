@@ -441,6 +441,35 @@ body,
   white-space: nowrap;
 }
 
+/* ---- Tables explorer tree (schema accordion) ---- */
+.explorer-view--tables {
+  padding: 0 0 0.75rem;
+}
+.explorer-catalog-tree {
+  padding: 0 0.25rem;
+}
+.explorer-tree-row {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.explorer-tree-row--table {
+  padding-left: 0.375rem;
+}
+.explorer-catalog-tree__tables {
+  margin-left: 0.625rem;
+  padding-left: 0.875rem;
+  border-left: 1px solid var(--border);
+}
+.explorer-catalog-tree__loading,
+.explorer-catalog-tree__error {
+  margin: 0.25rem 0 0.25rem 1.75rem;
+  font-size: var(--workspace-font-size);
+}
+
 /* ---- Graph left pane (Neo4j Database information) ---- */
 .graph-db-info {
   padding: 0 0.75rem 1rem;

@@ -19,9 +19,9 @@ export interface TableListResponse {
   tables: TableEntry[];
 }
 export interface ColumnEntry {
-  column_name: string;
-  data_type: string;
-  is_nullable: string;
+  name: string;
+  type: string;
+  nullable: boolean;
 }
 export interface ColumnListResponse {
   fq: string;
@@ -161,6 +161,7 @@ export interface QueryResponse {
 // ---------------- Artifacts ---------------- //
 export type ArtifactType =
   | "table_preview"
+  | "tables"
   | "dashboard"
   | "summary"
   | "sql"

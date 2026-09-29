@@ -3,7 +3,7 @@
  * radix-ui/react-tabs は使わず素直に div + button で作る (背景が動的で軽量なため)。
  */
 import { useTabStore } from "../../stores/tabStore";
-import { IconGraph } from "../TreePane/ExplorerIcons";
+import { IconGraph, IconTables } from "../TreePane/ExplorerIcons";
 import { FileTypeIcon } from "../TreePane/FileTypeIcon";
 
 const KIND_ICON: Record<string, string> = {
@@ -47,6 +47,10 @@ export function TabBar() {
             {t.kind === "graph" ? (
               <span className="tab-chip-icon tab-chip-icon--svg">
                 <IconGraph active={isActive} />
+              </span>
+            ) : t.kind === "tables" ? (
+              <span className="tab-chip-icon tab-chip-icon--svg">
+                <IconTables active={isActive} />
               </span>
             ) : t.kind === "file_preview" ? (
               <span className="tab-chip-icon tab-chip-icon--seti">
