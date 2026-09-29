@@ -46,15 +46,44 @@ export function GraphView({ filter }: GraphViewProps) {
     appendSidebarQuery({ queryType, ...ref });
   }
 
-  if (isLoading) return <p className="explorer-placeholder">Loading schema…</p>;
-  if (isSetupGuideError(error)) {
+  const sectionHead = (
+    <div className="explorer-section-head">
+      <span className="explorer-section-title">Database information</span>
+      <div className="explorer-section-actions">
+        <ExplorerRefreshButton
+          isFetching={isFetching}
+          onRefresh={() => void refreshGraphSchema()}
+        />
+      </div>
+    </div>
+  );
+
+  if (isLoading) {
     return (
-      <p className="explorer-placeholder">
-        Neo4j 未設定です。右ペインの設定手順を確認してください。
-      </p>
+      <div className="explorer-view explorer-view--graph">
+        {sectionHead}
+        <p className="explorer-placeholder">Loading schema…</p>
+      </div>
     );
   }
-  if (error) return <p className="explorer-error">スキーマ取得に失敗</p>;
+  if (isSetupGuideError(error)) {
+    return (
+      <div className="explorer-view explorer-view--graph">
+        {sectionHead}
+        <p className="explorer-placeholder">
+          Neo4j 未設定です。右ペインの設定手順を確認してください。
+        </p>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="explorer-view explorer-view--graph">
+        {sectionHead}
+        <p className="explorer-error">スキーマ取得に失敗</p>
+      </div>
+    );
+  }
 
   const empty =
     labels.length === 0 && relTypes.length === 0 && propKeys.length === 0;
@@ -63,15 +92,8 @@ export function GraphView({ filter }: GraphViewProps) {
 
   return (
     <div className="explorer-view explorer-view--graph">
+      {sectionHead}
       <div className="graph-db-info">
-        <div className="graph-db-info__head">
-          <h3 className="graph-db-info__title">Database information</h3>
-          <ExplorerRefreshButton
-            isFetching={isFetching}
-            onRefresh={() => void refreshGraphSchema()}
-          />
-        </div>
-
         {empty && (
           <p className="explorer-placeholder">グラフスキーマが空です</p>
         )}

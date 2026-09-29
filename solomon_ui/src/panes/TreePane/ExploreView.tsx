@@ -2,7 +2,7 @@
  * テーブル Explore ビュー。スキーマ選択とフラットなテーブル一覧。
  * スキーマ選択 → フラットなテーブル一覧。検索・ホバーツールチップ・ダブルクリックで中央表示。
  */
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { isSetupGuideError } from "../../api/client";
 import { useSchemas, useTables } from "../../api/catalog";
 import { refreshCatalogExplorer } from "../../api/explorerRefresh";
@@ -44,6 +44,26 @@ export function ExploreView({ filter }: ExploreViewProps) {
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt);
 
   const schemas = data?.schemas ?? [];
+  const {
+    data: tablesData,
+    isLoading: tablesLoading,
+    error: tablesError,
+    isFetching: tablesFetching,
+  } = useTables(schema, CATALOG);
+
+  const filteredTables = useMemo(() => {
+    const list = tablesData?.tables ?? [];
+    if (!filter.trim()) return list;
+    const f = filter.toLowerCase();
+    return list.filter(
+      (t) =>
+        t.name.toLowerCase().includes(f) ||
+        t.fq.toLowerCase().includes(f),
+    );
+  }, [tablesData, filter]);
+
+  const sectionCount = schema ? filteredTables.length : schemas.length;
+  const sectionBusy = schema ? tablesFetching : isFetching;
 
   useReportSetupGuideError(error);
 
@@ -67,29 +87,50 @@ export function ExploreView({ filter }: ExploreViewProps) {
     });
   }
 
-  if (isLoading) return <p className="explorer-placeholder">Loading…</p>;
-  if (isSetupGuideError(error)) {
+  const sectionHead = (
+    <div className="explorer-section-head">
+      <span className="explorer-section-title">Tables</span>
+      <span className="explorer-section-count">({sectionCount})</span>
+      <div className="explorer-section-actions">
+        <ExplorerRefreshButton
+          isFetching={sectionBusy}
+          onRefresh={() => void refreshCatalogExplorer()}
+        />
+      </div>
+    </div>
+  );
+
+  if (isLoading) {
     return (
-      <p className="explorer-placeholder">
-        Trino 未設定です。右ペインの設定手順を確認してください。
-      </p>
+      <div className="explorer-view">
+        {sectionHead}
+        <p className="explorer-placeholder">Loading…</p>
+      </div>
     );
   }
-  if (error) return <p className="explorer-error">スキーマ取得に失敗</p>;
+  if (isSetupGuideError(error)) {
+    return (
+      <div className="explorer-view">
+        {sectionHead}
+        <p className="explorer-placeholder">
+          Trino 未設定です。右ペインの設定手順を確認してください。
+        </p>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="explorer-view">
+        {sectionHead}
+        <p className="explorer-error">スキーマ取得に失敗</p>
+      </div>
+    );
+  }
 
   if (!schema) {
     return (
       <div className="explorer-view">
-        <div className="explorer-section-head">
-          <span className="explorer-section-title">Schemas</span>
-          <span className="explorer-section-count">({schemas.length})</span>
-          <div className="explorer-section-actions">
-            <ExplorerRefreshButton
-              isFetching={isFetching}
-              onRefresh={() => void refreshCatalogExplorer()}
-            />
-          </div>
-        </div>
+        {sectionHead}
         <ul className="explorer-table-list">
           {schemas.map((s) => (
             <li key={s}>
@@ -110,6 +151,8 @@ export function ExploreView({ filter }: ExploreViewProps) {
 
   return (
     <div className="explorer-view" onClick={() => setMenuFor(null)}>
+      {sectionHead}
+
       <nav className="explorer-breadcrumb">
         <button
           type="button"
@@ -123,19 +166,42 @@ export function ExploreView({ filter }: ExploreViewProps) {
         <span className="explorer-breadcrumb__label">{schema}</span>
       </nav>
 
-      <SchemaTableList
-        schema={schema}
-        filter={filter}
-        onOpen={openTablePreview}
-        onHover={(fq, el) => {
-          if (fq && el) setHovered({ fq, rect: el.getBoundingClientRect() });
-          else setHovered(null);
-        }}
-        onMenu={(e, node) => {
-          e.preventDefault();
-          setMenuFor({ x: e.clientX, y: e.clientY, node });
-        }}
-      />
+      {tablesLoading && (
+        <p className="explorer-placeholder">Loading tables…</p>
+      )}
+      {tablesError && (
+        <p className="explorer-error">テーブル取得に失敗</p>
+      )}
+      {!tablesLoading && !tablesError && (
+        <ul className="explorer-table-list">
+          {filteredTables.map((t) => {
+            const node: TableNode = { id: t.fq, name: t.name, fq: t.fq };
+            return (
+              <li key={t.fq}>
+                <button
+                  type="button"
+                  className="explorer-table-row"
+                  onDoubleClick={() => openTablePreview(t.fq)}
+                  onMouseEnter={(e) =>
+                    setHovered({ fq: t.fq, rect: e.currentTarget.getBoundingClientRect() })
+                  }
+                  onMouseLeave={() => setHovered(null)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMenuFor({ x: e.clientX, y: e.clientY, node });
+                  }}
+                >
+                  <IconTableGrid />
+                  <span className="explorer-table-name">{t.name}</span>
+                </button>
+              </li>
+            );
+          })}
+          {filteredTables.length === 0 && (
+            <li className="explorer-placeholder">テーブルが見つかりません</li>
+          )}
+        </ul>
+      )}
 
       {hovered && (
         <TableColumnTooltip fq={hovered.fq} anchor={hovered.rect} />
@@ -169,75 +235,5 @@ export function ExploreView({ filter }: ExploreViewProps) {
         />
       )}
     </div>
-  );
-}
-
-interface SchemaTableListProps {
-  schema: string;
-  filter: string;
-  onOpen: (fq: string) => void;
-  onHover: (fq: string | null, el: HTMLElement | null) => void;
-  onMenu: (e: ReactMouseEvent, node: TableNode) => void;
-}
-
-function SchemaTableList({
-  schema,
-  filter,
-  onOpen,
-  onHover,
-  onMenu,
-}: SchemaTableListProps) {
-  const { data, isLoading, error, isFetching } = useTables(schema, CATALOG);
-
-  const tables = useMemo(() => {
-    const list = data?.tables ?? [];
-    if (!filter.trim()) return list;
-    const f = filter.toLowerCase();
-    return list.filter(
-      (t) =>
-        t.name.toLowerCase().includes(f) ||
-        t.fq.toLowerCase().includes(f),
-    );
-  }, [data, filter]);
-
-  if (isLoading) return <p className="explorer-placeholder">Loading tables…</p>;
-  if (error) return <p className="explorer-error">テーブル取得に失敗</p>;
-
-  return (
-    <>
-      <div className="explorer-section-head">
-        <span className="explorer-section-title">Tables</span>
-        <span className="explorer-section-count">({tables.length})</span>
-        <div className="explorer-section-actions">
-          <ExplorerRefreshButton
-            isFetching={isFetching}
-            onRefresh={() => void refreshCatalogExplorer()}
-          />
-        </div>
-      </div>
-      <ul className="explorer-table-list">
-        {tables.map((t) => {
-          const node: TableNode = { id: t.fq, name: t.name, fq: t.fq };
-          return (
-            <li key={t.fq}>
-              <button
-                type="button"
-                className="explorer-table-row"
-                onDoubleClick={() => onOpen(t.fq)}
-                onMouseEnter={(e) => onHover(t.fq, e.currentTarget)}
-                onMouseLeave={() => onHover(null, null)}
-                onContextMenu={(e) => onMenu(e, node)}
-              >
-                <IconTableGrid />
-                <span className="explorer-table-name">{t.name}</span>
-              </button>
-            </li>
-          );
-        })}
-        {tables.length === 0 && (
-          <li className="explorer-placeholder">テーブルが見つかりません</li>
-        )}
-      </ul>
-    </>
   );
 }

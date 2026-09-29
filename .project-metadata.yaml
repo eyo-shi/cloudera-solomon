@@ -168,14 +168,16 @@ tasks:
     entity_label: opensearch-launcher
     subdomain: opensearch-launcher
     script: 1_start-opensearch/start_opensearch.py
-    short_summary: Launch OpenSearch on Kubernetes for internal mode
+    short_summary: Launch OpenSearch + Dashboards on Kubernetes for internal mode
     long_summary: >-
-      OPENSEARCH_MODE=internal のとき Kubernetes 上で OpenSearch (k-NN 対応) を
-      起動し、.solomon/opensearch_endpoints.json を Solomon と共有する。
+      OPENSEARCH_MODE=internal のとき Kubernetes 上で OpenSearch (k-NN 対応) と
+      OpenSearch Dashboards (Neo4j Browser 相当の管理 UI) を起動し、Launcher URL
+      から /dashboards/ でプロキシ公開する。solomon-datasets インデックスも作成し、
+      .solomon/opensearch_endpoints.json を Solomon と共有する。
       external モードでは supervisor は no-op (外部 OpenSearch を使用)。
     kernel: python3
     cpu: 2
-    memory: 4
+    memory: 6
 
   # 7. Solomon API を Workbench Application として起動 (Knox パススルーで公開)
   - type: start_application

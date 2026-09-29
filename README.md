@@ -207,6 +207,8 @@ Solomon プロセス内では OpenSearch サーバーは起動しない。
 **internal (`OPENSEARCH_MODE=internal`)**
 
 - AMP Deploy で `opensearch-launcher` が起動 (Neo4j launcher と同型)
+- OpenSearch 起動後に `solomon-datasets` インデックスを自動作成 (Solomon 起動時も再試行)
+- **OpenSearch Dashboards** を同 Pod で起動し、Launcher Application URL の `/dashboards/` から利用 (Neo4j Browser 相当)
 - Application Log に HTTP エンドポイントが出力される
 - DNS が通らない場合は `OPENSEARCH_ENDPOINT` を post-deploy で設定
 

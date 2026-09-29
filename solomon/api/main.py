@@ -17,6 +17,8 @@ FastAPI が ``/api/*`` を提供し、``/`` は ``solomon/api/static/`` の SPA
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from solomon.transport.crewai_bootstrap import configure_crewai_runtime
 
@@ -96,6 +98,14 @@ def _uvicorn_log_level() -> str:
     return level if level in _UVICORN_LOG_LEVELS else "info"
 
 
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from solomon.opensearch.bootstrap import bootstrap_search_index
+
+    bootstrap_search_index()
+    yield
+
+
 def create_app() -> FastAPI:
     """FastAPI アプリを組み立てる。テストからも呼ぶ想定。"""
     configure_logging()
@@ -108,6 +118,7 @@ def create_app() -> FastAPI:
             "Cloudera AI Agent Studio 上の Genie 相当マルチエージェントの "
             "FastAPI バックエンド。/api/* で Crew と各種メタデータを提供する。"
         ),
+        lifespan=_app_lifespan,
     )
 
     # CORS: Workbench の同一ドメインで配信されるので基本 same-origin。

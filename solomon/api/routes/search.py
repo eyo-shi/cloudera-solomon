@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from solomon.api.auth import require_user_context
 from solomon.opensearch.client import build_client, ping
+from solomon.opensearch.indexer import ensure_index
 from solomon.opensearch.search import keyword_search
 from solomon.transport.config import get_opensearch_config
 from solomon.transport.user_context import UserContext
@@ -68,10 +69,11 @@ def list_documents(
         )
 
     try:
+        client = build_client(config)
+        ensure_index(client, config)
         if q.strip():
             hits = keyword_search(config, q.strip(), top_k=limit)
         else:
-            client = build_client(config)
             body = {
                 "size": limit,
                 "query": {"match_all": {}},
