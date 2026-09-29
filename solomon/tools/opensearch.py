@@ -1,7 +1,7 @@
-"""OpenSearch Tools — Cloudera Semantic Search (Data Hub) への外部接続。
+"""OpenSearch Tools — Data Hub (本番) または CML launcher (デモ) への接続。
 
-OpenSearch は Solomon 内では起動しない。Trino/CDW と同様、post-deploy に
-Data Connection または env で外部クラスタのエンドポイントを設定する。
+``SOLOMON_OPENSEARCH_MODE`` で接続先を切り替える。Solomon プロセス内では
+OpenSearch サーバーは起動せず、外部 / co-located クラスタへ opensearch-py で接続する。
 """
 
 from __future__ import annotations
@@ -18,11 +18,22 @@ from solomon.transport.errors import ErrorCode, err, ok
 from solomon.transport.tool_base import BaseSolomonTool
 from solomon.transport.user_context import UserContext
 
-_NOT_CONFIGURED_MSG = (
-    "OpenSearch is not configured. Provision Semantic Search for AWS on Data Hub, "
-    "register a Data Connection (or set SOLOMON_OPENSEARCH_ENDPOINT and "
-    "SOLOMON_OPENSEARCH_NAMESPACE), then restart Solomon."
-)
+def _not_configured_msg() -> str:
+    from solomon.opensearch.mode import is_cml_opensearch_mode
+
+    if is_cml_opensearch_mode():
+        return (
+            "OpenSearch is not configured for CML demo mode. Ensure "
+            "opensearch-launcher Application is Running, wait for "
+            ".solomon/opensearch_endpoints.json, or set SOLOMON_OPENSEARCH_ENDPOINT, "
+            "then restart Solomon."
+        )
+    return (
+        "OpenSearch is not configured. Set SOLOMON_OPENSEARCH_MODE=datahub, "
+        "provision Semantic Search for AWS on Data Hub, register a Data Connection "
+        "(or set SOLOMON_OPENSEARCH_ENDPOINT and SOLOMON_OPENSEARCH_NAMESPACE), "
+        "then restart Solomon."
+    )
 
 
 class OpenSearchKeywordSearchArgs(BaseModel):
@@ -50,7 +61,7 @@ class OpenSearchKeywordSearchTool(BaseSolomonTool):
     ) -> dict[str, Any]:
         config = get_opensearch_config()
         if config is None:
-            return err(ErrorCode.OPENSEARCH_NOT_CONFIGURED, _NOT_CONFIGURED_MSG)
+            return err(ErrorCode.OPENSEARCH_NOT_CONFIGURED, _not_configured_msg())
         try:
             results = keyword_search(config, query, top_k=top_k)
         except Exception as exc:  # noqa: BLE001
@@ -95,7 +106,7 @@ class OpenSearchVectorSearchTool(BaseSolomonTool):
     ) -> dict[str, Any]:
         config = get_opensearch_config()
         if config is None:
-            return err(ErrorCode.OPENSEARCH_NOT_CONFIGURED, _NOT_CONFIGURED_MSG)
+            return err(ErrorCode.OPENSEARCH_NOT_CONFIGURED, _not_configured_msg())
         try:
             results = vector_search(config, query, top_k=top_k)
         except Exception as exc:  # noqa: BLE001
@@ -140,7 +151,7 @@ class OpenSearchHybridSearchTool(BaseSolomonTool):
     ) -> dict[str, Any]:
         config = get_opensearch_config()
         if config is None:
-            return err(ErrorCode.OPENSEARCH_NOT_CONFIGURED, _NOT_CONFIGURED_MSG)
+            return err(ErrorCode.OPENSEARCH_NOT_CONFIGURED, _not_configured_msg())
         try:
             results = hybrid_search(config, query, top_k=top_k)
         except Exception as exc:  # noqa: BLE001
@@ -245,7 +256,7 @@ class OpenSearchPingTool(BaseSolomonTool):
     def run(self, user_ctx: Optional[UserContext], **_: Any) -> dict[str, Any]:
         config = get_opensearch_config()
         if config is None:
-            return err(ErrorCode.OPENSEARCH_NOT_CONFIGURED, _NOT_CONFIGURED_MSG)
+            return err(ErrorCode.OPENSEARCH_NOT_CONFIGURED, _not_configured_msg())
         reachable = ping(config)
         if not reachable:
             return err(

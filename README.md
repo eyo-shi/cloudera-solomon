@@ -164,18 +164,27 @@ instruction}`) を返し、UI の **SetupGuide カード** が手順を表示す
 - 未設定時は Graph タブ・Ingestion の Neo4j 書込・Agentic RAG の graph 検索が
   `NEO4J_NOT_CONFIGURED` で停止する。
 
-### 4. OpenSearch / Cloudera Semantic Search への接続
+### 4. OpenSearch / Semantic Search への接続
 
-Solomon 内では OpenSearch を起動しない。Data Hub で **Semantic Search for AWS** を
-Provision した後、Management Console からエンドポイント URL と namespace を取得する。
+Deploy 時に `SOLOMON_OPENSEARCH_MODE` で接続方式を切り替える (Solomon プロセス内では
+OpenSearch サーバーは起動しない)。
+
+| モード | 用途 | 設定 |
+|---|---|---|
+| `cml` (AMP デフォルト) | CML デモ完結 | `opensearch-launcher` Application が K8s 上で OpenSearch を起動し、`.solomon/opensearch_endpoints.json` を Solomon と共有 |
+| `datahub` | 本番 | Data Hub **Semantic Search for AWS** を Provision し Data Connection または env で接続 |
+
+**CML デモ (`SOLOMON_OPENSEARCH_MODE=cml`)**
+
+- AMP Deploy で `opensearch-launcher` が起動 (Neo4j launcher と同型)
+- Application Log に HTTP エンドポイントが出力される
+- DNS が通らない場合は Log の `SOLOMON_OPENSEARCH_ENDPOINT` を Solomon env に設定
+
+**本番 (`SOLOMON_OPENSEARCH_MODE=datahub`)**
 
 - Data Connections に OpenSearch connection を登録済みなら
-  `SOLOMON_OPENSEARCH_CONNECTION_NAME` を設定 (省略時は OpenSearch タイプを自動検出)。
-- Data Connections を使わない環境では以下を直接指定:
-  - `SOLOMON_OPENSEARCH_ENDPOINT` (または `SOLOMON_OPENSEARCH_HOST`)
-  - `SOLOMON_OPENSEARCH_NAMESPACE` (default `solomon`)
-  - `SOLOMON_OPENSEARCH_INDEX` (default `{namespace}-datasets`)
-  - `SOLOMON_OPENSEARCH_USERNAME` / `SOLOMON_OPENSEARCH_PASSWORD` (必要な場合)
+  `SOLOMON_OPENSEARCH_CONNECTION_NAME` を設定 (省略時は OpenSearch タイプを自動検出)
+- 直接指定: `SOLOMON_OPENSEARCH_ENDPOINT`, `SOLOMON_OPENSEARCH_NAMESPACE`, 認証情報など
 
 Ingestion 完了後に Ossie dataset が OpenSearch にインデックスされる。
 未設定時は Search タブ・RAG の keyword/hybrid 検索が `OPENSEARCH_NOT_CONFIGURED` で停止する。

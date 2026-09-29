@@ -128,11 +128,11 @@ class CDVConfig:
 
 @dataclass(frozen=True)
 class OpenSearchConfig:
-    """Cloudera Semantic Search (Data Hub OpenSearch) への外部接続設定。
+    """OpenSearch 接続設定 (Data Hub 本番 / CML launcher デモ)。
 
-    OpenSearch は Trino/CDW と同様、Solomon 内では起動せず Data Hub 上の
-    Semantic Search for AWS クラスタへ接続する。認証情報は env / Data Connection
-    から取得し、Knox JWT とは別系統。
+    ``SOLOMON_OPENSEARCH_MODE=datahub`` では Data Hub Semantic Search へ接続。
+    ``SOLOMON_OPENSEARCH_MODE=cml`` では opensearch-launcher が起動した
+    クラスタ (``.solomon/opensearch_endpoints.json``) へ接続する。
     """
 
     host: str
@@ -621,22 +621,51 @@ def _opensearch_config_from_params(
     )
 
 
-def get_opensearch_config() -> Optional[OpenSearchConfig]:
-    """OpenSearch (Cloudera Semantic Search) 接続設定を解決する。解決順は 4 段:
+def _opensearch_config_from_endpoint(
+    endpoint: str,
+    *,
+    namespace_env: Optional[str],
+    index_env: Optional[str],
+    embedding_dim_env: Optional[str],
+    connection_name: Optional[str] = None,
+    default_scheme: str = "https",
+    default_verify_ssl: Any = True,
+) -> Optional[OpenSearchConfig]:
+    host, port, scheme = _parse_opensearch_endpoint(endpoint)
+    if not host:
+        return None
+    port = int(_env("SOLOMON_OPENSEARCH_PORT") or str(port))
+    scheme = _env("SOLOMON_OPENSEARCH_SCHEME") or scheme or default_scheme
+    verify_raw = _env("SOLOMON_OPENSEARCH_VERIFY_SSL")
+    verify = _parse_verify_ssl(verify_raw) if verify_raw is not None else default_verify_ssl
+    namespace = namespace_env or "solomon"
+    index_name = index_env or f"{namespace}-datasets"
+    dim_raw = embedding_dim_env or "1024"
+    try:
+        embedding_dim = int(dim_raw)
+    except (TypeError, ValueError):
+        embedding_dim = 1024
+    return OpenSearchConfig(
+        host=host,
+        port=port,
+        scheme=scheme,
+        verify_ssl=verify,
+        namespace=namespace,
+        index_name=index_name,
+        username=_env("SOLOMON_OPENSEARCH_USERNAME"),
+        password=_env("SOLOMON_OPENSEARCH_PASSWORD"),
+        embedding_dim=embedding_dim,
+        connection_name=connection_name,
+    )
 
-    1. env ``SOLOMON_OPENSEARCH_CONNECTION_NAME`` があれば ``cml.data_v1`` から取得
-    2. cml.data の全 connection から OpenSearch/CSS 系を auto-detect (1 件目)
-    3. env ``SOLOMON_OPENSEARCH_ENDPOINT`` / ``SOLOMON_OPENSEARCH_HOST`` 系にフォールバック
-    4. 何も無ければ ``None`` (Tool は ``OPENSEARCH_NOT_CONFIGURED`` を返す)
 
-    Data Hub の Semantic Search for AWS を Provision した後、Management Console
-    からエンドポイント URL と namespace を取得して Data Connection または env に
-    設定する (Trino/CDW と同じ post-deploy ワークフロー)。
-    """
-    namespace_env = _env("SOLOMON_OPENSEARCH_NAMESPACE")
-    index_env = _env("SOLOMON_OPENSEARCH_INDEX")
-    embedding_dim_env = _env("SOLOMON_OPENSEARCH_EMBEDDING_DIM")
-
+def _get_datahub_opensearch_config(
+    *,
+    namespace_env: Optional[str],
+    index_env: Optional[str],
+    embedding_dim_env: Optional[str],
+) -> Optional[OpenSearchConfig]:
+    """Production: Data Hub Semantic Search via Data Connection or explicit env."""
     name = _env("SOLOMON_OPENSEARCH_CONNECTION_NAME")
     conn: Optional[Any] = None
     if name:
@@ -677,34 +706,70 @@ def get_opensearch_config() -> Optional[OpenSearchConfig]:
 
     endpoint = _env("SOLOMON_OPENSEARCH_ENDPOINT") or _env("SOLOMON_OPENSEARCH_HOST")
     if not endpoint:
-        _logger.debug("opensearch_config.not_configured")
         return None
-
-    host, port, scheme = _parse_opensearch_endpoint(endpoint)
-    if not host:
-        return None
-    port = int(_env("SOLOMON_OPENSEARCH_PORT") or str(port))
-    scheme = _env("SOLOMON_OPENSEARCH_SCHEME") or scheme
-    verify = _parse_verify_ssl(_env("SOLOMON_OPENSEARCH_VERIFY_SSL"))
-    namespace = namespace_env or "solomon"
-    index_name = index_env or f"{namespace}-datasets"
-    dim_raw = embedding_dim_env or "1024"
-    try:
-        embedding_dim = int(dim_raw)
-    except (TypeError, ValueError):
-        embedding_dim = 1024
-    return OpenSearchConfig(
-        host=host,
-        port=port,
-        scheme=scheme,
-        verify_ssl=verify,
-        namespace=namespace,
-        index_name=index_name,
-        username=_env("SOLOMON_OPENSEARCH_USERNAME"),
-        password=_env("SOLOMON_OPENSEARCH_PASSWORD"),
-        embedding_dim=embedding_dim,
-        connection_name=None,
+    return _opensearch_config_from_endpoint(
+        endpoint,
+        namespace_env=namespace_env,
+        index_env=index_env,
+        embedding_dim_env=embedding_dim_env,
     )
+
+
+def _get_cml_opensearch_config(
+    *,
+    namespace_env: Optional[str],
+    index_env: Optional[str],
+    embedding_dim_env: Optional[str],
+) -> Optional[OpenSearchConfig]:
+    """Demo: co-located opensearch-launcher (Neo4j launcher と同型)."""
+    endpoint = _env("SOLOMON_OPENSEARCH_ENDPOINT") or _env("SOLOMON_OPENSEARCH_HOST")
+    if not endpoint:
+        from solomon.opensearch.endpoints_file import load_http_hosts
+
+        hosts = load_http_hosts()
+        if hosts:
+            endpoint = f"http://{hosts[0]}"
+    if not endpoint:
+        _logger.debug("opensearch_config.cml_launcher_not_ready")
+        return None
+    return _opensearch_config_from_endpoint(
+        endpoint,
+        namespace_env=namespace_env,
+        index_env=index_env,
+        embedding_dim_env=embedding_dim_env,
+        default_scheme="http",
+        default_verify_ssl=False,
+    )
+
+
+def get_opensearch_config() -> Optional[OpenSearchConfig]:
+    """OpenSearch 接続設定。``SOLOMON_OPENSEARCH_MODE`` で解決経路を切り替える。
+
+    * ``datahub`` (default): Data Hub Semantic Search — Data Connection または env
+    * ``cml``: opensearch-launcher が書く ``.solomon/opensearch_endpoints.json``
+      / ``SOLOMON_OPENSEARCH_ENDPOINT`` へ接続 (CML デモ完結)
+    """
+    from solomon.opensearch.mode import is_cml_opensearch_mode
+
+    namespace_env = _env("SOLOMON_OPENSEARCH_NAMESPACE")
+    index_env = _env("SOLOMON_OPENSEARCH_INDEX")
+    embedding_dim_env = _env("SOLOMON_OPENSEARCH_EMBEDDING_DIM")
+
+    if is_cml_opensearch_mode():
+        return _get_cml_opensearch_config(
+            namespace_env=namespace_env,
+            index_env=index_env,
+            embedding_dim_env=embedding_dim_env,
+        )
+
+    cfg = _get_datahub_opensearch_config(
+        namespace_env=namespace_env,
+        index_env=index_env,
+        embedding_dim_env=embedding_dim_env,
+    )
+    if cfg is None:
+        _logger.debug("opensearch_config.not_configured")
+    return cfg
 
 
 __all__ = [

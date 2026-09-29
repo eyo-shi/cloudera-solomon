@@ -49,6 +49,12 @@ environment_variables:
       "warm" にすると Tool の重い呼び出しをウォーミング済みのスタブに差し替える
       (デモ保険)。本番は "off"。
     required: false
+  SOLOMON_OPENSEARCH_MODE:
+    default: "cml"
+    description: >-
+      OpenSearch 接続方式。"cml" = 同プロジェクトの opensearch-launcher (CML デモ完結)。
+      "datahub" = Data Hub Semantic Search (本番)。Deploy 時に切り替える。
+    required: false
   NEO4J_USERNAME:
     default: "neo4j"
     description: Neo4j username.
@@ -89,6 +95,14 @@ environment_variables:
   NEO4J_USE_PVC:
     default: "false"
     description: Persist Neo4j data on the project PVC.
+    required: false
+  OPENSEARCH_MEMORY:
+    default: "2Gi"
+    description: Memory limit for the OpenSearch Pod (CML launcher / demo mode).
+    required: false
+  OPENSEARCH_USE_PVC:
+    default: "false"
+    description: Persist OpenSearch data on the project PVC (CML launcher).
     required: false
 
 # ---------------------------------------------------------------------------
@@ -169,7 +183,22 @@ tasks:
     cpu: 2
     memory: 8
 
-  # 6. Solomon API を Workbench Application として起動 (Knox パススルーで公開)
+  # 6. OpenSearch Launcher を Workbench Application として起動 (CML デモ用)
+  - type: start_application
+    name: OpenSearch Launcher
+    entity_label: opensearch-launcher
+    subdomain: opensearch-launcher
+    script: 1_start-opensearch/start_opensearch.py
+    short_summary: Launch OpenSearch on Kubernetes for CML demo mode
+    long_summary: >-
+      SOLOMON_OPENSEARCH_MODE=cml のとき Kubernetes 上で OpenSearch (k-NN 対応) を
+      起動し、.solomon/opensearch_endpoints.json を Solomon と共有する。
+      datahub モードでは supervisor は no-op (Data Hub Semantic Search を使用)。
+    kernel: python3
+    cpu: 2
+    memory: 4
+
+  # 7. Solomon API を Workbench Application として起動 (Knox パススルーで公開)
   - type: start_application
     name: Solomon
     entity_label: solomon-api

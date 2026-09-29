@@ -123,12 +123,16 @@ function guideFor(errorCode: string): GuideDetails {
         title: "Semantic Search (OpenSearch) への接続情報が未設定です",
         envList: [
           {
+            name: "SOLOMON_OPENSEARCH_MODE",
+            hint: "cml = opensearch-launcher (デモ) / datahub = Data Hub Semantic Search (本番)",
+          },
+          {
             name: "SOLOMON_OPENSEARCH_CONNECTION_NAME",
-            hint: "Site Administration → Data Connections で登録した OpenSearch connection 名",
+            hint: "datahub モード: Data Connections の OpenSearch connection 名",
           },
           {
             name: "SOLOMON_OPENSEARCH_ENDPOINT",
-            hint: "Data Connections を使わない場合のエンドポイント URL",
+            hint: "cml モード: launcher Log の HTTP エンドポイント (DNS 不通時)",
           },
           {
             name: "SOLOMON_OPENSEARCH_NAMESPACE",
@@ -136,8 +140,8 @@ function guideFor(errorCode: string): GuideDetails {
           },
         ],
         extraSteps: [
-          "Data Hub で Semantic Search for AWS を Provision",
-          "Site Administration → Data Connections で OpenSearch connection を登録",
+          "cml: opensearch-launcher Application が Running か確認し、Log の endpoints file を待つ",
+          "datahub: Semantic Search for AWS を Provision し Data Connection を登録",
           "Project → Settings → Advanced → Environment Variables に設定",
           "Solomon Application を Restart",
         ],
