@@ -98,10 +98,39 @@ def _uvicorn_log_level() -> str:
     return level if level in _UVICORN_LOG_LEVELS else "info"
 
 
+def _log_trino_startup_config() -> None:
+    from solomon.transport.config import get_trino_config
+    from solomon.trino.mode import is_internal_trino_mode
+
+    cfg = get_trino_config()
+    if cfg is None:
+        if is_internal_trino_mode():
+            print(
+                "[solomon] TRINO_MODE=internal but Trino is not ready yet. "
+                "Wait for warehouse-launcher, or set TRINO_ENDPOINT "
+                "from the warehouse-launcher Application Log.",
+                flush=True,
+            )
+        return
+    print(
+        "[solomon] Trino resolved: "
+        f"host={cfg.host} port={cfg.port} scheme={cfg.scheme} "
+        f"catalog={cfg.catalog} schema={cfg.schema} internal={cfg.internal}",
+        flush=True,
+    )
+    if cfg.internal:
+        print(
+            f"[solomon] TRINO_ENDPOINT (if setting manually): "
+            f"{cfg.scheme}://{cfg.host}:{cfg.port}",
+            flush=True,
+        )
+
+
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from solomon.opensearch.bootstrap import bootstrap_search_index
 
+    _log_trino_startup_config()
     bootstrap_search_index()
     yield
 

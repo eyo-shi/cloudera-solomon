@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
@@ -18,12 +19,28 @@ TRINO_IMAGE = os.getenv("TRINO_IMAGE") or "trinodb/trino:476"
 TRINO_SERVICE_TYPE = os.getenv("TRINO_SERVICE_TYPE") or "ClusterIP"
 TRINO_MEMORY = os.getenv("TRINO_MEMORY") or "2Gi"
 TRINO_JAVA_OPTS = os.getenv("TRINO_JAVA_OPTS") or "-Xmx1G"
-DUCKDB_INIT_IMAGE = os.getenv("DUCKDB_INIT_IMAGE") or "python:3.12-slim"
-DUCKDB_FILE = os.getenv("DUCKDB_FILE") or "/data/solomon.duckdb"
+DUCKDB_INIT_IMAGE = os.getenv("DUCKDB_INIT_IMAGE") or "busybox:1.36"
+DUCKDB_FILE = os.getenv("DUCKDB_FILE") or "/data/solomon/solomon.duckdb"
 TRINO_STARTUP_TIMEOUT_SECONDS = int(os.getenv("TRINO_STARTUP_TIMEOUT_SECONDS") or "900")
 TRINO_CATALOG_NAME = os.getenv("TRINO_CATALOG_NAME") or "iceberg"
+_SOLOMON_DUCKDB_REL = Path(".solomon") / "solomon.duckdb"
+_POD_FAILURE_WAITING_REASONS = (
+    "CrashLoopBackOff",
+    "ImagePullBackOff",
+    "ErrImagePull",
+    "CreateContainerConfigError",
+    "InvalidImageName",
+    "RunContainerError",
+    "Init:CrashLoopBackOff",
+    "Init:Error",
+)
 
 _supervisor_state: dict = {"phase": "initializing", "error": None}
+_deploy_ctx: dict = {
+    "use_pvc": False,
+    "pvc_claim": None,
+    "duckdb_file": DUCKDB_FILE,
+}
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -79,9 +96,56 @@ def _normalize_memory(value: str) -> str:
     return normalized
 
 
-def _duckdb_init_script() -> str:
-    path = Path(__file__).resolve().parent.parent / "warehouse" / "duckdb_init.py"
-    return path.read_text(encoding="utf-8")
+def _duckdb_project_path() -> Path:
+    for key in ("CDSW_PROJECT_DIR", "CML_PROJECT_DIR"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            return Path(raw) / _SOLOMON_DUCKDB_REL
+    return Path.cwd() / _SOLOMON_DUCKDB_REL
+
+
+def _ensure_duckdb_seeded() -> Path:
+    from solomon.trino.duckdb_seed import seed_duckdb_database
+
+    path = _duckdb_project_path()
+    seeded = seed_duckdb_database(path)
+    print(
+        f"Seeded DuckDB database at {path}"
+        if seeded
+        else f"DuckDB database already present at {path}"
+    )
+    return path
+
+
+def _get_project_pvc_claim_name() -> str | None:
+    pod_name = (os.getenv("HOSTNAME") or "").strip()
+    if not pod_name:
+        return None
+    try:
+        pod = client.CoreV1Api().read_namespaced_pod(
+            name=pod_name,
+            namespace=get_current_namespace(),
+        )
+    except ApiException:
+        return None
+    containers = pod.spec.containers or []
+    if not containers:
+        return None
+    for mount in containers[0].volume_mounts or []:
+        if mount.mount_path == "/home/cdsw":
+            for vol in pod.spec.volumes or []:
+                if vol.name == mount.name and vol.persistent_volume_claim:
+                    return vol.persistent_volume_claim.claim_name
+    return None
+
+
+def _use_project_pvc(pvc_claim: str | None) -> bool:
+    if pvc_claim is None:
+        return False
+    if TRINO_USE_PVC:
+        return True
+    # CML Workbench sessions always have /home/cdsw PVC — prefer shared seed file.
+    return (os.environ.get("CDSW_PROJECT_DIR") or os.environ.get("CML_PROJECT_DIR")) is not None
 
 
 def _trino_config_properties() -> str:
@@ -97,18 +161,32 @@ def _trino_config_properties() -> str:
 
 
 def _trino_catalog_properties() -> str:
+    duckdb_file = str(_deploy_ctx.get("duckdb_file") or DUCKDB_FILE)
     return "\n".join(
         [
             "connector.name=duckdb",
-            f"connection-url=jdbc:duckdb:{DUCKDB_FILE}",
+            f"connection-url=jdbc:duckdb:{duckdb_file}",
             "",
         ]
     )
 
 
-def ensure_configmaps() -> None:
+def ensure_configmaps(
+    *,
+    include_duckdb_binary: bool = False,
+    duckdb_path: Path | None = None,
+) -> None:
     core = client.CoreV1Api()
     namespace = get_current_namespace()
+    binary_data = None
+    if include_duckdb_binary:
+        if duckdb_path is None or not duckdb_path.is_file():
+            raise RuntimeError(
+                f"DuckDB seed file is required for emptyDir mode: {duckdb_path}"
+            )
+        binary_data = {
+            "solomon.duckdb": base64.b64encode(duckdb_path.read_bytes()).decode("ascii")
+        }
     body = client.V1ConfigMap(
         api_version="v1",
         metadata=client.V1ObjectMeta(
@@ -119,8 +197,8 @@ def ensure_configmaps() -> None:
         data={
             "config.properties": _trino_config_properties(),
             f"{TRINO_CATALOG_NAME}.properties": _trino_catalog_properties(),
-            "duckdb_init.py": _duckdb_init_script(),
         },
+        binary_data=binary_data,
     )
     try:
         core.create_namespaced_config_map(namespace=namespace, body=body)
@@ -136,58 +214,62 @@ def ensure_configmaps() -> None:
         print(f"Updated warehouse ConfigMap {get_configmap_name()}")
 
 
-def _data_volume() -> client.V1Volume:
+def _data_volume(*, use_pvc: bool, pvc_claim: str) -> client.V1Volume:
     volume = client.V1Volume(name="warehouse-data")
-    if TRINO_USE_PVC:
-        pod_name = (os.getenv("HOSTNAME") or "").strip()
-        pod_spec = client.CoreV1Api().read_namespaced_pod(
-            name=pod_name,
-            namespace=get_current_namespace(),
-        )
-        claim_name = None
-        for mount in pod_spec.spec.containers[0].volume_mounts or []:
-            if mount.mount_path == "/home/cdsw":
-                for vol in pod_spec.spec.volumes or []:
-                    if vol.name == mount.name and vol.persistent_volume_claim:
-                        claim_name = vol.persistent_volume_claim.claim_name
-                        break
-        if not claim_name:
-            raise RuntimeError("PVC claim for /home/cdsw not found")
+    if use_pvc:
         volume.persistent_volume_claim = client.V1PersistentVolumeClaimVolumeSource(
-            claim_name=claim_name
+            claim_name=pvc_claim
         )
     else:
         volume.empty_dir = client.V1EmptyDirVolumeSource()
     return volume
 
 
+def _data_mount(*, use_pvc: bool) -> client.V1VolumeMount:
+    duckdb_file = str(_deploy_ctx.get("duckdb_file") or DUCKDB_FILE)
+    if use_pvc:
+        return client.V1VolumeMount(
+            name="warehouse-data",
+            mount_path=str(Path(duckdb_file).parent),
+            sub_path=str(_SOLOMON_DUCKDB_REL.parent),
+        )
+    return client.V1VolumeMount(name="warehouse-data", mount_path="/data")
+
+
 def create_deployment_spec() -> client.V1Deployment:
     namespace = get_current_namespace()
     memory = _normalize_memory(TRINO_MEMORY)
-    data_volume = _data_volume()
-    data_mount = client.V1VolumeMount(name="warehouse-data", mount_path="/data")
-    if TRINO_USE_PVC:
-        data_mount.sub_path = "warehouse-volume"
+    use_pvc = bool(_deploy_ctx.get("use_pvc"))
+    pvc_claim = str(_deploy_ctx.get("pvc_claim") or "")
+    duckdb_file = str(_deploy_ctx.get("duckdb_file") or DUCKDB_FILE)
+    data_volume = _data_volume(use_pvc=use_pvc, pvc_claim=pvc_claim)
+    data_mount = _data_mount(use_pvc=use_pvc)
 
     config_volume = client.V1Volume(
         name="warehouse-config",
         config_map=client.V1ConfigMapVolumeSource(name=get_configmap_name()),
     )
 
-    init_container = client.V1Container(
-        name="duckdb-init",
-        image=DUCKDB_INIT_IMAGE,
-        image_pull_policy="IfNotPresent",
-        command=["/bin/sh", "-c"],
-        args=[
-            "pip install -q duckdb && python /config/duckdb_init.py "
-            f"{DUCKDB_FILE}"
-        ],
-        volume_mounts=[
-            data_mount,
-            client.V1VolumeMount(name="warehouse-config", mount_path="/config"),
-        ],
-    )
+    init_containers: list[client.V1Container] = []
+    if not use_pvc:
+        init_containers.append(
+            client.V1Container(
+                name="duckdb-init",
+                image=DUCKDB_INIT_IMAGE,
+                image_pull_policy="IfNotPresent",
+                command=["sh", "-c"],
+                args=[
+                    f"mkdir -p $(dirname {duckdb_file}) && "
+                    f"cp /config/solomon.duckdb {duckdb_file}"
+                ],
+                volume_mounts=[
+                    data_mount,
+                    client.V1VolumeMount(
+                        name="warehouse-config", mount_path="/config"
+                    ),
+                ],
+            )
+        )
 
     trino_container = client.V1Container(
         name="trino",
@@ -225,7 +307,7 @@ def create_deployment_spec() -> client.V1Deployment:
     )
 
     pod_spec = client.V1PodSpec(
-        init_containers=[init_container],
+        init_containers=init_containers,
         containers=[trino_container],
         volumes=[data_volume, config_volume],
     )
@@ -269,7 +351,27 @@ def create_service_spec() -> client.V1Service:
 
 
 def deploy_warehouse() -> None:
-    ensure_configmaps()
+    duckdb_path = _ensure_duckdb_seeded()
+    pvc_claim = _get_project_pvc_claim_name()
+    use_pvc = _use_project_pvc(pvc_claim)
+    if TRINO_USE_PVC and not pvc_claim:
+        raise RuntimeError(
+            "TRINO_USE_PVC=true but the launcher pod has no /home/cdsw PVC claim"
+        )
+    _deploy_ctx.update(
+        use_pvc=use_pvc,
+        pvc_claim=pvc_claim,
+        duckdb_file=DUCKDB_FILE,
+    )
+    print(
+        "Warehouse DuckDB storage: "
+        f"path={duckdb_path}, trino_file={DUCKDB_FILE}, "
+        f"use_pvc={use_pvc}, pvc_claim={pvc_claim or 'none'}"
+    )
+    ensure_configmaps(
+        include_duckdb_binary=not use_pvc,
+        duckdb_path=duckdb_path,
+    )
     apps = client.AppsV1Api()
     core = client.CoreV1Api()
     namespace = get_current_namespace()
@@ -311,37 +413,107 @@ def _list_warehouse_pods() -> list[client.V1Pod]:
     return pods.items or []
 
 
+def _format_container_status(name: str, status: client.V1ContainerStatus) -> str:
+    state = status.state
+    if state.waiting:
+        waiting = state.waiting
+        detail = waiting.message or waiting.reason or "waiting"
+        return f"{name}: waiting ({waiting.reason or 'Unknown'}) {detail}"
+    if state.terminated:
+        terminated = state.terminated
+        return (
+            f"{name}: terminated reason={terminated.reason} "
+            f"exit={terminated.exit_code} message={terminated.message or ''}"
+        )
+    if state.running:
+        return f"{name}: running"
+    return f"{name}: unknown"
+
+
+def _describe_pod(pod: client.V1Pod) -> str:
+    parts = [f"{pod.metadata.name}: phase={pod.status.phase}"]
+    for status in pod.status.init_container_statuses or []:
+        parts.append(_format_container_status(status.name, status))
+    for status in pod.status.container_statuses or []:
+        parts.append(_format_container_status(status.name, status))
+    return " | ".join(parts)
+
+
+def _get_k8s_events(limit: int = 12) -> str | None:
+    deployment_name = get_deployment_name()
+    lines: list[str] = []
+    try:
+        events = client.CoreV1Api().list_namespaced_event(
+            namespace=get_current_namespace(),
+        )
+        relevant = [
+            event
+            for event in events.items
+            if deployment_name in (event.involved_object.name or "")
+        ]
+        for event in sorted(
+            relevant,
+            key=lambda item: item.last_timestamp or item.event_time,
+        )[-limit:]:
+            involved = event.involved_object
+            lines.append(
+                f"{event.type} {event.reason} "
+                f"[{involved.kind}/{involved.name}]: {event.message}"
+            )
+        return "\n".join(lines) if lines else None
+    except ApiException:
+        return None
+
+
+def _pod_has_fatal_failure() -> bool:
+    for pod in _list_warehouse_pods():
+        for status in pod.status.init_container_statuses or []:
+            waiting = status.state.waiting
+            if waiting and waiting.reason in _POD_FAILURE_WAITING_REASONS:
+                return True
+        for status in pod.status.container_statuses or []:
+            waiting = status.state.waiting
+            if waiting and waiting.reason in _POD_FAILURE_WAITING_REASONS:
+                return True
+    return False
+
+
+def _pod_diagnostics_text() -> str:
+    pods = _list_warehouse_pods()
+    parts: list[str] = []
+    if pods:
+        parts.append("Pods: " + " | ".join(_describe_pod(pod) for pod in pods))
+    events = _get_k8s_events()
+    if events:
+        parts.append("K8s events:\n" + events)
+    return "\n".join(parts)
+
+
 def _pod_status_summary() -> str | None:
     pods = _list_warehouse_pods()
     if not pods:
         return "no pod"
-    pod = pods[0]
-    phase = pod.status.phase or "Unknown"
-    if pod.status.init_container_statuses:
-        init = pod.status.init_container_statuses[0]
-        waiting = init.state.waiting
-        if waiting and waiting.reason:
-            return f"init/{waiting.reason}"
-    if pod.status.container_statuses:
-        waiting = pod.status.container_statuses[0].state.waiting
-        if waiting and waiting.reason:
-            return f"{phase}/{waiting.reason}"
-    return phase
+    return _describe_pod(pods[0])
 
 
 def _pod_logs(tail_lines: int = 120) -> str | None:
     pods = _list_warehouse_pods()
     if not pods:
         return None
-    try:
-        return client.CoreV1Api().read_namespaced_pod_log(
-            name=pods[0].metadata.name,
-            namespace=get_current_namespace(),
-            tail_lines=tail_lines,
-            container="trino",
-        )
-    except ApiException:
-        return None
+    pod_name = pods[0].metadata.name
+    namespace = get_current_namespace()
+    core = client.CoreV1Api()
+    for container in ("trino", "duckdb-init"):
+        try:
+            return core.read_namespaced_pod_log(
+                name=pod_name,
+                namespace=namespace,
+                tail_lines=tail_lines,
+                container=container,
+            )
+        except ApiException:
+            continue
+    return None
 
 
 def _collect_http_hosts() -> list[str]:
@@ -393,12 +565,21 @@ def wait_for_trino() -> None:
     while time.time() < deadline:
         if is_trino_http_up():
             return
+        if _pod_has_fatal_failure():
+            diagnostics = _pod_diagnostics_text()
+            logs = _pod_logs()
+            detail = diagnostics or f" Pod status: {_pod_status_summary()}."
+            if logs:
+                detail += f"\nRecent pod logs:\n{logs[-3000:]}"
+            raise RuntimeError(
+                "Trino pod failed during startup (see diagnostics below).\n" + detail
+            )
         time.sleep(10)
     logs = _pod_logs()
-    detail = f" Pod status: {_pod_status_summary()}."
+    detail = _pod_diagnostics_text() or f" Pod status: {_pod_status_summary()}."
     if logs:
-        detail += f" Recent logs: {logs.strip().splitlines()[-1]}"
-    raise RuntimeError(f"Trino did not become ready within timeout.{detail}")
+        detail += f"\nRecent pod logs:\n{logs[-3000:]}"
+    raise RuntimeError(f"Trino did not become ready within timeout.\n{detail}")
 
 
 def _write_solomon_endpoints(info: dict) -> None:
@@ -410,7 +591,7 @@ def _write_solomon_endpoints(info: dict) -> None:
             "http_hosts": info.get("http_hosts") or [],
             "service_name": get_service_name(),
             "catalog": TRINO_CATALOG_NAME,
-            "duckdb_file": DUCKDB_FILE,
+            "duckdb_file": info.get("duckdb_file") or DUCKDB_FILE,
         }
         path = write_endpoints(payload)
         print(f"Wrote Solomon Trino endpoints to {path}")
@@ -428,9 +609,13 @@ def get_connection_info() -> dict:
         "namespace": get_current_namespace(),
         "trino_image": TRINO_IMAGE,
         "catalog": TRINO_CATALOG_NAME,
-        "duckdb_file": DUCKDB_FILE,
+        "duckdb_file": str(_deploy_ctx.get("duckdb_file") or DUCKDB_FILE),
+        "duckdb_seed_path": str(_duckdb_project_path()),
+        "use_pvc": bool(_deploy_ctx.get("use_pvc")),
+        "pvc_claim": _deploy_ctx.get("pvc_claim"),
         "pod_status": _pod_status_summary(),
         "pod_logs": _pod_logs(tail_lines=80),
+        "k8s_events": _get_k8s_events(),
         "supervisor_phase": _supervisor_state.get("phase"),
         "supervisor_error": _supervisor_state.get("error"),
     }
@@ -448,11 +633,37 @@ def get_connection_info() -> dict:
     return info
 
 
+def _print_trino_env_hints(info: dict) -> None:
+    from solomon.trino.env_hints import format_internal_trino_env_hints
+
+    lines = format_internal_trino_env_hints(
+        status=info.get("status"),
+        http_hosts=info.get("http_hosts"),
+        internal_http=info.get("internal_http"),
+    )
+    for line in lines:
+        print(line)
+
+
+def _print_early_trino_endpoint_hint() -> None:
+    hosts = _collect_http_hosts()
+    if not hosts:
+        return
+    primary = hosts[0]
+    host_part, _, port_part = primary.rpartition(":")
+    port = port_part if port_part.isdigit() else "8080"
+    print(
+        f"Warehouse Trino HTTP detected: http://{host_part}:{port} "
+        "(set TRINO_ENDPOINT on Solomon if DNS fails)"
+    )
+
+
 def print_connection_info() -> None:
     info = get_connection_info()
     if info.get("status") == "running":
         _write_solomon_endpoints(info)
     print("\n=== Warehouse (Trino + DuckDB) Connection Info ===")
+    _print_trino_env_hints(info)
     print(json.dumps(info, indent=2, sort_keys=True))
     print("==================================================\n")
 
@@ -473,6 +684,7 @@ def run_warehouse_supervisor() -> None:
     try:
         _supervisor_state["phase"] = "deploying"
         deploy_warehouse()
+        _print_early_trino_endpoint_hint()
         _supervisor_state["phase"] = "waiting"
         wait_for_trino()
         _supervisor_state["phase"] = "running"
@@ -488,8 +700,11 @@ def run_warehouse_supervisor() -> None:
             time.sleep(30)
     except Exception as exc:
         logs = _pod_logs(tail_lines=200)
+        diagnostics = _pod_diagnostics_text()
         print(f"Warehouse supervisor error: {exc}")
+        if diagnostics:
+            print(diagnostics)
         if logs:
-            print(f"Latest Trino pod logs:\n{logs[-5000:]}")
+            print(f"Latest warehouse pod logs:\n{logs[-5000:]}")
         _supervisor_state["phase"] = "error"
         _supervisor_state["error"] = str(exc)
