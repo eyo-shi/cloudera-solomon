@@ -23,6 +23,8 @@ DUCKDB_INIT_IMAGE = os.getenv("DUCKDB_INIT_IMAGE") or "busybox:1.36"
 DUCKDB_FILE = os.getenv("DUCKDB_FILE") or "/data/solomon/solomon.duckdb"
 TRINO_STARTUP_TIMEOUT_SECONDS = int(os.getenv("TRINO_STARTUP_TIMEOUT_SECONDS") or "900")
 TRINO_CATALOG_NAME = os.getenv("TRINO_CATALOG_NAME") or "iceberg"
+TRINO_CONTAINER_UID = int(os.getenv("TRINO_CONTAINER_UID") or "1000")
+TRINO_CONTAINER_GID = int(os.getenv("TRINO_CONTAINER_GID") or "1000")
 _SOLOMON_DUCKDB_REL = Path(".solomon") / "solomon.duckdb"
 _POD_FAILURE_WAITING_REASONS = (
     "CrashLoopBackOff",
@@ -112,6 +114,8 @@ def _ensure_duckdb_seeded() -> Path:
 
     path = _duckdb_project_path()
     seeded = seed_duckdb_database(path)
+    if path.is_file():
+        path.chmod(0o664)
     print(
         f"Seeded DuckDB database at {path}"
         if seeded
@@ -236,6 +240,15 @@ def _data_volume(*, use_pvc: bool, pvc_claim: str) -> client.V1Volume:
     return volume
 
 
+def _trino_container_security_context() -> client.V1SecurityContext:
+    """trinodb/trino runs as user ``trino`` (uid 1000); CML requires numeric IDs."""
+    return client.V1SecurityContext(
+        run_as_user=TRINO_CONTAINER_UID,
+        run_as_group=TRINO_CONTAINER_GID,
+        run_as_non_root=True,
+    )
+
+
 def _data_mount(*, use_pvc: bool) -> client.V1VolumeMount:
     duckdb_file = str(_deploy_ctx.get("duckdb_file") or DUCKDB_FILE)
     if use_pvc:
@@ -268,6 +281,7 @@ def create_deployment_spec() -> client.V1Deployment:
                 name="duckdb-init",
                 image=DUCKDB_INIT_IMAGE,
                 image_pull_policy="IfNotPresent",
+                security_context=_trino_container_security_context(),
                 command=["sh", "-c"],
                 args=[
                     f"mkdir -p $(dirname {duckdb_file}) && "
@@ -286,6 +300,7 @@ def create_deployment_spec() -> client.V1Deployment:
         name="trino",
         image=TRINO_IMAGE,
         image_pull_policy="IfNotPresent",
+        security_context=_trino_container_security_context(),
         ports=[client.V1ContainerPort(container_port=8080, name="http")],
         env=[client.V1EnvVar(name="JAVA_TOOL_OPTIONS", value=TRINO_JAVA_OPTS)],
         resources=client.V1ResourceRequirements(
@@ -318,6 +333,10 @@ def create_deployment_spec() -> client.V1Deployment:
     )
 
     pod_spec = client.V1PodSpec(
+        security_context=client.V1PodSecurityContext(
+            fs_group=TRINO_CONTAINER_GID,
+            fs_group_change_policy="Always",
+        ),
         init_containers=init_containers,
         containers=[trino_container],
         volumes=[data_volume, config_volume],
@@ -413,6 +432,12 @@ def deploy_warehouse() -> None:
             body=service,
         )
         print(f"Updated warehouse service {get_service_name()}")
+    cluster_ip = _get_service_cluster_ip()
+    if cluster_ip:
+        print(
+            f"Warehouse Trino Service ClusterIP: http://{cluster_ip}:8080 "
+            "(use for Solomon TRINO_ENDPOINT if DNS fails)"
+        )
 
 
 def _list_warehouse_pods() -> list[client.V1Pod]:
@@ -527,7 +552,25 @@ def _pod_logs(tail_lines: int = 120) -> str | None:
     return None
 
 
+def _get_service_cluster_ip() -> str | None:
+    try:
+        service = client.CoreV1Api().read_namespaced_service(
+            name=get_service_name(),
+            namespace=get_current_namespace(),
+        )
+        cluster_ip = (service.spec.cluster_ip or "").strip()
+        if cluster_ip and cluster_ip.lower() != "none":
+            return cluster_ip
+    except ApiException as exc:
+        print(
+            f"Warning: could not read Trino service ClusterIP "
+            f"({get_service_name()}): {exc.reason}"
+        )
+    return None
+
+
 def _collect_http_hosts() -> list[str]:
+    """Return host:port strings; Service ClusterIP first (Solomon-reachable)."""
     hosts: list[str] = []
     seen: set[str] = set()
 
@@ -538,19 +581,12 @@ def _collect_http_hosts() -> list[str]:
         seen.add(text)
         hosts.append(text)
 
+    cluster_ip = _get_service_cluster_ip()
+    if cluster_ip:
+        add(f"{cluster_ip}:8080")
     for pod in _list_warehouse_pods():
         if pod.status.pod_ip:
             add(f"{pod.status.pod_ip}:8080")
-    try:
-        service = client.CoreV1Api().read_namespaced_service(
-            name=get_service_name(),
-            namespace=get_current_namespace(),
-        )
-        cluster_ip = (service.spec.cluster_ip or "").strip()
-        if cluster_ip and cluster_ip.lower() != "none":
-            add(f"{cluster_ip}:8080")
-    except ApiException:
-        pass
     return hosts
 
 
@@ -575,6 +611,7 @@ def wait_for_trino() -> None:
     deadline = time.time() + TRINO_STARTUP_TIMEOUT_SECONDS
     while time.time() < deadline:
         if is_trino_http_up():
+            _write_solomon_endpoints(get_connection_info())
             return
         if _pod_has_fatal_failure():
             diagnostics = _pod_diagnostics_text()
@@ -606,6 +643,12 @@ def _write_solomon_endpoints(info: dict) -> None:
         }
         path = write_endpoints(payload)
         print(f"Wrote Solomon Trino endpoints to {path}")
+        hosts = payload["http_hosts"]
+        if hosts:
+            print(
+                "Solomon TRINO_ENDPOINT (if DNS fails): "
+                f"http://{hosts[0]}"
+            )
     except Exception as exc:
         print(f"Warning: could not write Solomon Trino endpoints file: {exc}")
 
@@ -630,6 +673,7 @@ def get_connection_info() -> dict:
         "supervisor_phase": _supervisor_state.get("phase"),
         "supervisor_error": _supervisor_state.get("error"),
     }
+    info["cluster_ip"] = _get_service_cluster_ip()
     info["http_hosts"] = _collect_http_hosts()
     info["internal_http"] = internal_http_url()
     if is_trino_http_up():
@@ -651,22 +695,40 @@ def _print_trino_env_hints(info: dict) -> None:
         status=info.get("status"),
         http_hosts=info.get("http_hosts"),
         internal_http=info.get("internal_http"),
+        cluster_ip=info.get("cluster_ip"),
     )
     for line in lines:
         print(line)
 
 
 def _print_early_trino_endpoint_hint() -> None:
+    cluster_ip = _get_service_cluster_ip()
+    if cluster_ip:
+        print(
+            f"Warehouse Trino Service ClusterIP: http://{cluster_ip}:8080 "
+            "(set TRINO_ENDPOINT on Solomon if DNS fails)"
+        )
     hosts = _collect_http_hosts()
-    if not hosts:
-        return
-    primary = hosts[0]
-    host_part, _, port_part = primary.rpartition(":")
-    port = port_part if port_part.isdigit() else "8080"
-    print(
-        f"Warehouse Trino HTTP detected: http://{host_part}:{port} "
-        "(set TRINO_ENDPOINT on Solomon if DNS fails)"
-    )
+    pod_hosts = [
+        host
+        for host in hosts
+        if not cluster_ip or not host.startswith(f"{cluster_ip}:")
+    ]
+    if pod_hosts:
+        primary = pod_hosts[0]
+        host_part, _, port_part = primary.rpartition(":")
+        port = port_part if port_part.isdigit() else "8080"
+        print(
+            f"Warehouse Trino pod IP (launcher only): http://{host_part}:{port}"
+        )
+    elif not cluster_ip and hosts:
+        primary = hosts[0]
+        host_part, _, port_part = primary.rpartition(":")
+        port = port_part if port_part.isdigit() else "8080"
+        print(
+            f"Warehouse Trino HTTP detected: http://{host_part}:{port} "
+            "(set TRINO_ENDPOINT on Solomon if DNS fails)"
+        )
 
 
 def print_connection_info() -> None:

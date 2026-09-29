@@ -18,10 +18,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from solomon.api.auth import require_user_context
 from solomon.transport.config import get_trino_config
+from solomon.transport.logging import get_logger
 from solomon.transport.user_context import UserContext
 from solomon.tools._trino_client import map_trino_error, trino_connection_for_user
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
+_logger = get_logger(__name__)
 
 _TRINO_QUERY_TIMEOUT_S = 45.0
 
@@ -49,21 +51,56 @@ def _require_trino_or_503() -> None:
         )
 
 
+def _internal_trino_instruction() -> str:
+    return (
+        "warehouse-launcher の Application Log で "
+        "Solomon TRINO_ENDPOINT (if DNS fails) を確認し、"
+        "Project → Settings → Advanced → Environment Variables に "
+        "TRINO_ENDPOINT を設定して Solomon Application を再起動してください。"
+    )
+
+
+def _raise_trino_error(detail: dict[str, Any]) -> None:
+    code = str(detail.get("error_code") or "")
+    if code == "TRINO_NOT_CONFIGURED":
+        detail.setdefault(
+            "instruction",
+            (
+                "warehouse-launcher の Status が running になるまで待ち、"
+                "Solomon Application を再起動してください。"
+            ),
+        )
+        raise HTTPException(status_code=503, detail=detail)
+    if code.startswith("TRINO_"):
+        from solomon.trino.mode import is_internal_trino_mode
+
+        if is_internal_trino_mode():
+            detail.setdefault("instruction", _internal_trino_instruction())
+    raise HTTPException(status_code=502, detail=detail)
+
+
 def _run_query(
     user_ctx: UserContext,
     sql: str,
     catalog: str,
 ) -> list[list[Any]]:
+    cfg = get_trino_config()
     conn_or_err = trino_connection_for_user(user_ctx, catalog=catalog)
     if isinstance(conn_or_err, dict):
-        detail = conn_or_err
-        raise HTTPException(status_code=502, detail=detail)
+        _raise_trino_error(conn_or_err)
     try:
         cur = conn_or_err.cursor()
         cur.execute(sql)
         return cur.fetchall()
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=map_trino_error(e, sql)) from e
+        host = f"{cfg.host}:{cfg.port}" if cfg else "unknown"
+        _logger.error(
+            "trino.catalog_query_failed",
+            host=host,
+            catalog=catalog,
+            error=str(e),
+        )
+        _raise_trino_error(map_trino_error(e, sql))
 
 
 async def _run_query_async(

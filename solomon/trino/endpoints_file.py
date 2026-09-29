@@ -17,6 +17,9 @@ def _project_dir() -> Path:
         raw = (os.environ.get(key) or "").strip()
         if raw:
             return Path(raw)
+    # CML Workbench sessions usually cwd=/home/cdsw even when env is unset.
+    if Path("/home/cdsw").is_dir():
+        return Path("/home/cdsw")
     return Path.cwd()
 
 
