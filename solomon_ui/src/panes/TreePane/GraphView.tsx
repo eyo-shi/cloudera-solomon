@@ -48,7 +48,7 @@ export function GraphView({ filter }: GraphViewProps) {
 
   const sectionHead = (
     <div className="explorer-section-head">
-      <span className="explorer-section-title">Database information</span>
+      <span className="explorer-section-title">Graph</span>
       <div className="explorer-section-actions">
         <ExplorerRefreshButton
           isFetching={isFetching}

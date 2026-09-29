@@ -1284,10 +1284,27 @@ body,
   color: var(--text);
   font-weight: 600;
 }
+/* 展開ガイド線: 各行の chevron (^) の右端に合わせる */
+.explorer-view--storage {
+  --storage-tree-guide: calc(0.25rem + 0.625rem + 1em);
+  --storage-tree-indent: calc(var(--storage-tree-guide) + 0.375rem);
+}
+.explorer-view--storage .tree-child-list {
+  padding-left: var(--storage-tree-indent);
+}
 .explorer-view--storage .tree-child-list--guided {
-  margin-left: 0.35rem;
-  padding-left: 0.65rem;
-  border-left: 1px solid var(--border-strong);
+  position: relative;
+  margin-left: 0;
+  border-left: none;
+}
+.explorer-view--storage .tree-child-list--guided::before {
+  content: "";
+  position: absolute;
+  left: var(--storage-tree-guide);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-strong);
 }
 .explorer-view--storage .tree-row--selected {
   background: var(--explorer-active-soft);
@@ -1603,6 +1620,16 @@ body,
 }
 .tab-chip--active .tab-chip-icon--svg .explorer-icon--active {
   color: var(--explorer-active);
+}
+.tab-chip-icon--seti {
+  display: inline-flex;
+  align-items: center;
+  opacity: 1;
+}
+.tab-seti-file-icon {
+  font-size: 0.875rem;
+  width: 0.875rem;
+  min-width: 0.875rem;
 }
 .tab-chip-title {
   overflow: hidden;
