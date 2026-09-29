@@ -101,6 +101,9 @@ def _duckdb_project_path() -> Path:
         raw = (os.environ.get(key) or "").strip()
         if raw:
             return Path(raw) / _SOLOMON_DUCKDB_REL
+    # CML sessions usually cwd=/home/cdsw even when CDSW_PROJECT_DIR is unset.
+    if Path("/home/cdsw").is_dir():
+        return Path("/home/cdsw") / _SOLOMON_DUCKDB_REL
     return Path.cwd() / _SOLOMON_DUCKDB_REL
 
 
@@ -142,10 +145,10 @@ def _get_project_pvc_claim_name() -> str | None:
 def _use_project_pvc(pvc_claim: str | None) -> bool:
     if pvc_claim is None:
         return False
-    if TRINO_USE_PVC:
-        return True
-    # CML Workbench sessions always have /home/cdsw PVC — prefer shared seed file.
-    return (os.environ.get("CDSW_PROJECT_DIR") or os.environ.get("CML_PROJECT_DIR")) is not None
+    # emptyDir + ConfigMap binary fallback is capped at 1 MiB; prefer project PVC.
+    if _env_bool("TRINO_FORCE_EMPTYDIR", default=False):
+        return False
+    return True
 
 
 def _trino_config_properties() -> str:
@@ -184,8 +187,16 @@ def ensure_configmaps(
             raise RuntimeError(
                 f"DuckDB seed file is required for emptyDir mode: {duckdb_path}"
             )
+        duckdb_bytes = duckdb_path.read_bytes()
+        # ConfigMap total size limit is 1 MiB (base64 adds ~33% overhead).
+        if len(duckdb_bytes) > 700_000:
+            raise RuntimeError(
+                f"DuckDB file {duckdb_path} is {len(duckdb_bytes)} bytes — too large "
+                "for ConfigMap emptyDir mode. Mount the project PVC (/home/cdsw) "
+                "or set TRINO_FORCE_EMPTYDIR=false (default)."
+            )
         binary_data = {
-            "solomon.duckdb": base64.b64encode(duckdb_path.read_bytes()).decode("ascii")
+            "solomon.duckdb": base64.b64encode(duckdb_bytes).decode("ascii")
         }
     body = client.V1ConfigMap(
         api_version="v1",
