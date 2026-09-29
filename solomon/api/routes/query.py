@@ -55,7 +55,7 @@ def run_query(
                     "Cloudera AI Workbench の Site Administration → Data "
                     "Connections で CDW / Trino connection を登録し、Project "
                     "→ Settings → Advanced → Environment Variables に "
-                    "SOLOMON_TRINO_CONNECTION_NAME を設定して Application を"
+                    "TRINO_CONNECTION_NAME を設定して Application を"
                     "再起動してください。"
                 ),
             },

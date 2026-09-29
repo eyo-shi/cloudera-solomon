@@ -42,32 +42,48 @@ def trino_connection_for_user(
     """
     if trino is None:
         return err(ErrorCode.TRINO_QUERY_FAILED, "trino client is not installed")
-    if not user_ctx.knox_jwt:
-        return err(ErrorCode.AUTH_MISSING, "Knox JWT is required for Trino access")
 
     cfg = get_trino_config()
     if cfg is None:
+        from solomon.trino.mode import is_internal_trino_mode
+
+        if is_internal_trino_mode():
+            return err(
+                ErrorCode.TRINO_NOT_CONFIGURED,
+                "Internal Trino warehouse is not ready. Wait for warehouse-launcher "
+                "status=running, then restart Solomon or refresh the Tables tab.",
+            )
         return err(
             ErrorCode.TRINO_NOT_CONFIGURED,
             "Trino connection is not configured. Register a CDW/Trino "
             "Data Connection in Site Administration, or set "
-            "SOLOMON_TRINO_CONNECTION_NAME / SOLOMON_TRINO_HOST after deploy.",
+            "TRINO_CONNECTION_NAME / TRINO_HOST after deploy.",
         )
 
-    conn = trino.dbapi.connect(
-        host=cfg.host,
-        port=cfg.port,
-        http_scheme=cfg.scheme,
-        user=user_ctx.user_name,
-        auth=JWTAuthentication(user_ctx.knox_jwt),
-        catalog=catalog or cfg.catalog,
-        schema=schema or cfg.schema,
-        verify=cfg.verify_ssl,
-        request_timeout=30,
-        http_headers={
+    if cfg.internal:
+        user_name = user_ctx.user_name or "solomon"
+    elif not user_ctx.knox_jwt:
+        return err(ErrorCode.AUTH_MISSING, "Knox JWT is required for Trino access")
+    else:
+        user_name = user_ctx.user_name
+
+    connect_kwargs: dict[str, Any] = {
+        "host": cfg.host,
+        "port": cfg.port,
+        "http_scheme": cfg.scheme,
+        "user": user_name,
+        "catalog": catalog or cfg.catalog,
+        "schema": schema or cfg.schema,
+        "verify": cfg.verify_ssl,
+        "request_timeout": 30,
+        "http_headers": {
             "X-Solomon-Request-Id": user_ctx.request_id,
         },
-    )
+    }
+    if not cfg.internal:
+        connect_kwargs["auth"] = JWTAuthentication(user_ctx.knox_jwt)
+
+    conn = trino.dbapi.connect(**connect_kwargs)
     return conn
 
 

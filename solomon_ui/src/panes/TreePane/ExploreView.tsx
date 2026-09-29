@@ -113,7 +113,7 @@ export function ExploreView({ filter }: ExploreViewProps) {
       <div className="explorer-view">
         {sectionHead}
         <p className="explorer-placeholder">
-          Trino 未設定です。右ペインの設定手順を確認してください。
+          Trino 未接続です。warehouse-launcher の起動を待つか、右ペインの設定手順を確認してください。
         </p>
       </div>
     );

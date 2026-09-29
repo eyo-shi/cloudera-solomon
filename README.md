@@ -133,6 +133,7 @@ Deploy 時に Configuration 画面へ表示される Environment Variables (す�
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `SOLOMON_LOG_LEVEL` | `INFO` | ログレベル |
+| `TRINO_MODE` | `internal` | Trino / Tables: warehouse-launcher (DuckDB) / CDW |
 | `NEO4J_MODE` | `internal` | Neo4j: CML 内 launcher / 外部クラスタ |
 | `NEO4J_USERNAME` | `neo4j` | Neo4j 認証ユーザー (launcher と Solomon が共有) |
 | `NEO4J_PASSWORD` | `Neo4jPass1234` | Neo4j 認証パスワード (本番では必ず変更) |
@@ -152,16 +153,36 @@ Connections** が single source of truth。LLM / CDV も Deploy 後に同画面�
 未設定のまま UI で該当機能を叩くと、API は HTTP 503 + JSON (`{error_code, message,
 instruction}`) を返し、UI の **SetupGuide カード** が手順を表示する。
 
-### 1. Trino / CDW への接続
+### 1. Trino / Tables への接続
+
+Deploy 時に `TRINO_MODE` で接続方式を切り替える (デフォルト `internal`)。
+
+| モード | 用途 | 設定 |
+|---|---|---|
+| `internal` (デフォルト) | CML 内部デモ | `warehouse-launcher` が Trino + DuckDB (catalog `iceberg`) を 1 Pod で起動 |
+| `external` | 本番 CDW | Data Connection または `TRINO_HOST` 等 (下記) |
+
+**internal (`TRINO_MODE=internal`)**
+
+- AMP Deploy で `warehouse-launcher` が起動
+- `demo` スキーマに `customers` / `orders` を seed (Tables タブですぐ確認可能)
+- Solomon は `.solomon/trino_endpoints.json` から HTTP 接続先を自動解決
+- DNS が通らない場合のみ `TRINO_ENDPOINT` を post-deploy で設定
+
+**external (`TRINO_MODE=external`)**
 
 - Site Administration → Data Connections で CDW / Trino connection を登録済みなら、
-  `SOLOMON_TRINO_CONNECTION_NAME` にその connection 名を設定する
+  `TRINO_CONNECTION_NAME` にその connection 名を設定する
   (未設定でも Trino タイプの connection が 1 個なら自動採用)。
-- Data Connections を使わない環境では以下 4 個を代わりに設定:
-  - `SOLOMON_TRINO_HOST`
-  - `SOLOMON_TRINO_PORT` (default 443)
-  - `SOLOMON_TRINO_CATALOG` (default `iceberg`)
-  - `SOLOMON_TRINO_SCHEMA` (default `demo`)
+- Data Connections を使わない環境では以下を代わりに設定:
+  - `TRINO_HOST`
+  - `TRINO_PORT` (default 443)
+  - `TRINO_SCHEME` (default `https`)
+  - `TRINO_VERIFY_SSL` (default `true`)
+  - `TRINO_CATALOG` (default `iceberg`)
+  - `TRINO_SCHEMA` (default `demo`)
+
+旧名 `SOLOMON_TRINO_*` も後方互換で読み取る。
 
 ### 2. S3 への接続
 

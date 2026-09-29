@@ -29,7 +29,7 @@ _TRINO_QUERY_TIMEOUT_S = 45.0
 def _require_trino_or_503() -> None:
     """Trino 未設定なら 503 + guided error を投げる (UI が SetupGuide 表示)。
 
-    Data Connection (``SOLOMON_TRINO_CONNECTION_NAME``) と env fallback の
+    Data Connection (``TRINO_CONNECTION_NAME``) と env fallback の
     どちらでも解決できないケース。呼び出し元は catalog 各エンドポイント。
     """
     if get_trino_config() is None:
@@ -42,7 +42,7 @@ def _require_trino_or_503() -> None:
                     "Cloudera AI Workbench の Site Administration → Data "
                     "Connections で CDW / Trino connection を登録し、Project "
                     "→ Settings → Advanced → Environment Variables に "
-                    "SOLOMON_TRINO_CONNECTION_NAME を設定して Application を"
+                    "TRINO_CONNECTION_NAME を設定して Application を"
                     "再起動してください。"
                 ),
             },
@@ -85,8 +85,8 @@ async def _run_query_async(
                 "message": (
                     f"Trino query timed out after {_TRINO_QUERY_TIMEOUT_S:.0f}s. "
                     "The cluster may still be waking from auto-suspend — wait a "
-                    "few minutes and reload, or verify SOLOMON_TRINO_HOST / "
-                    "SOLOMON_TRINO_CONNECTION_NAME."
+                    "few minutes and reload, or verify TRINO_HOST / "
+                    "TRINO_CONNECTION_NAME."
                 ),
             },
         ) from exc

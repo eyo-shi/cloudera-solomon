@@ -54,21 +54,25 @@ function guideFor(errorCode: string): GuideDetails {
       };
     case "TRINO_NOT_CONFIGURED":
       return {
-        title: "Trino / CDW への接続情報が未設定です",
+        title: "Trino / Tables への接続が未設定、または warehouse が未起動です",
         envList: [
           {
-            name: "SOLOMON_TRINO_CONNECTION_NAME",
-            hint: "Site Administration → Data Connections で登録した CDW / Trino connection 名",
+            name: "TRINO_MODE",
+            hint: "internal (デフォルト) = warehouse-launcher / external = CDW Trino",
           },
           {
-            name: "SOLOMON_TRINO_HOST / SOLOMON_TRINO_PORT",
-            hint: "Data Connections を使わない場合の直接指定 (代替)",
+            name: "TRINO_CONNECTION_NAME",
+            hint: "external 時: Site Administration → Data Connections の CDW connection 名",
+          },
+          {
+            name: "TRINO_HOST / TRINO_ENDPOINT",
+            hint: "external: TRINO_HOST / internal: launcher 待ち or TRINO_ENDPOINT 上書き",
           },
         ],
         extraSteps: [
-          "Site Administration → Data Connections で CDW / Trino connection を登録",
-          "Project → Settings → Advanced → Environment Variables に上記を設定",
-          "同ページから Application を Restart",
+          "internal: Warehouse Launcher Application が status=running になるまで待つ",
+          "external: Data Connection 登録後 Project Settings に TRINO_CONNECTION_NAME を設定",
+          "Tables タブを Refresh、または Application (Solomon) を Restart",
         ],
       };
     case "CDV_NOT_CONFIGURED":

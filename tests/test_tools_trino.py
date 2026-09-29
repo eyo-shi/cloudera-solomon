@@ -13,9 +13,10 @@ from unittest import mock
 
 import pytest
 
-from solomon.tools import _trino_client
 from solomon.tools._trino_client import map_trino_error
 from solomon.tools.trino import TrinoDDLTool, TrinoMetaTool, TrinoQueryTool
+
+_TRINO_CONN_PATCH = "solomon.tools.trino.trino_connection_for_user"
 from solomon.transport.user_context import (
     UserContext,
     reset_user_context,
@@ -55,9 +56,7 @@ class TestTrinoQueryTool:
             description=[("name", "varchar", None, None, None, None, None),
                          ("age", "bigint", None, None, None, None, None)],
         )
-        with mock.patch.object(
-            _trino_client, "trino_connection_for_user", return_value=fake_conn
-        ):
+        with mock.patch(_TRINO_CONN_PATCH, return_value=fake_conn):
             result = TrinoQueryTool()._run(sql="SELECT name, age FROM users", max_rows=10)
         assert result["status"] == "ok"
         assert result["row_count"] == 2
@@ -75,9 +74,7 @@ class TestTrinoQueryTool:
         fake_conn = _make_fake_conn(
             exc=Exception("Access Denied: Cannot select from table foo")
         )
-        with mock.patch.object(
-            _trino_client, "trino_connection_for_user", return_value=fake_conn
-        ):
+        with mock.patch(_TRINO_CONN_PATCH, return_value=fake_conn):
             result = TrinoQueryTool()._run(sql="SELECT * FROM foo")
         assert result["status"] == "error"
         assert result["error_code"] == "PERM_SELECT_DENIED"
@@ -86,9 +83,7 @@ class TestTrinoQueryTool:
         fake_conn = _make_fake_conn(
             exc=Exception("Table 'iceberg.demo.missing' does not exist")
         )
-        with mock.patch.object(
-            _trino_client, "trino_connection_for_user", return_value=fake_conn
-        ):
+        with mock.patch(_TRINO_CONN_PATCH, return_value=fake_conn):
             result = TrinoQueryTool()._run(sql="SELECT * FROM missing")
         assert result["status"] == "error"
         assert result["error_code"] == "TRINO_TABLE_NOT_FOUND"
@@ -97,9 +92,7 @@ class TestTrinoQueryTool:
 class TestTrinoDDLTool:
     def test_ddl_success(self, auth_ctx: UserContext) -> None:
         fake_conn = _make_fake_conn(description=[], rows=[])
-        with mock.patch.object(
-            _trino_client, "trino_connection_for_user", return_value=fake_conn
-        ):
+        with mock.patch(_TRINO_CONN_PATCH, return_value=fake_conn):
             result = TrinoDDLTool()._run(sql="CREATE TABLE demo.new_t (a int)")
         assert result["status"] == "ok"
         assert result["sql"].startswith("CREATE TABLE")
@@ -115,9 +108,7 @@ class TestTrinoDDLTool:
             rows=[(42,)],
             description=[("rows", "bigint", None, None, None, None, None)],
         )
-        with mock.patch.object(
-            _trino_client, "trino_connection_for_user", return_value=fake_conn
-        ):
+        with mock.patch(_TRINO_CONN_PATCH, return_value=fake_conn):
             result = TrinoDDLTool()._run(sql="INSERT INTO t VALUES (1)")
         assert result["status"] == "ok"
         assert result["affected_rows"] == 42
@@ -126,9 +117,7 @@ class TestTrinoDDLTool:
         fake_conn = _make_fake_conn(
             exc=Exception("Access Denied: Cannot create table demo.foo")
         )
-        with mock.patch.object(
-            _trino_client, "trino_connection_for_user", return_value=fake_conn
-        ):
+        with mock.patch(_TRINO_CONN_PATCH, return_value=fake_conn):
             result = TrinoDDLTool()._run(sql="CREATE TABLE demo.foo (x int)")
         assert result["status"] == "error"
         assert result["error_code"] == "PERM_CREATE_DENIED"
@@ -170,9 +159,7 @@ class TestTrinoMetaTool:
 
         cur.execute.side_effect = _execute
 
-        with mock.patch.object(
-            _trino_client, "trino_connection_for_user", return_value=conn
-        ):
+        with mock.patch(_TRINO_CONN_PATCH, return_value=conn):
             result = TrinoMetaTool()._run(
                 catalog="iceberg", schema="demo", table="sales"
             )
@@ -188,9 +175,7 @@ class TestTrinoMetaTool:
         cur = conn.cursor.return_value
         cur.description = []
         cur.fetchall.return_value = []
-        with mock.patch.object(
-            _trino_client, "trino_connection_for_user", return_value=conn
-        ):
+        with mock.patch(_TRINO_CONN_PATCH, return_value=conn):
             result = TrinoMetaTool()._run(
                 catalog="iceberg", schema="demo", table="missing"
             )

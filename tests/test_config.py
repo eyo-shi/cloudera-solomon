@@ -24,12 +24,24 @@ from solomon.transport import config as cfg_mod
 # ------------------------------------------------------------------ #
 _ALL_ENV_KEYS = [
     # trino
+    "TRINO_MODE",
+    "SOLOMON_TRINO_MODE",
+    "TRINO_ENDPOINT",
+    "TRINO_ENDPOINTS_FILE",
+    "SOLOMON_TRINO_ENDPOINTS_FILE",
+    "TRINO_CONNECTION_NAME",
     "SOLOMON_TRINO_CONNECTION_NAME",
+    "TRINO_HOST",
     "SOLOMON_TRINO_HOST",
+    "TRINO_PORT",
     "SOLOMON_TRINO_PORT",
+    "TRINO_SCHEME",
     "SOLOMON_TRINO_SCHEME",
+    "TRINO_VERIFY_SSL",
     "SOLOMON_TRINO_VERIFY_SSL",
+    "TRINO_CATALOG",
     "SOLOMON_TRINO_CATALOG",
+    "TRINO_SCHEMA",
     "SOLOMON_TRINO_SCHEMA",
     # s3
     "SOLOMON_S3_CONNECTION_NAME",
@@ -77,21 +89,33 @@ def _fake_conn(**params: Any) -> SimpleNamespace:
 # get_trino_config
 # ================================================================== #
 class TestGetTrinoConfig:
+    @pytest.fixture(autouse=True)
+    def _external_trino_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRINO_MODE", "external")
+
     def test_returns_none_when_no_env_and_no_cml(self) -> None:
         assert cfg_mod.get_trino_config() is None
 
     def test_env_fallback_minimal(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SOLOMON_TRINO_HOST", "trino.example.com")
+        monkeypatch.setenv("TRINO_HOST", "trino.example.com")
         c = cfg_mod.get_trino_config()
         assert c is not None
         assert c.host == "trino.example.com"
         assert c.port == 443
 
+    def test_legacy_solo_prefix_env_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_TRINO_HOST", "legacy.trino.example.com")
+        c = cfg_mod.get_trino_config()
+        assert c is not None
+        assert c.host == "legacy.trino.example.com"
+
     def test_env_fallback_strips_embedded_port_from_host(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("SOLOMON_TRINO_HOST", "trino.example.com:443")
-        monkeypatch.setenv("SOLOMON_TRINO_PORT", "8443")
+        monkeypatch.setenv("TRINO_HOST", "trino.example.com:443")
+        monkeypatch.setenv("TRINO_PORT", "8443")
         c = cfg_mod.get_trino_config()
         assert c is not None
         assert c.host == "trino.example.com"
@@ -105,12 +129,12 @@ class TestGetTrinoConfig:
     def test_env_fallback_full_override(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("SOLOMON_TRINO_HOST", "cdw.internal")
-        monkeypatch.setenv("SOLOMON_TRINO_PORT", "8443")
-        monkeypatch.setenv("SOLOMON_TRINO_SCHEME", "https")
-        monkeypatch.setenv("SOLOMON_TRINO_VERIFY_SSL", "false")
-        monkeypatch.setenv("SOLOMON_TRINO_CATALOG", "hive_prod")
-        monkeypatch.setenv("SOLOMON_TRINO_SCHEMA", "analytics")
+        monkeypatch.setenv("TRINO_HOST", "cdw.internal")
+        monkeypatch.setenv("TRINO_PORT", "8443")
+        monkeypatch.setenv("TRINO_SCHEME", "https")
+        monkeypatch.setenv("TRINO_VERIFY_SSL", "false")
+        monkeypatch.setenv("TRINO_CATALOG", "hive_prod")
+        monkeypatch.setenv("TRINO_SCHEMA", "analytics")
         c = cfg_mod.get_trino_config()
         assert c is not None
         assert c.host == "cdw.internal"
@@ -122,8 +146,8 @@ class TestGetTrinoConfig:
     def test_verify_ssl_ca_bundle_path_passthrough(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("SOLOMON_TRINO_HOST", "trino.example.com")
-        monkeypatch.setenv("SOLOMON_TRINO_VERIFY_SSL", "/etc/ssl/certs/ca.pem")
+        monkeypatch.setenv("TRINO_HOST", "trino.example.com")
+        monkeypatch.setenv("TRINO_VERIFY_SSL", "/etc/ssl/certs/ca.pem")
         c = cfg_mod.get_trino_config()
         assert c is not None
         assert c.verify_ssl == "/etc/ssl/certs/ca.pem"
@@ -131,7 +155,7 @@ class TestGetTrinoConfig:
     def test_named_connection_resolved_from_cml(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("SOLOMON_TRINO_CONNECTION_NAME", "prod-cdw")
+        monkeypatch.setenv("TRINO_CONNECTION_NAME", "prod-cdw")
         conn = _fake_conn(
             _type="cdw",
             _name="prod-cdw",
@@ -155,9 +179,9 @@ class TestGetTrinoConfig:
     def test_env_catalog_overrides_data_connection(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """env の SOLOMON_TRINO_CATALOG は Data Connection より優先される。"""
-        monkeypatch.setenv("SOLOMON_TRINO_CONNECTION_NAME", "prod-cdw")
-        monkeypatch.setenv("SOLOMON_TRINO_CATALOG", "override_catalog")
+        """env の TRINO_CATALOG は Data Connection より優先される。"""
+        monkeypatch.setenv("TRINO_CONNECTION_NAME", "prod-cdw")
+        monkeypatch.setenv("TRINO_CATALOG", "override_catalog")
         conn = _fake_conn(
             _type="cdw",
             _name="prod-cdw",
@@ -194,8 +218,8 @@ class TestGetTrinoConfig:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """明示名指定が cml から取れなくても env host があれば動く。"""
-        monkeypatch.setenv("SOLOMON_TRINO_CONNECTION_NAME", "does-not-exist")
-        monkeypatch.setenv("SOLOMON_TRINO_HOST", "fallback.trino.example")
+        monkeypatch.setenv("TRINO_CONNECTION_NAME", "does-not-exist")
+        monkeypatch.setenv("TRINO_HOST", "fallback.trino.example")
         monkeypatch.setattr(
             cfg_mod, "_cml_get_connection", lambda name: None
         )
@@ -209,8 +233,8 @@ class TestGetTrinoConfig:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Data Connection に host が無ければ env fallback に落ちる。"""
-        monkeypatch.setenv("SOLOMON_TRINO_CONNECTION_NAME", "broken")
-        monkeypatch.setenv("SOLOMON_TRINO_HOST", "fallback.example")
+        monkeypatch.setenv("TRINO_CONNECTION_NAME", "broken")
+        monkeypatch.setenv("TRINO_HOST", "fallback.example")
         broken = _fake_conn(_type="trino", _name="broken")  # no host
         monkeypatch.setattr(
             cfg_mod, "_cml_get_connection", lambda name: broken

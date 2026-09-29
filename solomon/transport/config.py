@@ -7,12 +7,13 @@ Solomon は Cloudera AI Workbench の AMP として配信される。以下の 3
 「cml.data の呼び方」も意識せずに済むようにする。
 
 1. **AMP Configuration 画面** (Deploy フォーム): ``SOLOMON_LOG_LEVEL``、
-   ``NEO4J_MODE`` / ``OPENSEARCH_MODE``、``NEO4J_USERNAME`` / ``NEO4J_PASSWORD``。
+   ``TRINO_MODE``、``NEO4J_MODE`` / ``OPENSEARCH_MODE``、
+   ``NEO4J_USERNAME`` / ``NEO4J_PASSWORD``。
 2. **Cloudera AI Workbench の Data Connections** (Site Administration →
    Data Connections で設定済み): Trino / S3 の接続情報は Deploy 時に二重入力
    させず、``cml.data_v1`` 経由で取得する。
 3. **Post-deploy env** (Project → Settings → Advanced → Environment Variables):
-   LLM プロバイダ、Trino 接続名の上書き、CDV base URL などは AMP を Deploy
+   LLM プロバイダ、``TRINO_*`` / CDV base URL などは AMP を Deploy
    した後に Application を再起動する形で反映する。
 
 ## 未設定時の挙動
@@ -69,6 +70,9 @@ class TrinoConfig:
 
     Knox JWT は :class:`~solomon.session.UserContext` から都度取得するため、ここには
     載せない (トークンを config に固めない = ログ / repr に漏れない)。
+
+    ``internal=True`` のとき warehouse-launcher (Trino + DuckDB) へ接続し、
+    JWT 認証は使わない。
     """
 
     host: str
@@ -79,6 +83,8 @@ class TrinoConfig:
     schema: str = "demo"
     #: Data Connection 由来ならその name。env fallback なら None。
     connection_name: Optional[str] = None
+    #: ``TRINO_MODE=internal`` — co-located Trino + DuckDB (demo warehouse)。
+    internal: bool = False
 
 
 @dataclass(frozen=True)
@@ -161,7 +167,7 @@ def _env(name: str) -> Optional[str]:
 
 
 def _normalize_trino_host(host: str, port: int) -> tuple[str, int]:
-    """``SOLOMON_TRINO_HOST`` に誤って ``:443`` 等が含まれるケースを正規化する。"""
+    """``TRINO_HOST`` に誤って ``:443`` 等が含まれるケースを正規化する。"""
     text = host.strip()
     if not text or text.startswith("["):
         return text, port
@@ -179,7 +185,7 @@ def _normalize_trino_host(host: str, port: int) -> tuple[str, int]:
 
 
 def _parse_verify_ssl(raw: Optional[str]) -> Any:
-    """``SOLOMON_TRINO_VERIFY_SSL`` の値を bool / path に変換する。"""
+    """``TRINO_VERIFY_SSL`` の値を bool / path に変換する。"""
     if raw is None:
         return True
     lower = raw.lower()
@@ -294,22 +300,73 @@ def _conn_params(conn: Any) -> dict[str, Any]:
 # ------------------------------------------------------------------ #
 # Trino
 # ------------------------------------------------------------------ #
-def get_trino_config() -> Optional[TrinoConfig]:
-    """Trino 接続設定を解決する。解決順は 4 段:
+def _get_internal_trino_config(
+    *,
+    catalog_env: Optional[str],
+    schema_env: Optional[str],
+) -> Optional[TrinoConfig]:
+    """Co-located warehouse-launcher: endpoints file → env override."""
+    from solomon.trino.endpoints_file import load_http_hosts
+    from solomon.trino.env import trino_env
 
-    1. env ``SOLOMON_TRINO_CONNECTION_NAME`` があれば ``cml.data_v1`` から取得
-    2. cml.data の全 connection から Trino/CDW 系を auto-detect (1 件目)
-    3. env ``SOLOMON_TRINO_HOST`` 系にフォールバック
-    4. 何も無ければ ``None``
+    host: Optional[str] = None
+    port = 8080
 
-    ``SOLOMON_TRINO_CATALOG`` / ``SOLOMON_TRINO_SCHEMA`` は Data Connection の値が
-    あればそちらを優先し、env はさらにその上書きとして扱う (デモ運用しやすさ)。
-    """
-    catalog_env = _env("SOLOMON_TRINO_CATALOG")
-    schema_env = _env("SOLOMON_TRINO_SCHEMA")
+    endpoint = trino_env("ENDPOINT") or trino_env("HOST")
+    if endpoint:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+        if parsed.hostname:
+            host = parsed.hostname
+            if parsed.port is not None:
+                port = parsed.port
+
+    if not host:
+        hosts = load_http_hosts()
+        if hosts:
+            first = hosts[0]
+            if ":" in first:
+                host_part, _, port_part = first.rpartition(":")
+                host = host_part
+                if port_part.isdigit():
+                    port = int(port_part)
+            else:
+                host = first
+
+    if not host:
+        _logger.debug("trino_config.internal_launcher_not_ready")
+        return None
+
+    scheme = trino_env("SCHEME") or "http"
+    verify = _parse_verify_ssl(trino_env("VERIFY_SSL"))
+    if verify is True and scheme == "http":
+        verify = False
+    catalog = catalog_env or "iceberg"
+    schema = schema_env or "demo"
+    host, port = _normalize_trino_host(host, port)
+    return TrinoConfig(
+        host=host,
+        port=port,
+        scheme=scheme,
+        verify_ssl=verify,
+        catalog=catalog,
+        schema=schema,
+        connection_name=None,
+        internal=True,
+    )
+
+
+def _get_external_trino_config(
+    *,
+    catalog_env: Optional[str],
+    schema_env: Optional[str],
+) -> Optional[TrinoConfig]:
+    """Production CDW / Trino via Data Connection or env fallback."""
+    from solomon.trino.env import trino_env
 
     # 1) 明示名指定
-    name = _env("SOLOMON_TRINO_CONNECTION_NAME")
+    name = trino_env("CONNECTION_NAME")
     conn: Optional[Any] = None
     if name:
         conn = _cml_get_connection(name)
@@ -361,17 +418,18 @@ def get_trino_config() -> Optional[TrinoConfig]:
                 catalog=catalog,
                 schema=schema,
                 connection_name=name,
+                internal=False,
             )
 
     # 3) env fallback
-    host = _env("SOLOMON_TRINO_HOST")
+    host = trino_env("HOST")
     if not host:
         _logger.debug("trino_config.not_configured")
         return None
-    port = int(_env("SOLOMON_TRINO_PORT") or "443")
+    port = int(trino_env("PORT") or "443")
     host, port = _normalize_trino_host(host, port)
-    scheme = _env("SOLOMON_TRINO_SCHEME") or "https"
-    verify = _parse_verify_ssl(_env("SOLOMON_TRINO_VERIFY_SSL"))
+    scheme = trino_env("SCHEME") or "https"
+    verify = _parse_verify_ssl(trino_env("VERIFY_SSL"))
     catalog = catalog_env or "iceberg"
     schema = schema_env or "demo"
     return TrinoConfig(
@@ -382,6 +440,32 @@ def get_trino_config() -> Optional[TrinoConfig]:
         catalog=catalog,
         schema=schema,
         connection_name=None,
+        internal=False,
+    )
+
+
+def get_trino_config() -> Optional[TrinoConfig]:
+    """Trino 接続設定を解決する。
+
+    * ``TRINO_MODE=internal`` (default): warehouse-launcher の Trino + DuckDB
+    * ``TRINO_MODE=external``: CDW / Trino — Data Connection または env (4 段)
+    """
+    from solomon.trino.mode import is_internal_trino_mode
+
+    from solomon.trino.env import trino_env
+
+    catalog_env = trino_env("CATALOG")
+    schema_env = trino_env("SCHEMA")
+
+    if is_internal_trino_mode():
+        return _get_internal_trino_config(
+            catalog_env=catalog_env,
+            schema_env=schema_env,
+        )
+
+    return _get_external_trino_config(
+        catalog_env=catalog_env,
+        schema_env=schema_env,
     )
 
 
