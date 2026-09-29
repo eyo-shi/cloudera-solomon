@@ -15,19 +15,20 @@ from solomon.transport import config as cfg_mod
 
 def test_opensearch_config_not_configured(monkeypatch) -> None:
     for key in (
-        "SOLOMON_OPENSEARCH_CONNECTION_NAME",
-        "SOLOMON_OPENSEARCH_ENDPOINT",
-        "SOLOMON_OPENSEARCH_HOST",
+        "OPENSEARCH_CONNECTION_NAME",
+        "OPENSEARCH_ENDPOINT",
+        "OPENSEARCH_HOST",
     ):
         monkeypatch.delenv(key, raising=False)
     assert cfg_mod.get_opensearch_config() is None
 
 
 def test_opensearch_config_from_endpoint_env(monkeypatch) -> None:
+    monkeypatch.setenv("OPENSEARCH_MODE", "external")
     monkeypatch.setenv(
-        "SOLOMON_OPENSEARCH_ENDPOINT", "https://css.example.com:9200"
+        "OPENSEARCH_ENDPOINT", "https://css.example.com:9200"
     )
-    monkeypatch.setenv("SOLOMON_OPENSEARCH_NAMESPACE", "myproject")
+    monkeypatch.setenv("OPENSEARCH_NAMESPACE", "myproject")
     config = cfg_mod.get_opensearch_config()
     assert config is not None
     assert config.host == "css.example.com"
@@ -38,7 +39,8 @@ def test_opensearch_config_from_endpoint_env(monkeypatch) -> None:
 
 
 def test_opensearch_config_from_data_connection(monkeypatch) -> None:
-    monkeypatch.setenv("SOLOMON_OPENSEARCH_CONNECTION_NAME", "css-prod")
+    monkeypatch.setenv("OPENSEARCH_MODE", "external")
+    monkeypatch.setenv("OPENSEARCH_CONNECTION_NAME", "css-prod")
     conn = SimpleNamespace(
         type="opensearch",
         name="css-prod",
@@ -58,8 +60,8 @@ def test_opensearch_config_from_data_connection(monkeypatch) -> None:
 
 
 def test_opensearch_tools_not_configured(monkeypatch) -> None:
-    monkeypatch.delenv("SOLOMON_OPENSEARCH_ENDPOINT", raising=False)
-    monkeypatch.delenv("SOLOMON_OPENSEARCH_HOST", raising=False)
+    monkeypatch.delenv("OPENSEARCH_ENDPOINT", raising=False)
+    monkeypatch.delenv("OPENSEARCH_HOST", raising=False)
 
     kw = OpenSearchKeywordSearchTool().run(user_ctx=None, query="sales", top_k=3)
     assert kw["status"] == "error"

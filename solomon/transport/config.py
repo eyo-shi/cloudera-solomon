@@ -6,8 +6,8 @@ Solomon は Cloudera AI Workbench の AMP として配信される。以下の 3
 混在するが、この 1 モジュールに集約することでコード側は「env の名前」も
 「cml.data の呼び方」も意識せずに済むようにする。
 
-1. **AMP setup 画面** で入力する **Deploy-time env** (最小): ``SOLOMON_LOG_LEVEL`` /
-   ``SOLOMON_DEMO_MODE`` の 2 個のみ。
+1. **AMP Configuration 画面** (Deploy フォーム): ``SOLOMON_LOG_LEVEL``、
+   ``NEO4J_MODE`` / ``OPENSEARCH_MODE``、``NEO4J_USERNAME`` / ``NEO4J_PASSWORD``。
 2. **Cloudera AI Workbench の Data Connections** (Site Administration →
    Data Connections で設定済み): Trino / S3 の接続情報は Deploy 時に二重入力
    させず、``cml.data_v1`` 経由で取得する。
@@ -128,11 +128,12 @@ class CDVConfig:
 
 @dataclass(frozen=True)
 class OpenSearchConfig:
-    """OpenSearch 接続設定 (Data Hub 本番 / CML launcher デモ)。
+    """OpenSearch 接続設定 (external cluster / internal launcher)。
 
-    ``SOLOMON_OPENSEARCH_MODE=datahub`` では Data Hub Semantic Search へ接続。
-    ``SOLOMON_OPENSEARCH_MODE=cml`` では opensearch-launcher が起動した
-    クラスタ (``.solomon/opensearch_endpoints.json``) へ接続する。
+    ``OPENSEARCH_MODE=external`` では Data Hub Semantic Search 等の
+    外部クラスタへ接続。``OPENSEARCH_MODE=internal`` では
+    opensearch-launcher が起動した co-located クラスタ
+    (``.solomon/opensearch_endpoints.json``) へ接続する。
     """
 
     host: str
@@ -634,9 +635,11 @@ def _opensearch_config_from_endpoint(
     host, port, scheme = _parse_opensearch_endpoint(endpoint)
     if not host:
         return None
-    port = int(_env("SOLOMON_OPENSEARCH_PORT") or str(port))
-    scheme = _env("SOLOMON_OPENSEARCH_SCHEME") or scheme or default_scheme
-    verify_raw = _env("SOLOMON_OPENSEARCH_VERIFY_SSL")
+    from solomon.opensearch.env import opensearch_env
+
+    port = int(opensearch_env("PORT") or str(port))
+    scheme = opensearch_env("SCHEME") or scheme or default_scheme
+    verify_raw = opensearch_env("VERIFY_SSL")
     verify = _parse_verify_ssl(verify_raw) if verify_raw is not None else default_verify_ssl
     namespace = namespace_env or "solomon"
     index_name = index_env or f"{namespace}-datasets"
@@ -652,21 +655,23 @@ def _opensearch_config_from_endpoint(
         verify_ssl=verify,
         namespace=namespace,
         index_name=index_name,
-        username=_env("SOLOMON_OPENSEARCH_USERNAME"),
-        password=_env("SOLOMON_OPENSEARCH_PASSWORD"),
+        username=opensearch_env("USERNAME"),
+        password=opensearch_env("PASSWORD"),
         embedding_dim=embedding_dim,
         connection_name=connection_name,
     )
 
 
-def _get_datahub_opensearch_config(
+def _get_external_opensearch_config(
     *,
     namespace_env: Optional[str],
     index_env: Optional[str],
     embedding_dim_env: Optional[str],
 ) -> Optional[OpenSearchConfig]:
     """Production: Data Hub Semantic Search via Data Connection or explicit env."""
-    name = _env("SOLOMON_OPENSEARCH_CONNECTION_NAME")
+    from solomon.opensearch.env import opensearch_env
+
+    name = opensearch_env("CONNECTION_NAME")
     conn: Optional[Any] = None
     if name:
         conn = _cml_get_connection(name)
@@ -704,7 +709,7 @@ def _get_datahub_opensearch_config(
             connection_name=name,
         )
 
-    endpoint = _env("SOLOMON_OPENSEARCH_ENDPOINT") or _env("SOLOMON_OPENSEARCH_HOST")
+    endpoint = opensearch_env("ENDPOINT") or opensearch_env("HOST")
     if not endpoint:
         return None
     return _opensearch_config_from_endpoint(
@@ -715,14 +720,16 @@ def _get_datahub_opensearch_config(
     )
 
 
-def _get_cml_opensearch_config(
+def _get_internal_opensearch_config(
     *,
     namespace_env: Optional[str],
     index_env: Optional[str],
     embedding_dim_env: Optional[str],
 ) -> Optional[OpenSearchConfig]:
-    """Demo: co-located opensearch-launcher (Neo4j launcher と同型)."""
-    endpoint = _env("SOLOMON_OPENSEARCH_ENDPOINT") or _env("SOLOMON_OPENSEARCH_HOST")
+    """Internal: co-located opensearch-launcher (Neo4j launcher と同型)."""
+    from solomon.opensearch.env import opensearch_env
+
+    endpoint = opensearch_env("ENDPOINT") or opensearch_env("HOST")
     if not endpoint:
         from solomon.opensearch.endpoints_file import load_http_hosts
 
@@ -730,7 +737,7 @@ def _get_cml_opensearch_config(
         if hosts:
             endpoint = f"http://{hosts[0]}"
     if not endpoint:
-        _logger.debug("opensearch_config.cml_launcher_not_ready")
+        _logger.debug("opensearch_config.internal_launcher_not_ready")
         return None
     return _opensearch_config_from_endpoint(
         endpoint,
@@ -743,26 +750,27 @@ def _get_cml_opensearch_config(
 
 
 def get_opensearch_config() -> Optional[OpenSearchConfig]:
-    """OpenSearch 接続設定。``SOLOMON_OPENSEARCH_MODE`` で解決経路を切り替える。
+    """OpenSearch 接続設定。``OPENSEARCH_MODE`` で解決経路を切り替える。
 
-    * ``datahub`` (default): Data Hub Semantic Search — Data Connection または env
-    * ``cml``: opensearch-launcher が書く ``.solomon/opensearch_endpoints.json``
-      / ``SOLOMON_OPENSEARCH_ENDPOINT`` へ接続 (CML デモ完結)
+    * ``internal`` (default): opensearch-launcher が書く
+      ``.solomon/opensearch_endpoints.json`` / ``OPENSEARCH_ENDPOINT``
+    * ``external``: Data Hub Semantic Search — Data Connection または env
     """
-    from solomon.opensearch.mode import is_cml_opensearch_mode
+    from solomon.opensearch.env import opensearch_env
+    from solomon.opensearch.mode import is_internal_opensearch_mode
 
-    namespace_env = _env("SOLOMON_OPENSEARCH_NAMESPACE")
-    index_env = _env("SOLOMON_OPENSEARCH_INDEX")
-    embedding_dim_env = _env("SOLOMON_OPENSEARCH_EMBEDDING_DIM")
+    namespace_env = opensearch_env("NAMESPACE")
+    index_env = opensearch_env("INDEX")
+    embedding_dim_env = opensearch_env("EMBEDDING_DIM")
 
-    if is_cml_opensearch_mode():
-        return _get_cml_opensearch_config(
+    if is_internal_opensearch_mode():
+        return _get_internal_opensearch_config(
             namespace_env=namespace_env,
             index_env=index_env,
             embedding_dim_env=embedding_dim_env,
         )
 
-    cfg = _get_datahub_opensearch_config(
+    cfg = _get_external_opensearch_config(
         namespace_env=namespace_env,
         index_env=index_env,
         embedding_dim_env=embedding_dim_env,

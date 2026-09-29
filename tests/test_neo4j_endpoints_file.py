@@ -18,7 +18,7 @@ def test_load_bolt_uris_from_shared_file(tmp_path, monkeypatch) -> None:
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("SOLOMON_NEO4J_ENDPOINTS_FILE", str(path))
+    monkeypatch.setenv("NEO4J_ENDPOINTS_FILE", str(path))
 
     uris = load_bolt_uris()
     assert uris[0] == "bolt://10.43.10.5:7687"
@@ -28,7 +28,7 @@ def test_load_bolt_uris_from_shared_file(tmp_path, monkeypatch) -> None:
 
 def test_write_endpoints_round_trip(tmp_path, monkeypatch) -> None:
     path = tmp_path / ".solomon" / "neo4j_endpoints.json"
-    monkeypatch.setenv("SOLOMON_NEO4J_ENDPOINTS_FILE", str(path))
+    monkeypatch.setenv("NEO4J_ENDPOINTS_FILE", str(path))
 
     written = write_endpoints({"bolt_hosts": ["10.42.1.17"]})
     assert written == path

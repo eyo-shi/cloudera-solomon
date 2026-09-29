@@ -1,7 +1,7 @@
-"""OpenSearch Tools — Data Hub (本番) または CML launcher (デモ) への接続。
+"""OpenSearch Tools — external cluster または internal launcher への接続。
 
-``SOLOMON_OPENSEARCH_MODE`` で接続先を切り替える。Solomon プロセス内では
-OpenSearch サーバーは起動せず、外部 / co-located クラスタへ opensearch-py で接続する。
+``OPENSEARCH_MODE`` (internal / external) で接続先を切り替える。
+Solomon プロセス内では OpenSearch サーバーは起動せず、opensearch-py で接続する。
 """
 
 from __future__ import annotations
@@ -19,19 +19,19 @@ from solomon.transport.tool_base import BaseSolomonTool
 from solomon.transport.user_context import UserContext
 
 def _not_configured_msg() -> str:
-    from solomon.opensearch.mode import is_cml_opensearch_mode
+    from solomon.opensearch.mode import is_internal_opensearch_mode
 
-    if is_cml_opensearch_mode():
+    if is_internal_opensearch_mode():
         return (
-            "OpenSearch is not configured for CML demo mode. Ensure "
+            "OpenSearch is not configured for internal mode. Ensure "
             "opensearch-launcher Application is Running, wait for "
-            ".solomon/opensearch_endpoints.json, or set SOLOMON_OPENSEARCH_ENDPOINT, "
+            ".solomon/opensearch_endpoints.json, or set OPENSEARCH_ENDPOINT, "
             "then restart Solomon."
         )
     return (
-        "OpenSearch is not configured. Set SOLOMON_OPENSEARCH_MODE=datahub, "
+        "OpenSearch is not configured. Set OPENSEARCH_MODE=external, "
         "provision Semantic Search for AWS on Data Hub, register a Data Connection "
-        "(or set SOLOMON_OPENSEARCH_ENDPOINT and SOLOMON_OPENSEARCH_NAMESPACE), "
+        "(or set OPENSEARCH_ENDPOINT and OPENSEARCH_NAMESPACE), "
         "then restart Solomon."
     )
 

@@ -95,8 +95,12 @@ function guideFor(errorCode: string): GuideDetails {
         title: "Neo4j への接続情報が未設定です",
         envList: [
           {
+            name: "NEO4J_MODE",
+            hint: "internal = neo4j-launcher (CML 内部) / external = 外部 Neo4j クラスタ",
+          },
+          {
             name: "NEO4J_URI",
-            hint: "neo4j-launcher Application Log の Internal / External Bolt URI",
+            hint: "external モード: 外部 Bolt URI。internal で DNS 不通時は launcher Log の URI",
           },
           {
             name: "NEO4J_USERNAME",
@@ -104,17 +108,16 @@ function guideFor(errorCode: string): GuideDetails {
           },
           {
             name: "NEO4J_PASSWORD",
-            hint: "neo4j-launcher Application Log の Password",
+            hint: "external モード必須。internal は launcher 既定 (Neo4jPass1234) も可",
           },
           {
             name: "NEO4J_EXTERNAL_URI",
-            hint: "Internal DNS が失敗する場合の ELB URI (任意)",
+            hint: "internal モードで Internal DNS が失敗する場合の ELB URI (任意)",
           },
         ],
         extraSteps: [
-          "Applications ページで neo4j-launcher が Running であることを確認",
-          "Application Log から Bolt URI と Password をコピー",
-          "Project → Settings → Advanced → Environment Variables に設定",
+          "internal: Applications で neo4j-launcher が Running か確認し .solomon/neo4j_endpoints.json を待つ",
+          "external: Project → Settings → Advanced → Environment Variables に NEO4J_URI 等を設定",
           "Solomon Application を Restart",
         ],
       };
@@ -123,25 +126,25 @@ function guideFor(errorCode: string): GuideDetails {
         title: "Semantic Search (OpenSearch) への接続情報が未設定です",
         envList: [
           {
-            name: "SOLOMON_OPENSEARCH_MODE",
-            hint: "cml = opensearch-launcher (デモ) / datahub = Data Hub Semantic Search (本番)",
+            name: "OPENSEARCH_MODE",
+            hint: "internal = opensearch-launcher (CML 内部) / external = Data Hub Semantic Search 等",
           },
           {
-            name: "SOLOMON_OPENSEARCH_CONNECTION_NAME",
-            hint: "datahub モード: Data Connections の OpenSearch connection 名",
+            name: "OPENSEARCH_CONNECTION_NAME",
+            hint: "external モード: Data Connections の OpenSearch connection 名",
           },
           {
-            name: "SOLOMON_OPENSEARCH_ENDPOINT",
-            hint: "cml モード: launcher Log の HTTP エンドポイント (DNS 不通時)",
+            name: "OPENSEARCH_ENDPOINT",
+            hint: "external: クラスタ URL。internal で DNS 不通時は launcher Log の HTTP エンドポイント",
           },
           {
-            name: "SOLOMON_OPENSEARCH_NAMESPACE",
+            name: "OPENSEARCH_NAMESPACE",
             hint: "インデックス namespace (default: solomon)",
           },
         ],
         extraSteps: [
-          "cml: opensearch-launcher Application が Running か確認し、Log の endpoints file を待つ",
-          "datahub: Semantic Search for AWS を Provision し Data Connection を登録",
+          "internal: opensearch-launcher Application が Running か確認し endpoints file を待つ",
+          "external: Semantic Search for AWS を Provision し Data Connection を登録",
           "Project → Settings → Advanced → Environment Variables に設定",
           "Solomon Application を Restart",
         ],

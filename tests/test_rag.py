@@ -55,8 +55,8 @@ class TestNeo4jQueryValidation:
 
 class TestOrchestratorOffline:
     def test_keyword_falls_back_to_ossie(self, monkeypatch) -> None:
-        monkeypatch.delenv("SOLOMON_OPENSEARCH_ENDPOINT", raising=False)
-        monkeypatch.delenv("SOLOMON_OPENSEARCH_HOST", raising=False)
+        monkeypatch.delenv("OPENSEARCH_ENDPOINT", raising=False)
+        monkeypatch.delenv("OPENSEARCH_HOST", raising=False)
         plan = RetrievalPlan(strategy="KEYWORD", query="sales revenue")
         bundle = execute_retrieval(plan, user_ctx=None)
         assert bundle.plan.strategy == "KEYWORD"

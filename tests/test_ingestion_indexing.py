@@ -74,8 +74,8 @@ def test_build_searchable_text_includes_description() -> None:
 
 
 def test_opensearch_index_skips_when_not_configured(monkeypatch) -> None:
-    monkeypatch.delenv("SOLOMON_OPENSEARCH_ENDPOINT", raising=False)
-    monkeypatch.delenv("SOLOMON_OPENSEARCH_HOST", raising=False)
+    monkeypatch.delenv("OPENSEARCH_ENDPOINT", raising=False)
+    monkeypatch.delenv("OPENSEARCH_HOST", raising=False)
     result = OpenSearchIndexTool().run(
         user_ctx=None,
         fq_name="iceberg.demo.incidents",

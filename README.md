@@ -87,7 +87,6 @@ MVP + Knowledge Source 拡張が `main` に入っている:
 | `solomon.router.RouterCrew` | intent 分類 + Python レベルディスパッチ (`KNOWLEDGE_RAG` 含む) |
 | `solomon.api` | FastAPI (`/api/wish` SSE / `/api/catalog` / `/api/graph` / `/api/search` / `/api/files` / `/api/query` / SPA mount) |
 | `solomon_ui` | React + Vite 3 ペイン UI (4 Knowledge Source タブ + Graph 可視化 + ChatPane SSE) |
-| `solomon.demo.warm` | `SOLOMON_DEMO_MODE=warm` のキャンド応答フォールバック |
 | `solomon.manifest` | Python 定義から Agent Studio manifest を自動生成 |
 | `.project-metadata.yaml` | Cloudera AI Workbench (AMP) 登録用マニフェスト |
 
@@ -127,12 +126,28 @@ AMP Deploy では Step 2 が nvm + `npm ci && npm run build` を自動実行す�
 2. Workbench Application として `python -m solomon.api.main` を起動 (`CDSW_APP_PORT` を uvicorn に渡す)
 3. FastAPI が `/api/*` と `/` (SPA) を配信
 
+## Deploy フォーム (AMP Configuration 画面)
+
+Deploy 時に Configuration 画面へ表示される Environment Variables (すべて optional):
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `SOLOMON_LOG_LEVEL` | `INFO` | ログレベル |
+| `NEO4J_MODE` | `internal` | Neo4j: CML 内 launcher / 外部クラスタ |
+| `NEO4J_USERNAME` | `neo4j` | Neo4j 認証ユーザー (launcher と Solomon が共有) |
+| `NEO4J_PASSWORD` | `Neo4jPass1234` | Neo4j 認証パスワード (本番では必ず変更) |
+| `OPENSEARCH_MODE` | `internal` | OpenSearch: CML 内 launcher / 外部クラスタ |
+
+launcher のメモリ・PVC 等のチューニングは Deploy フォームには出さない。
+必要な場合のみ Deploy 後に **Project → Settings → Advanced → Environment Variables**
+で設定する (`.env.example` の optional セクション参照)。
+
 ## Deploy 後の設定手順 (Post-Deploy Configuration)
 
-AMP Deploy 時に必須入力は **なし** (optional の `SOLOMON_LOG_LEVEL` / `SOLOMON_DEMO_MODE` のみ)。
-Trino / S3 / OpenSearch は Cloudera AI Workbench の **Site Administration → Data Connections** が
-single source of truth。Neo4j / LLM / CDV は Deploy 完了後に **Project → Settings → Advanced →
-Environment Variables** で設定し、同画面から Application を再起動して反映する。
+**external** を選んだ場合は Deploy 後に **Project → Settings → Advanced →
+Environment Variables** で接続情報を設定する。Trino / S3 は **Site Administration → Data
+Connections** が single source of truth。LLM / CDV も Deploy 後に同画面で設定し、Application を
+再起動して反映する。
 
 未設定のまま UI で該当機能を叩くと、API は HTTP 503 + JSON (`{error_code, message,
 instruction}`) を返し、UI の **SetupGuide カード** が手順を表示する。
@@ -158,33 +173,49 @@ instruction}`) を返し、UI の **SetupGuide カード** が手順を表示す
 
 ### 3. Neo4j への接続
 
-- Workbench 上で Neo4j Launcher Application を Deploy し、Application Log から
-  `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` を取得して env に設定する。
-- CML neo4j-launcher の内部/外部 Bolt URI フォールバックに対応している。
-- 未設定時は Graph タブ・Ingestion の Neo4j 書込・Agentic RAG の graph 検索が
-  `NEO4J_NOT_CONFIGURED` で停止する。
-
-### 4. OpenSearch / Semantic Search への接続
-
-Deploy 時に `SOLOMON_OPENSEARCH_MODE` で接続方式を切り替える (Solomon プロセス内では
-OpenSearch サーバーは起動しない)。
+Deploy 時に `NEO4J_MODE` で接続方式を切り替える (デフォルト `internal`)。
 
 | モード | 用途 | 設定 |
 |---|---|---|
-| `cml` (AMP デフォルト) | CML デモ完結 | `opensearch-launcher` Application が K8s 上で OpenSearch を起動し、`.solomon/opensearch_endpoints.json` を Solomon と共有 |
-| `datahub` | 本番 | Data Hub **Semantic Search for AWS** を Provision し Data Connection または env で接続 |
+| `internal` (デフォルト) | CML 内部 | `neo4j-launcher` が K8s 上で Neo4j を起動し、`.solomon/neo4j_endpoints.json` を Solomon と共有 |
+| `external` | 外部クラスタ | Deploy フォームで `NEO4J_USERNAME` / `NEO4J_PASSWORD` を設定。Deploy 後に `NEO4J_URI` を Project Settings で設定 |
 
-**CML デモ (`SOLOMON_OPENSEARCH_MODE=cml`)**
+**internal (`NEO4J_MODE=internal`)**
+
+- AMP Deploy で `neo4j-launcher` が起動
+- Solomon は endpoints file から Bolt URI を自動解決 (Deploy 時に `NEO4J_URI` は不要)
+- Internal DNS が通らない場合のみ `NEO4J_URI` または `NEO4J_EXTERNAL_URI` を post-deploy で設定
+
+**external (`NEO4J_MODE=external`)**
+
+- launcher は no-op。外部 Neo4j クラスタへ直接接続
+- Project Settings → Advanced → Environment Variables に接続情報を設定
+
+未設定時は Graph タブ・Ingestion の Neo4j 書込・Agentic RAG の graph 検索が
+`NEO4J_NOT_CONFIGURED` で停止する。
+
+### 4. OpenSearch / Semantic Search への接続
+
+Deploy 時に `OPENSEARCH_MODE` で接続方式を切り替える (デフォルト `internal`)。
+Solomon プロセス内では OpenSearch サーバーは起動しない。
+
+| モード | 用途 | 設定 |
+|---|---|---|
+| `internal` (デフォルト) | CML 内部 | `opensearch-launcher` が K8s 上で OpenSearch を起動し、`.solomon/opensearch_endpoints.json` を Solomon と共有 |
+| `external` | 外部クラスタ | Data Hub **Semantic Search for AWS** 等 — Data Connection または env で接続 |
+
+**internal (`OPENSEARCH_MODE=internal`)**
 
 - AMP Deploy で `opensearch-launcher` が起動 (Neo4j launcher と同型)
 - Application Log に HTTP エンドポイントが出力される
-- DNS が通らない場合は Log の `SOLOMON_OPENSEARCH_ENDPOINT` を Solomon env に設定
+- DNS が通らない場合は `OPENSEARCH_ENDPOINT` を post-deploy で設定
 
-**本番 (`SOLOMON_OPENSEARCH_MODE=datahub`)**
+**external (`OPENSEARCH_MODE=external`)**
 
+- launcher は no-op
 - Data Connections に OpenSearch connection を登録済みなら
-  `SOLOMON_OPENSEARCH_CONNECTION_NAME` を設定 (省略時は OpenSearch タイプを自動検出)
-- 直接指定: `SOLOMON_OPENSEARCH_ENDPOINT`, `SOLOMON_OPENSEARCH_NAMESPACE`, 認証情報など
+  `OPENSEARCH_CONNECTION_NAME` を設定 (省略時は OpenSearch タイプを自動検出)
+- 直接指定: `OPENSEARCH_ENDPOINT`, `OPENSEARCH_NAMESPACE`, 認証情報など
 
 Ingestion 完了後に Ossie dataset が OpenSearch にインデックスされる。
 未設定時は Search タブ・RAG の keyword/hybrid 検索が `OPENSEARCH_NOT_CONFIGURED` で停止する。

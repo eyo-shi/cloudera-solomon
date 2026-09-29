@@ -7,12 +7,13 @@ description: |
   配信し、Trino / CDV / S3 は Knox JWT + IDBroker によるエンドユーザー権限で操作する。
   セマンティックレイヤは Apache Ossie の YAML を Git 管理する。
 
-  Deploy 時に必要な入力は Optional な SOLOMON_LOG_LEVEL / SOLOMON_DEMO_MODE の 2 個
-  のみ。LLM プロバイダ (cai / anthropic / openai / bedrock 選択式)、Trino / S3
-  接続 (Data Connections を優先)、Cloudera Data Visualization は Deploy 完了後に
-  Project → Settings → Advanced → Environment Variables で設定し、Application を
-  再起動して反映する。未設定のまま UI で該当機能を叩くと API は HTTP 503 +
-  guided JSON を返し、SetupGuide カードが手順を表示する。
+  Deploy フォーム (Configuration 画面) には SOLOMON_LOG_LEVEL、Neo4j/OpenSearch の
+  NEO4J_MODE / OPENSEARCH_MODE、NEO4J_USERNAME / NEO4J_PASSWORD が含まれる。
+  Neo4j / OpenSearch は internal (CML 内 launcher、デフォルト) / external
+  (外部クラスタ) を選択。external 時の接続情報、launcher チューニング、LLM、
+  Trino / S3 (Data Connections を優先)、CDV は Deploy 後に Project → Settings →
+  Advanced → Environment Variables で設定する。未設定のまま UI で該当機能を
+  叩くと API は HTTP 503 + guided JSON を返し、SetupGuide カードが手順を表示する。
 
   詳細な post-deploy 手順は README.md「Deploy 後の設定手順」セクションを参照。
 
@@ -30,79 +31,57 @@ runtimes:
     edition: Standard
 
 # ---------------------------------------------------------------------------
-# ユーザー入力 (AMP セットアップ画面のフォームに現れる)
+# Deploy フォーム (AMP Configuration 画面に表示される Environment Variables)
 #
-# 方針: Deploy 時に必要な項目は極限まで削減する。Trino / S3 は Cloudera AI
-# Workbench の Site Administration → Data Connections が single source of
-# truth。LLM / CDV は「Deploy 後に Project → Settings → Advanced →
-# Environment Variables で設定 → Application 再起動」ワークフローに寄せる
-# (詳細は本ファイル冒頭の "Deploy 後の設定手順" を参照)。
+# 方針: Deploy 時は MODE 選択と Neo4j 認証情報を設定。neo4j-launcher と Solomon
+# は同じ NEO4J_USERNAME / NEO4J_PASSWORD を共有する。Trino / S3 は
+# Site Administration → Data Connections が single source of truth。
+# 接続 URI・launcher チューニング・LLM / CDV は Deploy 後に
+# Project → Settings → Advanced → Environment Variables で設定する。
+#
+# --- Deploy フォームに含めない項目 (post-deploy 参照) ---
+#
+# [external Neo4j] NEO4J_MODE=external のとき:
+#   NEO4J_URI (NEO4J_USERNAME / NEO4J_PASSWORD は Deploy フォームで設定済み)
+#
+# [external OpenSearch] OPENSEARCH_MODE=external のとき:
+#   OPENSEARCH_CONNECTION_NAME または OPENSEARCH_ENDPOINT,
+#   OPENSEARCH_NAMESPACE, OPENSEARCH_USERNAME / OPENSEARCH_PASSWORD
+#
+# [internal モード optional] launcher 既定値で動作。変更する場合のみ post-deploy:
+#   NEO4J_MEMORY (4Gi), NEO4J_USE_PVC (false), NEO4J_SERVICE_TYPE (LoadBalancer),
+#   NEO4J_URI / NEO4J_EXTERNAL_URI (DNS 不通時)
+#   OPENSEARCH_MEMORY (2Gi), OPENSEARCH_USE_PVC (false),
+#   OPENSEARCH_ENDPOINT (DNS 不通時)
+#
+# [その他 post-deploy] LLM, Trino/S3 上書き, CDV — README「Deploy 後の設定手順」参照
 # ---------------------------------------------------------------------------
 environment_variables:
   SOLOMON_LOG_LEVEL:
     default: "INFO"
-    description: structlog のログレベル (DEBUG / INFO / WARNING / ERROR)
+    description: ログレベル (DEBUG / INFO / WARNING / ERROR)。通常は変更不要。
     required: false
-  SOLOMON_DEMO_MODE:
-    default: "off"
+  NEO4J_MODE:
+    default: "internal"
     description: >-
-      "warm" にすると Tool の重い呼び出しをウォーミング済みのスタブに差し替える
-      (デモ保険)。本番は "off"。
-    required: false
-  SOLOMON_OPENSEARCH_MODE:
-    default: "cml"
-    description: >-
-      OpenSearch 接続方式。"cml" = 同プロジェクトの opensearch-launcher (CML デモ完結)。
-      "datahub" = Data Hub Semantic Search (本番)。Deploy 時に切り替える。
+      Neo4j 接続方式。internal = neo4j-launcher が CML 内で起動 (推奨・デフォルト)。
+      external = 外部 Neo4j — Deploy 後に Project Settings で NEO4J_URI を設定。
     required: false
   NEO4J_USERNAME:
     default: "neo4j"
-    description: Neo4j username.
+    description: >-
+      Neo4j 認証ユーザー。neo4j-launcher と Solomon が共有。internal / external 共通。
     required: false
   NEO4J_PASSWORD:
     default: "Neo4jPass1234"
-    description: Neo4j password. Built-in default Neo4jPass1234. 本番運用時は必ず変更してください。
+    description: >-
+      Neo4j 認証パスワード。neo4j-launcher と Solomon が共有。本番運用時は必ず変更すること。
     required: false
-  NEO4J_URI:
-    default: "bolt://cml-neo4j-REPLACE_FROM_APPLICATION_LOG.mlx-user-0:7687"
-    description: |
-      Primary Bolt URI from neo4j-launcher Application Log (Internal Bolt for
-      same AMP project). If internal DNS fails, set this or NEO4J_EXTERNAL_URI
-      to External Bolt (ELB) and restart Solomon.
-    required: false
-  NEO4J_EXTERNAL_URI:
-    default: "-"
-    description: |
-      Optional External Bolt URI (ELB) from neo4j-launcher Application Log.
-      Used when Internal Bolt DNS is unreachable from the Solomon pod.
-    required: false
-  NEO4J_ACCEPT_LICENSE_AGREEMENT:
-    default: "yes"
-    description: Must be 'yes' for Neo4j Docker images to start.
-    required: false
-  NEO4J_SERVICE_TYPE:
-    default: "LoadBalancer"
-    description: Kubernetes Service type (LoadBalancer, NodePort, or ClusterIP).
-    required: false
-  NEO4J_PLUGINS:
-    default: "[]"
-    description: 'Neo4j plugins JSON array. Example ["apoc"] or [].'
-    required: false
-  NEO4J_MEMORY:
-    default: "4Gi"
-    description: Memory limit for the Neo4j Pod.
-    required: false
-  NEO4J_USE_PVC:
-    default: "false"
-    description: Persist Neo4j data on the project PVC.
-    required: false
-  OPENSEARCH_MEMORY:
-    default: "2Gi"
-    description: Memory limit for the OpenSearch Pod (CML launcher / demo mode).
-    required: false
-  OPENSEARCH_USE_PVC:
-    default: "false"
-    description: Persist OpenSearch data on the project PVC (CML launcher).
+  OPENSEARCH_MODE:
+    default: "internal"
+    description: >-
+      OpenSearch 接続方式。internal = opensearch-launcher が CML 内で起動 (推奨・デフォルト)。
+      external = 外部クラスタ — Deploy 後に Project Settings で接続情報を設定。
     required: false
 
 # ---------------------------------------------------------------------------
@@ -176,24 +155,24 @@ tasks:
     short_summary: Launch Neo4j on Kubernetes and expose it externally
     long_summary: >-
       java-code-analysis-integrated と同様に Kubernetes 上で Neo4j を起動する。
-      Application Log から Internal Bolt URI と password を Project Settings へ
-      設定し、取り込み時に Solomon が Dataset / Column / SourceFile ノードを
-      作成できるようにする。
+      NEO4J_MODE=internal のとき K8s 上で Neo4j を起動し、
+      .solomon/neo4j_endpoints.json を Solomon と共有する。external モードでは
+      supervisor は no-op (外部 Neo4j へ接続)。
     kernel: python3
     cpu: 2
     memory: 8
 
-  # 6. OpenSearch Launcher を Workbench Application として起動 (CML デモ用)
+  # 6. OpenSearch Launcher を Workbench Application として起動 (internal モード用)
   - type: start_application
     name: OpenSearch Launcher
     entity_label: opensearch-launcher
     subdomain: opensearch-launcher
     script: 1_start-opensearch/start_opensearch.py
-    short_summary: Launch OpenSearch on Kubernetes for CML demo mode
+    short_summary: Launch OpenSearch on Kubernetes for internal mode
     long_summary: >-
-      SOLOMON_OPENSEARCH_MODE=cml のとき Kubernetes 上で OpenSearch (k-NN 対応) を
+      OPENSEARCH_MODE=internal のとき Kubernetes 上で OpenSearch (k-NN 対応) を
       起動し、.solomon/opensearch_endpoints.json を Solomon と共有する。
-      datahub モードでは supervisor は no-op (Data Hub Semantic Search を使用)。
+      external モードでは supervisor は no-op (外部 OpenSearch を使用)。
     kernel: python3
     cpu: 2
     memory: 4

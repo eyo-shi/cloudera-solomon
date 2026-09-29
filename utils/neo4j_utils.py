@@ -2510,7 +2510,19 @@ def _bootstrap_neo4j() -> None:
 
 
 def run_neo4j_supervisor() -> None:
-    print("Starting Neo4j server...")
+    from solomon.graph.mode import is_internal_neo4j_mode
+
+    if not is_internal_neo4j_mode():
+        _set_supervisor_state("disabled")
+        print(
+            "Neo4j launcher disabled (NEO4J_MODE=external). "
+            "Configure external Neo4j via Project Settings > Advanced > "
+            "Environment Variables (NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD) "
+            "on Solomon."
+        )
+        return
+
+    print("Starting Neo4j server (internal mode)...")
     try:
         _set_supervisor_state("initializing")
         _bootstrap_neo4j()

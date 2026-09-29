@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from solomon.infra.env_compat import env_first
+
 _ENDPOINTS_REL = Path(".solomon") / "opensearch_endpoints.json"
 
 
@@ -19,7 +21,7 @@ def _project_dir() -> Path:
 
 
 def endpoints_file_path() -> Path:
-    override = (os.environ.get("SOLOMON_OPENSEARCH_ENDPOINTS_FILE") or "").strip()
+    override = (env_first("OPENSEARCH_ENDPOINTS_FILE", "SOLOMON_OPENSEARCH_ENDPOINTS_FILE") or "").strip()
     if override:
         return Path(override)
     return _project_dir() / _ENDPOINTS_REL
@@ -42,7 +44,7 @@ def load_http_endpoints() -> dict[str, Any]:
 
 
 def load_http_hosts() -> list[str]:
-    """Return host:port strings suitable for SOLOMON_OPENSEARCH_ENDPOINT."""
+    """Return host:port strings suitable for OPENSEARCH_ENDPOINT."""
     data = load_http_endpoints()
     hosts: list[str] = []
     seen: set[str] = set()

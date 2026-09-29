@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from solomon.infra.env_compat import env_first
+
 _ENDPOINTS_REL = Path(".solomon") / "neo4j_endpoints.json"
 
 
@@ -23,7 +25,7 @@ def _project_dir() -> Path:
 
 
 def endpoints_file_path() -> Path:
-    override = (os.environ.get("SOLOMON_NEO4J_ENDPOINTS_FILE") or "").strip()
+    override = (env_first("NEO4J_ENDPOINTS_FILE", "SOLOMON_NEO4J_ENDPOINTS_FILE") or "").strip()
     if override:
         return Path(override)
     return _project_dir() / _ENDPOINTS_REL

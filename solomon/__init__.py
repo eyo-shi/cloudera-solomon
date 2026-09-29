@@ -9,7 +9,6 @@
     solomon.transport   認証・HTTP・ロギングの共通層
     solomon.tools       各種 CrewAI Tool 実装
     solomon.api         FastAPI バックエンド
-    solomon.demo        デモ用ウォームアップ / フォールバック
 """
 
 __version__ = "0.0.1"

@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from solomon.graph.mode import is_external_neo4j_mode, is_internal_neo4j_mode
 from solomon.graph.neo4j_connect import validate_neo4j_uri_for_ingest
+from solomon.graph.neo4j_endpoints_file import load_bolt_uris
 
 DEFAULT_NEO4J_USERNAME = "neo4j"
 DEFAULT_NEO4J_PASSWORD = "Neo4jPass1234"
@@ -22,7 +24,7 @@ def _env(name: str, default: str | None = None) -> str | None:
     text = raw.strip()
     if not text or text == OPTIONAL_UNSET_VALUE:
         return default
-    if "://" not in text and name == "NEO4J_URI":
+    if "://" not in text and name in ("NEO4J_URI", "NEO4J_EXTERNAL_URI"):
         text = f"bolt://{text}"
     return text
 
@@ -59,6 +61,35 @@ class Neo4jConfig:
             )
 
 
-def get_neo4j_config() -> Neo4jConfig | None:
-    """Return Neo4j settings when NEO4J_URI is configured, else None."""
+def _config_from_uri(uri: str) -> Neo4jConfig:
+    return Neo4jConfig(
+        uri=uri,
+        username=_env("NEO4J_USERNAME", DEFAULT_NEO4J_USERNAME) or DEFAULT_NEO4J_USERNAME,
+        password=_env("NEO4J_PASSWORD", DEFAULT_NEO4J_PASSWORD) or DEFAULT_NEO4J_PASSWORD,
+    )
+
+
+def _get_internal_neo4j_config() -> Neo4jConfig | None:
+    """Co-located neo4j-launcher: endpoints file first, env override optional."""
+    uri = _env("NEO4J_URI") or _env("NEO4J_EXTERNAL_URI")
+    if not uri:
+        uris = load_bolt_uris()
+        if uris:
+            uri = uris[0]
+    if not uri:
+        return None
+    return _config_from_uri(uri)
+
+
+def _get_external_neo4j_config() -> Neo4jConfig | None:
+    """External Neo4j: post-deploy NEO4J_URI (Project Settings > Advanced)."""
     return Neo4jConfig.from_env()
+
+
+def get_neo4j_config() -> Neo4jConfig | None:
+    """Return Neo4j settings based on ``NEO4J_MODE``."""
+    if is_internal_neo4j_mode():
+        return _get_internal_neo4j_config()
+    if is_external_neo4j_mode():
+        return _get_external_neo4j_config()
+    return None

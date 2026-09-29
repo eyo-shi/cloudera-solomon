@@ -21,16 +21,33 @@ router = APIRouter(prefix="/api/graph", tags=["graph"])
 
 def _require_neo4j_or_503() -> None:
     if get_neo4j_config() is None:
+        from solomon.graph.mode import is_external_neo4j_mode, is_internal_neo4j_mode
+
+        if is_internal_neo4j_mode():
+            instruction = (
+                "NEO4J_MODE=internal です。neo4j-launcher Application "
+                "が Running であることを確認し、Application Log で "
+                ".solomon/neo4j_endpoints.json が書き込まれるまで待ってから "
+                "Solomon Application を再起動してください。"
+            )
+        elif is_external_neo4j_mode():
+            instruction = (
+                "NEO4J_MODE=external です。Project → Settings → Advanced → "
+                "Environment Variables に NEO4J_URI / NEO4J_USERNAME / "
+                "NEO4J_PASSWORD を設定し、Application を再起動してください。"
+            )
+        else:
+            instruction = (
+                "Project → Settings → Advanced → Environment Variables に "
+                "NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD を設定し、"
+                "Application を再起動してください。"
+            )
         raise HTTPException(
             status_code=503,
             detail={
                 "error_code": "NEO4J_NOT_CONFIGURED",
                 "message": "Neo4j への接続情報が設定されていません。",
-                "instruction": (
-                    "Project → Settings → Advanced → Environment Variables に "
-                    "NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD を設定し、"
-                    "Application を再起動してください。"
-                ),
+                "instruction": instruction,
             },
         )
 

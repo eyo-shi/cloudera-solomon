@@ -19,21 +19,21 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 
 def _require_opensearch_or_503() -> None:
     if get_opensearch_config() is None:
-        from solomon.opensearch.mode import is_cml_opensearch_mode
+        from solomon.opensearch.mode import is_internal_opensearch_mode
 
-        if is_cml_opensearch_mode():
+        if is_internal_opensearch_mode():
             instruction = (
-                "SOLOMON_OPENSEARCH_MODE=cml です。opensearch-launcher Application "
+                "OPENSEARCH_MODE=internal です。opensearch-launcher Application "
                 "が Running であることを確認し、Application Log で "
                 ".solomon/opensearch_endpoints.json が書き込まれるまで待ってから "
                 "Solomon Application を再起動してください。"
             )
         else:
             instruction = (
-                "SOLOMON_OPENSEARCH_MODE=datahub です。Data Hub の Semantic Search "
+                "OPENSEARCH_MODE=external です。Data Hub の Semantic Search "
                 "for AWS を Provision し、Project → Settings → Advanced → "
-                "Environment Variables に SOLOMON_OPENSEARCH_CONNECTION_NAME または "
-                "SOLOMON_OPENSEARCH_ENDPOINT / SOLOMON_OPENSEARCH_NAMESPACE "
+                "Environment Variables に OPENSEARCH_CONNECTION_NAME または "
+                "OPENSEARCH_ENDPOINT / OPENSEARCH_NAMESPACE "
                 "を設定して Application を再起動してください。"
             )
         raise HTTPException(

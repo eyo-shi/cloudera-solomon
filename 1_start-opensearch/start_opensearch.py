@@ -1,4 +1,4 @@
-"""OpenSearch Launcher — co-located OpenSearch for CML demo deployments."""
+"""OpenSearch Launcher — co-located OpenSearch for internal mode deployments."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from utils.opensearch_utils import get_connection_info, run_opensearch_superviso
 def _render_status_page(info: dict) -> str:
     rows = [
         ("Status", info.get("status")),
-        ("Mode", os.getenv("SOLOMON_OPENSEARCH_MODE", "datahub")),
+        ("Mode", os.getenv("OPENSEARCH_MODE") or os.getenv("SOLOMON_OPENSEARCH_MODE", "internal")),
         ("Internal HTTP", info.get("internal_http")),
         ("HTTP Hosts", ", ".join(info.get("http_hosts") or [])),
         ("Service", info.get("service_name")),
@@ -33,8 +33,8 @@ def _render_status_page(info: dict) -> str:
 <html><head><meta charset="utf-8"><title>OpenSearch Launcher</title></head>
 <body>
 <h1>OpenSearch Launcher</h1>
-<p>CML demo mode uses <code>SOLOMON_OPENSEARCH_MODE=cml</code>.
-Production uses <code>datahub</code> with Data Hub Semantic Search.</p>
+<p>Internal mode uses <code>OPENSEARCH_MODE=internal</code>.
+External mode uses <code>external</code> with Data Hub Semantic Search or other cluster.</p>
 <table>{body}</table>
 </body></html>"""
 

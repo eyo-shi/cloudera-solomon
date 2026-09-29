@@ -332,7 +332,7 @@ def _write_solomon_endpoints(info: dict) -> None:
         hosts = payload["http_hosts"]
         if hosts:
             print(
-                "Solomon SOLOMON_OPENSEARCH_ENDPOINT (if DNS fails): "
+                "Solomon OPENSEARCH_ENDPOINT (if DNS fails): "
                 f"http://{hosts[0]}"
             )
     except Exception as exc:
@@ -372,18 +372,19 @@ def print_connection_info() -> None:
 
 
 def run_opensearch_supervisor() -> None:
-    from solomon.opensearch.mode import is_cml_opensearch_mode
+    from solomon.opensearch.mode import is_internal_opensearch_mode
 
-    if not is_cml_opensearch_mode():
+    if not is_internal_opensearch_mode():
         _supervisor_state["phase"] = "disabled"
         print(
-            "OpenSearch launcher disabled (SOLOMON_OPENSEARCH_MODE=datahub). "
-            "Use Data Hub Semantic Search and configure SOLOMON_OPENSEARCH_CONNECTION_NAME "
-            "or SOLOMON_OPENSEARCH_ENDPOINT on Solomon."
+            "OpenSearch launcher disabled (OPENSEARCH_MODE=external). "
+            "Configure external OpenSearch via Project Settings > Advanced > "
+            "Environment Variables (OPENSEARCH_CONNECTION_NAME or "
+            "OPENSEARCH_ENDPOINT) on Solomon."
         )
         return
 
-    print("Starting OpenSearch server (CML demo mode)...")
+    print("Starting OpenSearch server (internal mode)...")
     try:
         _supervisor_state["phase"] = "deploying"
         deploy_opensearch()

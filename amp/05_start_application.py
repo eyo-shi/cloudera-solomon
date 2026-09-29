@@ -17,7 +17,6 @@ def _normalize_deploy_env() -> None:
     """空の optional env を Workbench 向けデフォルトに置き換える。"""
     defaults = {
         "SOLOMON_LOG_LEVEL": "INFO",
-        "SOLOMON_DEMO_MODE": "off",
     }
     for key, default in defaults.items():
         if not (os.environ.get(key) or "").strip():
