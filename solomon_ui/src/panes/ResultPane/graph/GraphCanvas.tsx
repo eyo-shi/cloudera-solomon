@@ -15,6 +15,37 @@ import { attachDragPhysics } from "./graphDragPhysics";
 
 type GraphLayoutMode = "force" | "hierarchical";
 
+const NODE_FONT_SIZE = 10;
+/** Neo4j Browser 風の固定ノード直径 (px)。 */
+const NODE_DIAMETER = 56;
+/** 円内に収めるラベルの最大幅 (px, 10px フォント)。 */
+const NODE_LABEL_MAX_WIDTH = 44;
+
+function measureLabelWidth(label: string): number {
+  if (typeof document === "undefined") {
+    return label.length * NODE_FONT_SIZE * 0.6;
+  }
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return label.length * NODE_FONT_SIZE * 0.6;
+  ctx.font = `${NODE_FONT_SIZE}px Helvetica, Arial, sans-serif`;
+  return ctx.measureText(label).width;
+}
+
+/** Neo4j Browser 同様、長い名前は 1 行で ``...`` 省略する。 */
+function ellipsizeNodeLabel(label: string, maxWidth: number): string {
+  const text = label.trim();
+  if (!text || measureLabelWidth(text) <= maxWidth) return text;
+  const ellipsis = "...";
+  let end = text.length;
+  while (end > 0) {
+    const candidate = text.slice(0, end).trimEnd() + ellipsis;
+    if (measureLabelWidth(candidate) <= maxWidth) return candidate;
+    end -= 1;
+  }
+  return ellipsis;
+}
+
 function toElements(
   nodes: GraphNodeDTO[],
   edges: GraphEdgeDTO[],
@@ -22,7 +53,8 @@ function toElements(
   const nodeEls: ElementDefinition[] = nodes.map((n) => ({
     data: {
       id: n.id,
-      label: n.caption,
+      label: ellipsizeNodeLabel(n.caption, NODE_LABEL_MAX_WIDTH),
+      fullLabel: n.caption,
       labels: n.labels.join(", "),
       primaryLabel: n.labels[0] ?? "Node",
       color: primaryNodeColor(n.labels),
@@ -41,12 +73,35 @@ function toElements(
   return [...nodeEls, ...edgeEls];
 }
 
-function layoutOptions(mode: GraphLayoutMode, animate = true): LayoutOptions {
+interface LayoutGraphShape {
+  nodeCount: number;
+  edgeCount: number;
+}
+
+/** ラベル選択などエッジなし結果は Neo4j Browser 同様に円状配置する。 */
+function layoutOptions(
+  mode: GraphLayoutMode,
+  graph: LayoutGraphShape,
+  animate = true,
+): LayoutOptions {
+  const duration = animate ? 250 : 0;
+  if (graph.edgeCount === 0 && graph.nodeCount > 0) {
+    return {
+      name: "circle",
+      animate,
+      animationDuration: duration,
+      padding: 40,
+      avoidOverlap: true,
+      spacingFactor: 1.35,
+      startAngle: (3 / 2) * Math.PI,
+      clockwise: true,
+    };
+  }
   if (mode === "hierarchical") {
     return {
       name: "breadthfirst",
       animate,
-      animationDuration: animate ? 250 : 0,
+      animationDuration: duration,
       padding: 30,
       directed: true,
       spacingFactor: 1.2,
@@ -55,8 +110,12 @@ function layoutOptions(mode: GraphLayoutMode, animate = true): LayoutOptions {
   return {
     name: "cose",
     animate,
-    animationDuration: animate ? 250 : 0,
+    animationDuration: duration,
     padding: 30,
+    nodeRepulsion: 8000,
+    idealEdgeLength: 120,
+    edgeElasticity: 100,
+    randomize: true,
   };
 }
 
@@ -77,15 +136,20 @@ interface GraphCanvasProps {
   nodes: GraphNodeDTO[];
   edges: GraphEdgeDTO[];
   searchQuery?: string;
+  /** 全画面表示などコンテナサイズが変わったときに Cytoscape を再レイアウトする */
+  layoutRevision?: string;
   onSelectionChange?: (selection: GraphSelection | null) => void;
 }
 
 function nodeMatchesSearch(node: NodeSingular, query: string): boolean {
   const q = query.toLowerCase();
   const label = String(node.data("label") ?? "").toLowerCase();
+  const fullLabel = String(node.data("fullLabel") ?? label).toLowerCase();
   const id = String(node.id()).toLowerCase();
   const labels = String(node.data("labels") ?? "").toLowerCase();
-  if (label.includes(q) || id.includes(q) || labels.includes(q)) return true;
+  if (label.includes(q) || fullLabel.includes(q) || id.includes(q) || labels.includes(q)) {
+    return true;
+  }
   const props = node.data("properties") as Record<string, unknown> | undefined;
   if (props) {
     for (const value of Object.values(props)) {
@@ -134,12 +198,15 @@ function exportGraphSvg(cy: Core) {
     );
   });
   cy.nodes().forEach((node) => {
-    const p = node.renderedPosition();
+    const bb = node.renderedBoundingBox({ includeLabels: false });
+    const cx = (bb.x1 + bb.x2) / 2;
+    const cy = (bb.y1 + bb.y2) / 2;
+    const r = Math.max(bb.w, bb.h) / 2;
     const color = String(node.data("color") ?? "#64748b");
     const label = escapeXml(String(node.data("label") ?? ""));
     parts.push(
-      `<circle cx="${p.x}" cy="${p.y}" r="28" fill="${color}" stroke="#ffffff" stroke-width="2"/>`,
-      `<text x="${p.x}" y="${p.y}" text-anchor="middle" dominant-baseline="middle" fill="#ffffff" font-size="10" font-family="sans-serif">${label}</text>`,
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" stroke="#ffffff" stroke-width="2"/>`,
+      `<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" fill="#000000" font-size="${NODE_FONT_SIZE}" font-family="sans-serif">${label}</text>`,
     );
   });
   parts.push("</svg>");
@@ -226,7 +293,10 @@ const LAYOUT_ITEMS: Array<{
 ];
 
 export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
-  function GraphCanvas({ nodes, edges, searchQuery = "", onSelectionChange }, ref) {
+  function GraphCanvas(
+    { nodes, edges, searchQuery = "", layoutRevision, onSelectionChange },
+    ref,
+  ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const layoutMenuRef = useRef<HTMLDivElement>(null);
@@ -283,6 +353,16 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
   }, [layoutMenuOpen]);
 
   useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    const frame = requestAnimationFrame(() => {
+      cy.resize();
+      cy.fit(undefined, 40);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [layoutRevision]);
+
+  useEffect(() => {
     if (!containerRef.current) return;
     const cy = cytoscape({
       container: containerRef.current,
@@ -294,13 +374,14 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
             label: "data(label)",
             "text-valign": "center",
             "text-halign": "center",
-            "font-size": "10px",
-            "text-wrap": "wrap",
-            "text-max-width": "80px",
-            width: "56px",
-            height: "56px",
+            "font-size": `${NODE_FONT_SIZE}px`,
+            "text-wrap": "none",
+            "text-overflow-wrap": "whitespace",
+            width: `${NODE_DIAMETER}px`,
+            height: `${NODE_DIAMETER}px`,
+            shape: "ellipse",
             "background-color": "data(color)",
-            color: "#fff",
+            color: "#000000",
             "border-width": "2px",
             "border-color": "#fff",
           },
@@ -337,7 +418,11 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           },
         },
       ],
-      layout: layoutOptions(layoutModeRef.current, false),
+      layout: layoutOptions(
+        layoutModeRef.current,
+        { nodeCount: nodes.length, edgeCount: edges.length },
+        false,
+      ),
       wheelSensitivity: 0.2,
       autoungrabify: false,
     });
@@ -350,7 +435,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       onSelectionChangeRef.current?.({
         kind: "node",
         id: d.id,
-        label: d.label,
+        label: d.fullLabel ?? d.label,
         properties: d.properties ?? {},
         extra: { primaryLabel: d.primaryLabel, labels: d.labels },
       });
@@ -375,7 +460,18 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
     cy.fit(undefined, 40);
     cyRef.current = cy;
+
+    const container = containerRef.current;
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" && container
+        ? new ResizeObserver(() => {
+            cy.resize();
+          })
+        : null;
+    resizeObserver?.observe(container);
+
     return () => {
+      resizeObserver?.disconnect();
       detachDragPhysics();
       onSelectionChangeRef.current?.(null);
       cy.destroy();
@@ -400,7 +496,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const cy = cyRef.current;
     if (!cy) return;
     setLayoutMode(mode);
-    cy.layout(layoutOptions(mode)).run();
+    cy.layout(
+      layoutOptions(mode, { nodeCount: nodes.length, edgeCount: edges.length }),
+    ).run();
   }
 
   const activeLayout = LAYOUT_ITEMS.find((item) => item.mode === layoutMode)!;

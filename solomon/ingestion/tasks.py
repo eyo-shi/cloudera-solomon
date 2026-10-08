@@ -25,6 +25,7 @@ from typing import Any, Optional
 from solomon.ingestion.models import (
     ConflictAndPermissionsResult,
     CreateIcebergTableResult,
+    LoadIcebergDataResult,
     DraftOssieResult,
     IndexOpenSearchResult,
     LoadNeo4jGraphResult,
@@ -80,6 +81,9 @@ def make_sniff_format_task(agent: Any, context: list[Task]) -> Task:
             " (b) csv/tsv なら CSVSnifferTool に必ず bucket={bucket}, "
             "key={key} を渡して encoding と delimiter を確定"
             " (content_b64 を LLM が改変しないよう S3 直読みを使う)。"
+            " (b2) J5 完検テキスト (VERSION/KIBAN/DATE メタ行 + 測定表) なら"
+            " KankenSniffTool で format=kanken, source_encoding, header_row,"
+            " meta_kv を確定する (Shift-JIS 自動デコード)。"
             " (c) xlsx/xls なら ExcelHeaderDetectTool で header_row と sheet"
             " を確定。 (d) parquet なら ParquetMetaTool に bucket={bucket}, "
             "key={key} を渡してスキーマを確認。"
@@ -87,8 +91,8 @@ def make_sniff_format_task(agent: Any, context: list[Task]) -> Task:
             "実行しない。"
         ),
         expected_output=(
-            "SniffFormatResult の JSON。format, encoding, delimiter, sheet, "
-            "header_row, supported, reason を含む。"
+            "SniffFormatResult の JSON。format, encoding, source_encoding, "
+            "delimiter, sheet, header_row, meta_kv, supported, reason を含む。"
         ),
         agent=agent,
         context=context,
@@ -199,24 +203,48 @@ def make_create_iceberg_table_task(agent: Any, context: list[Task]) -> Task:
 
 
 # ------------------------------------------------------------------ #
-# 7. load_neo4j_graph_task  (副作用あり: max_retries=0)
+# 7. load_iceberg_data_task  (副作用あり: max_retries=0)
+# ------------------------------------------------------------------ #
+def make_load_iceberg_data_task(agent: Any, context: list[Task]) -> Task:
+    return Task(
+        description=(
+            "create_iceberg_table 完了後、IcebergLoadDataTool で S3 ソースの"
+            "行データを作成済みテーブルへ INSERT せよ。bucket={bucket}, "
+            "key={key} と sniff_format の format / encoding / delimiter / "
+            "header_row を渡す。propose_schema の target_schema と "
+            "resolved_table (= proposed_table_name) を schema / table に使う。"
+            "kanken 形式では Shift-JIS デコードとメタ行スキップは Tool 内で"
+            "自動処理される。副作用ありのため max_retries=0。"
+        ),
+        expected_output=(
+            "LoadIcebergDataResult の JSON。fq_table_name, inserted_rows, "
+            "column_count, source_format を含む。"
+        ),
+        agent=agent,
+        context=context,
+        output_json=LoadIcebergDataResult,
+        max_retries=0,
+    )
+
+
+# ------------------------------------------------------------------ #
+# 8. load_neo4j_graph_task  (副作用あり: max_retries=0)
 # ------------------------------------------------------------------ #
 def make_load_neo4j_graph_task(agent: Any, context: list[Task]) -> Task:
     return Task(
         description=(
-            "create_iceberg_table 完了後、Neo4jGraphLoadTool を使って取り込み"
-            "メタデータを Neo4j へ反映せよ。System / Document ノードも作成する。"
-            "catalog / target_schema / resolved_table / columns / bucket / key / "
-            "format / sheet / header_row / meta_kv / row_count_hint を前段タスクから"
-            "集約して渡す。system_name は meta_kv または S3 key から推定可。"
-            "Crew inputs に node_fields (カンマ区切り) がある場合は、その列名を "
-            "graph_node ロールとして Neo4jGraphLoadTool に渡す。"
+            "load_iceberg_data 完了後、ManufacturingGraphLoadTool で bucket={bucket}, "
+            "key={key} と sniff_format の format を渡し、J5 受領データの"
+            "製造トレーサビリティグラフ (Board/AssemblyUnit/ValveBody/"
+            "TestRecord/MemoryDump/Measurement) を Neo4j に MERGE せよ。"
+            "同一 KIBAN のファイルは自動的に同一 Board ノードに接続される。"
             "NEO4J_URI 未設定時は skipped=true, reason を返し、Crew 全体は失敗させない。"
             "副作用ありのため max_retries=0。"
         ),
         expected_output=(
-            "LoadNeo4jGraphResult の JSON。dataset_id, source_id, system_id, "
-            "system_name, document_ids, neo4j_uri, counts, skipped, reason を含む。"
+            "LoadNeo4jGraphResult の JSON。data_type, kiban, at_serial, system_id, "
+            "system_name, test_record_id, board_id, assembly_unit_id, document_ids, "
+            "documents, neo4j_uri, counts, skipped, reason を含む。"
         ),
         agent=agent,
         context=context,
@@ -226,7 +254,7 @@ def make_load_neo4j_graph_task(agent: Any, context: list[Task]) -> Task:
 
 
 # ------------------------------------------------------------------ #
-# 8. draft_ossie_task
+# 9. draft_ossie_task
 # ------------------------------------------------------------------ #
 def make_draft_ossie_task(agent: Any, context: list[Task]) -> Task:
     return Task(
@@ -250,7 +278,7 @@ def make_draft_ossie_task(agent: Any, context: list[Task]) -> Task:
 
 
 # ------------------------------------------------------------------ #
-# 9. index_opensearch_task  (副作用あり: max_retries=0)
+# 10. index_opensearch_task  (副作用あり: max_retries=0)
 # ------------------------------------------------------------------ #
 def make_index_opensearch_task(agent: Any, context: list[Task]) -> Task:
     return Task(
@@ -274,19 +302,19 @@ def make_index_opensearch_task(agent: Any, context: list[Task]) -> Task:
 
 
 # ------------------------------------------------------------------ #
-# 10. wrap_up_task
+# 11. wrap_up_task
 # ------------------------------------------------------------------ #
 def make_wrap_up_task(agent: Any, context: list[Task]) -> Task:
     return Task(
         description=(
             "これまでのタスク結果を統合し、ユーザーへの最終レポートを"
             "IngestionReport JSON として返せ。summary_markdown には作成した"
-            " fq_table_name、行数目安、カラム数、Neo4j System/Document 投入結果、"
+            " fq_table_name、inserted_rows、カラム数、Neo4j System/Document 投入結果、"
             "OpenSearch インデックス結果、類似テーブル、Ossie YAML のパスを"
             "日本語で 5-10 行にまとめる。"
         ),
         expected_output=(
-            "IngestionReport の JSON。fq_table_name, ddl, column_count, "
+            "IngestionReport の JSON。fq_table_name, ddl, column_count, inserted_rows, "
             "ossie_yaml_path, neo4j_dataset_id, neo4j_system_id, neo4j_counts, "
             "opensearch_index, opensearch_indexed_count, similar_tables, "
             "source, summary_markdown を含む。"
@@ -335,6 +363,7 @@ __all__ = [
     "make_propose_schema_and_name_task",
     "make_check_conflict_and_permissions_task",
     "make_create_iceberg_table_task",
+    "make_load_iceberg_data_task",
     "make_load_neo4j_graph_task",
     "make_draft_ossie_task",
     "make_index_opensearch_task",

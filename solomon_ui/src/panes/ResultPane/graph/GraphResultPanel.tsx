@@ -18,7 +18,6 @@ export type { GraphPanelView };
 
 interface Props {
   panel: GraphResultPanelState;
-  isMaximized?: boolean;
 }
 
 function IconMaximize({ active }: { active?: boolean }) {
@@ -309,12 +308,10 @@ function propertyTableFromGraph(
   return { columns, rows };
 }
 
-export function GraphResultPanel({
-  panel,
-  isMaximized = false,
-}: Props) {
+export function GraphResultPanel({ panel }: Props) {
   const removePanel = useGraphStore((s) => s.removePanel);
   const toggleMaximizePanel = useGraphStore((s) => s.toggleMaximizePanel);
+  const isMaximized = useGraphStore((s) => s.maximizedPanelId === panel.id);
   const viewModes = useMemo(() => resolveViewModes(panel), [
     panel.allowedViews,
     panel.queryType,
@@ -392,7 +389,8 @@ export function GraphResultPanel({
     setCollapsed((v) => !v);
   }
 
-  function onToggleMaximize() {
+  function onToggleMaximize(e: React.MouseEvent) {
+    e.stopPropagation();
     if (!isMaximized && collapsed) setCollapsed(false);
     toggleMaximizePanel(panel.id);
   }
@@ -488,6 +486,7 @@ export function GraphResultPanel({
                         nodes={nodes}
                         edges={edges}
                         searchQuery={searchQuery}
+                        layoutRevision={isMaximized ? "maximized" : "normal"}
                         onSelectionChange={setGraphSelection}
                       />
                     )}

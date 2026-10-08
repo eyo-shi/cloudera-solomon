@@ -41,7 +41,8 @@ from solomon.transport.config import (
 )
 from solomon.tools._s3_client import map_s3_error, s3_client_for_user
 from solomon.tools.excel import ExcelHeaderDetectTool
-from solomon.tools.format import CSVSnifferTool, MagicByteTool, ParquetMetaTool
+from solomon.tools.format import CSVSnifferTool, KankenSniffTool, MagicByteTool, ParquetMetaTool
+from solomon.tools.kanken import kanken_rows_to_preview, parse_kanken_bytes
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -313,20 +314,27 @@ def preview_object(
         raise HTTPException(status_code=400, detail=magic_result)
 
     fmt = magic_result.get("format", "unknown")
+    ext_format = _preview_format_from_extension(key)
     base: dict[str, Any] = {
         "bucket": bucket,
         "key": key,
         "size": total_size,
         "content_type": content_type,
-        "format": fmt,
+        "format": ext_format or fmt,
         "truncated": total_size > len(head_bytes),
     }
 
     # 3) フォーマット別のプレビュー
-    if fmt in ("csv", "tsv"):
+    if ext_format:
+        result = _preview_text(head_bytes)
+    elif fmt in ("csv", "tsv"):
         result = _preview_csv(head_bytes, rows=rows, magic_hint=magic_result)
+    elif fmt == "kanken":
+        result = _preview_kanken(head_bytes, rows=rows)
     elif fmt == "json":
         result = _preview_json(head_bytes, rows=rows)
+        if isinstance(result, dict) and result.get("mode") == "jsonl":
+            base["format"] = "jsonl"
     elif fmt in ("xlsx", "xls"):
         result = _preview_excel(user_ctx, bucket, key, sheet=sheet, rows=rows)
     elif fmt == "parquet":
@@ -350,6 +358,37 @@ def preview_object(
 # ------------------------------------------------------------------ #
 # 内部ヘルパ: フォーマット別プレビュー
 # ------------------------------------------------------------------ #
+def _preview_format_from_extension(key: str) -> str | None:
+    """拡張子でプレーンテキスト表示を強制する (内容 sniff より優先)。"""
+    name = key.rsplit("/", 1)[-1]
+    if "." not in name:
+        return None
+    ext = name.rsplit(".", 1)[-1].lower()
+    if ext in {"yaml", "yml"}:
+        return "yaml"
+    if ext == "log":
+        return "log"
+    if ext == "md":
+        return "markdown"
+    if ext in {"txt", "conf", "cfg", "ini", "properties", "env"}:
+        return "text"
+    return None
+
+
+def _preview_text(head_bytes: bytes) -> dict[str, Any]:
+    """テキストファイル: デコードして行単位プレビュー用に返す。"""
+    decoded = _decode_lenient_with_encoding(head_bytes)
+    if decoded is None:
+        return err(ErrorCode.FORMAT_ENCODING_UNKNOWN, "could not decode as UTF-8/CP932")
+    encoding, text = decoded
+    lines = text.splitlines()
+    return {
+        "encoding": encoding,
+        "text": text,
+        "line_count": len(lines),
+    }
+
+
 def _preview_csv(
     head_bytes: bytes, *, rows: int, magic_hint: dict[str, Any]
 ) -> dict[str, Any]:
@@ -387,6 +426,32 @@ def _preview_csv(
         "columns": header,
         "rows": data_rows,
         "row_count": len(data_rows),
+    }
+
+
+def _preview_kanken(head_bytes: bytes, *, rows: int) -> dict[str, Any]:
+    """J5 完検: Shift-JIS/UTF-8 をデコードし、メタ行 + 測定行をプレビュー。"""
+    sniff = KankenSniffTool().run(
+        user_ctx=None,
+        content_b64=base64.b64encode(head_bytes).decode("ascii"),
+    )
+    if sniff.get("status") != "ok":
+        return sniff
+    if not sniff.get("supported", True):
+        return sniff
+    try:
+        parsed = parse_kanken_bytes(head_bytes)
+        preview = kanken_rows_to_preview(parsed, max_rows=rows)
+    except Exception as e:  # noqa: BLE001
+        return err(ErrorCode.FORMAT_CORRUPT, f"kanken preview failed: {e}")
+    return {
+        "encoding": sniff.get("encoding"),
+        "source_encoding": sniff.get("source_encoding"),
+        "header_row": sniff.get("header_row"),
+        "meta_kv": sniff.get("meta_kv") or {},
+        "columns": [c.get("name") for c in preview.get("columns") or []],
+        "rows": preview.get("preview_rows") or [],
+        "row_count": preview.get("row_count_preview", 0),
     }
 
 
@@ -433,10 +498,12 @@ def _preview_json(head_bytes: bytes, *, rows: int) -> dict[str, Any]:
     # 通常の JSON (単一値または配列)
     try:
         value = json.loads(stripped)
+        truncated = _truncate_json(value, max_list=rows)
         return {
             "encoding": encoding,
             "mode": "json",
-            "value": _truncate_json(value, max_list=rows),
+            "json": truncated,
+            "value": truncated,
         }
     except json.JSONDecodeError:
         pass
@@ -462,6 +529,8 @@ def _preview_json(head_bytes: bytes, *, rows: int) -> dict[str, Any]:
     return {
         "encoding": encoding,
         "mode": "jsonl",
+        "format": "jsonl",
+        "jsonl": lines,
         "rows": lines,
         "row_count": len(lines),
         "parse_errors": parse_errors,
@@ -579,11 +648,20 @@ def _parse_total_from_content_range(header: str, *, fallback: int) -> int:
 
 def _decode_lenient(raw: bytes) -> Optional[str]:
     """UTF-8 → CP932 の順で decode を試す。"""
+    decoded = _decode_lenient_with_encoding(raw)
+    return decoded[1] if decoded else None
+
+
+def _decode_lenient_with_encoding(raw: bytes) -> tuple[str, str] | None:
+    """UTF-8 (BOM 付き含む) → CP932 の順で decode を試す。"""
     if raw.startswith(b"\xef\xbb\xbf"):
-        raw = raw[3:]
+        try:
+            return "utf-8-sig", raw[3:].decode("utf-8")
+        except UnicodeDecodeError:
+            pass
     for enc in ("utf-8", "cp932"):
         try:
-            return raw.decode(enc)
+            return enc, raw.decode(enc)
         except UnicodeDecodeError:
             continue
     return None

@@ -10,11 +10,16 @@ def coalesce_schema_field(data: Any) -> Any:
         return data
     out = dict(data)
     if not out.get("schema"):
-        for alt in ("target_schema", "schema_name", "trino_schema"):
+        for alt in ("target_schema", "schema_name", "trino_schema", "schema_"):
             if out.get(alt):
                 out["schema"] = out[alt]
                 break
     return out
 
 
-__all__ = ["coalesce_schema_field"]
+def normalize_tool_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """CrewAI Tool 呼び出し kwargs を run() シグネチャ向けに正規化する。"""
+    return coalesce_schema_field(dict(kwargs))
+
+
+__all__ = ["coalesce_schema_field", "normalize_tool_kwargs"]

@@ -5,6 +5,7 @@
 import { useTabStore } from "../../stores/tabStore";
 import { IconGraph, IconTables } from "../TreePane/ExplorerIcons";
 import { FileTypeIcon } from "../TreePane/FileTypeIcon";
+import { fileExtension } from "../TreePane/setiFileIcons";
 
 const KIND_ICON: Record<string, string> = {
   table_preview: "▤",
@@ -15,7 +16,10 @@ const KIND_ICON: Record<string, string> = {
 
 function filePreviewFilename(ref: Record<string, unknown>, title: string): string {
   const key = ref.key;
-  if (typeof key === "string" && key.trim()) return key;
+  if (typeof key === "string" && key.trim()) {
+    const parts = key.split("/").filter(Boolean);
+    return parts[parts.length - 1] ?? key;
+  }
   return title;
 }
 
@@ -38,10 +42,18 @@ export function TabBar() {
       {tabs.map((t) => {
         const icon = tabIcon(t.kind);
         const isActive = t.id === activeId;
+        const isFilePreview = t.kind === "file_preview";
+        const label = isFilePreview
+          ? filePreviewFilename(t.ref, t.title)
+          : t.title;
         return (
           <div
             key={t.id}
-            className={"tab-chip" + (isActive ? " tab-chip--active" : "")}
+            className={
+              "tab-chip" +
+              (isActive ? " tab-chip--active" : "") +
+              (isFilePreview ? " tab-chip--file-preview" : "")
+            }
             onClick={() => setActive(t.id)}
           >
             {t.kind === "graph" ? (
@@ -55,15 +67,21 @@ export function TabBar() {
             ) : t.kind === "file_preview" ? (
               <span className="tab-chip-icon tab-chip-icon--seti">
                 <FileTypeIcon
-                  filename={filePreviewFilename(t.ref, t.title)}
+                  filename={label}
+                  variant={
+                    fileExtension(label) === "md" &&
+                    t.ref.markdownView === "preview"
+                      ? "markdown-preview"
+                      : "default"
+                  }
                   className="seti-file-icon tab-seti-file-icon"
                 />
               </span>
             ) : icon ? (
               <span className="tab-chip-icon">{icon}</span>
             ) : null}
-            <span className="tab-chip-title" title={t.title}>
-              {t.title}
+            <span className="tab-chip-title" title={label}>
+              {label}
             </span>
             <button
               className="tab-chip-close"

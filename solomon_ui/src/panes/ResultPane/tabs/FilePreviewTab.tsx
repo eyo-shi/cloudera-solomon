@@ -7,11 +7,19 @@
  *   jsonl       -> 1 行ずつテーブル化
  *   excel       -> シートタブ + データグリッド
  *   parquet     -> スキーマ + サンプル行数
+ *   markdown    -> Markdown ソース / Preview 切替
+ *   text/log/yaml -> 行番号付きプレーンテキスト
  *   その他      -> フォーマット + head_bytes を表示
  */
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import Markdown from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
+import remarkGfm from "remark-gfm";
 import { useFilePreview } from "../../../api/files";
+import { useTabStore } from "../../../stores/tabStore";
 import type { FilePreviewResponse, TabDescriptor } from "../../../types";
+
+type MarkdownViewMode = "markdown" | "preview";
 
 interface Props {
   tab: TabDescriptor;
@@ -21,7 +29,17 @@ export function FilePreviewTab({ tab }: Props) {
   const bucket = String(tab.ref.bucket ?? "");
   const key = String(tab.ref.key ?? "");
   const [sheet, setSheet] = useState<string | undefined>(undefined);
+  const [markdownView, setMarkdownView] = useState<MarkdownViewMode>("markdown");
+  const patchTabRef = useTabStore((s) => s.patchTabRef);
   const { data, isLoading, error } = useFilePreview({ bucket, key, sheet, rows: 200 });
+
+  useEffect(() => {
+    setMarkdownView("markdown");
+  }, [key]);
+
+  useEffect(() => {
+    patchTabRef(tab.id, { markdownView });
+  }, [markdownView, patchTabRef, tab.id]);
 
   if (!bucket || !key) return <p className="placeholder">bucket/key 不正</p>;
   if (isLoading) return <p className="placeholder">読み込み中…</p>;
@@ -49,12 +67,57 @@ export function FilePreviewTab({ tab }: Props) {
       <div className="tab-meta">
         <FilePathBreadcrumb bucket={bucket} objectKey={key} />
         <span className="meta-badge">{data.format ?? "?"}</span>
+        {data.format === "markdown" && (
+          <MarkdownViewToggle value={markdownView} onChange={setMarkdownView} />
+        )}
         {data.encoding && <span className="meta-badge">{data.encoding}</span>}
         {data.total_size !== undefined && (
           <span className="meta-badge">{humanBytes(data.total_size)}</span>
         )}
       </div>
-      <FormatBody data={data} sheet={sheet} setSheet={setSheet} />
+      <FormatBody
+        data={data}
+        sheet={sheet}
+        setSheet={setSheet}
+        markdownView={markdownView}
+      />
+    </div>
+  );
+}
+
+function MarkdownViewToggle({
+  value,
+  onChange,
+}: {
+  value: MarkdownViewMode;
+  onChange: (mode: MarkdownViewMode) => void;
+}) {
+  return (
+    <div className="file-preview-view-toggle" role="tablist" aria-label="Markdown view">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === "preview"}
+        className={
+          "file-preview-view-toggle__btn" +
+          (value === "preview" ? " file-preview-view-toggle__btn--active" : "")
+        }
+        onClick={() => onChange("preview")}
+      >
+        Preview
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === "markdown"}
+        className={
+          "file-preview-view-toggle__btn" +
+          (value === "markdown" ? " file-preview-view-toggle__btn--active" : "")
+        }
+        onClick={() => onChange("markdown")}
+      >
+        Markdown
+      </button>
     </div>
   );
 }
@@ -63,10 +126,12 @@ function FormatBody({
   data,
   sheet,
   setSheet,
+  markdownView,
 }: {
   data: FilePreviewResponse;
   sheet: string | undefined;
   setSheet: (s: string | undefined) => void;
+  markdownView: MarkdownViewMode;
 }) {
   switch (data.format) {
     case "csv":
@@ -78,13 +143,38 @@ function FormatBody({
         />
       );
     case "json":
-      return <JsonBody value={data.json} />;
+      return <JsonBody value={data.json ?? data.value} />;
     case "jsonl":
-      return <JsonlBody rows={data.jsonl ?? []} />;
+      return (
+        <JsonlBody
+          rows={(data.jsonl ?? data.rows ?? []) as unknown[]}
+        />
+      );
     case "excel":
       return <ExcelBody data={data} sheet={sheet} setSheet={setSheet} />;
     case "parquet":
       return <ParquetBody data={data} />;
+    case "markdown":
+      return markdownView === "preview" ? (
+        <MarkdownPreviewBody
+          text={data.text ?? ""}
+          truncated={Boolean(data.truncated)}
+        />
+      ) : (
+        <TextBody
+          text={data.text ?? ""}
+          truncated={Boolean(data.truncated)}
+        />
+      );
+    case "text":
+    case "log":
+    case "yaml":
+      return (
+        <TextBody
+          text={data.text ?? ""}
+          truncated={Boolean(data.truncated)}
+        />
+      );
     default:
       return (
         <p className="placeholder">
@@ -211,6 +301,56 @@ function ExcelBody({
         </table>
       </div>
     </>
+  );
+}
+
+function MarkdownPreviewBody({
+  text,
+  truncated,
+}: {
+  text: string;
+  truncated: boolean;
+}) {
+  return (
+    <div className="text-preview markdown-file-preview">
+      {truncated && (
+        <p className="text-preview-note">先頭 2MB のみ表示しています</p>
+      )}
+      <div className="text-preview-scroll markdown-body">
+        <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+          {text || " "}
+        </Markdown>
+      </div>
+    </div>
+  );
+}
+
+function TextBody({
+  text,
+  truncated,
+}: {
+  text: string;
+  truncated: boolean;
+}) {
+  const lines = text.length ? text.split(/\r?\n/) : [""];
+  return (
+    <div className="text-preview">
+      {truncated && (
+        <p className="text-preview-note">先頭 2MB のみ表示しています</p>
+      )}
+      <div className="text-preview-scroll">
+        <pre className="text-preview-body">
+          {lines.map((line, index) => (
+            <div key={index} className="text-preview-line">
+              <span className="text-preview-ln" aria-hidden="true">
+                {index + 1}
+              </span>
+              <code className="text-preview-content">{line || " "}</code>
+            </div>
+          ))}
+        </pre>
+      </div>
+    </div>
   );
 }
 

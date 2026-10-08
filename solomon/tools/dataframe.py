@@ -27,6 +27,8 @@ from solomon.transport.logging import get_logger
 from solomon.transport.tool_base import BaseSolomonTool
 from solomon.transport.user_context import UserContext
 from solomon.tools._s3_client import map_s3_error, s3_client_for_user
+from solomon.tools.kanken import kanken_rows_to_preview, parse_kanken_bytes
+from solomon.tools.vb import parse_vb_bytes, vb_rows_to_preview
 
 _logger = get_logger(__name__)
 
@@ -35,7 +37,8 @@ class DataFramePreviewArgs(BaseModel):
     bucket: str
     key: str
     format: str = Field(
-        ..., description="csv / tsv / xlsx / xls / parquet / json のいずれか"
+        ...,
+        description="csv / tsv / xlsx / xls / parquet / json / kanken / vb のいずれか",
     )
     max_rows: int = Field(200, ge=10, le=5000)
     # csv 用
@@ -95,6 +98,22 @@ class DataFramePreviewTool(BaseSolomonTool):
             return map_s3_error(e, bucket, key)
 
         fmt = format.lower()
+        if fmt == "kanken":
+            try:
+                parsed = parse_kanken_bytes(body)
+                preview = kanken_rows_to_preview(parsed, max_rows=max_rows)
+                return ok(preview)
+            except Exception as e:  # noqa: BLE001
+                return err(ErrorCode.FORMAT_CORRUPT, f"kanken read failed: {e}")
+
+        if fmt == "vb":
+            try:
+                parsed = parse_vb_bytes(body)
+                preview = vb_rows_to_preview(parsed, max_rows=max_rows)
+                return ok(preview)
+            except Exception as e:  # noqa: BLE001
+                return err(ErrorCode.FORMAT_CORRUPT, f"vb read failed: {e}")
+
         try:
             df = _read_bytes_to_df(
                 body,
@@ -160,10 +179,17 @@ def _read_bytes_to_df(
 ) -> Any:
     buf = io.BytesIO(body)
     if fmt in ("csv", "tsv"):
-        # デフォルト
         sep = delimiter or ("\t" if fmt == "tsv" else ",")
         enc = encoding or "utf-8"
-        return pd.read_csv(buf, sep=sep, encoding=enc, nrows=max_rows)
+        skip = list(range(header_row)) if header_row and header_row > 0 else None
+        return pd.read_csv(
+            buf,
+            sep=sep,
+            encoding=enc,
+            skiprows=skip,
+            header=0,
+            nrows=max_rows,
+        )
     if fmt in ("xlsx", "xls"):
         try:
             return pd.read_excel(

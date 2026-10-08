@@ -62,7 +62,18 @@ def _relationship_id(rel: Any) -> str:
 
 
 def _caption(labels: list[str], props: dict[str, Any]) -> str:
-    for key in ("name", "fq_name", "title", "id", "path"):
+    for key in (
+        "trace_id",
+        "kiban",
+        "at_serial",
+        "customer_part_no",
+        "symbol_name",
+        "name",
+        "fq_name",
+        "title",
+        "id",
+        "path",
+    ):
         val = props.get(key)
         if val:
             return str(val)

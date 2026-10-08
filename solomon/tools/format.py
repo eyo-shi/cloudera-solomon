@@ -18,6 +18,8 @@ from solomon.transport.logging import get_logger
 from solomon.transport.tool_base import BaseSolomonTool
 from solomon.transport.user_context import UserContext
 from solomon.tools._s3_client import map_s3_error, s3_client_for_user
+from solomon.tools.kanken import decode_kanken_bytes, is_kanken_text, parse_kanken_bytes
+from solomon.tools.vb import is_vb_report_text, parse_vb_bytes
 
 _logger = get_logger(__name__)
 
@@ -109,6 +111,26 @@ class MagicByteTool(BaseSolomonTool):
         stripped = text_sample.lstrip()
         if stripped and stripped[0] in _TEXT_JSON_LEADING:
             return ok({"format": "json", "confidence": "medium", "method": "leading_char"})
+
+        # 3-b. J5 完検 (メタ KV 行 + 固定幅測定テーブル)
+        if is_kanken_text(stripped):
+            return ok(
+                {
+                    "format": "kanken",
+                    "confidence": "high",
+                    "method": "kanken_meta_header",
+                }
+            )
+
+        # 3-c. VB 試験帳票 (CP932 日本語帳票)
+        if is_vb_report_text(stripped):
+            return ok(
+                {
+                    "format": "vb",
+                    "confidence": "high",
+                    "method": "vb_report_title",
+                }
+            )
 
         # 4. CSV / TSV 推定 (区切り候補が行内に均一に現れるか)
         first_lines = stripped.splitlines()[:5]
@@ -274,6 +296,91 @@ class CSVSnifferTool(BaseSolomonTool):
         encoding, text = decoded
         sniffed = _sniff_csv_text(text)
         return ok({"encoding": encoding, **sniffed})
+
+
+# ------------------------------------------------------------------ #
+# KankenSniffTool
+# ------------------------------------------------------------------ #
+class KankenSniffArgs(BaseModel):
+    bucket: Optional[str] = None
+    key: Optional[str] = None
+    content_b64: Optional[str] = None
+    max_sample_bytes: int = Field(65536, ge=1024, le=1_048_576)
+
+
+class KankenSniffTool(BaseSolomonTool):
+    """J5 完検テキストの検出・Shift-JIS デコード・メタ/ヘッダー行の特定。"""
+
+    name: str = "kanken_sniff"
+    description: str = (
+        "Detect J5 kanken (完成検査) text files: decode Shift-JIS/UTF-8, locate "
+        "meta key/value header rows and the measurement table header row. "
+        "Prefer bucket+key for S3 direct read."
+    )
+    args_schema: type[BaseModel] = KankenSniffArgs
+    requires_auth: bool = False
+
+    def run(
+        self,
+        user_ctx: Optional[UserContext],
+        bucket: Optional[str] = None,
+        key: Optional[str] = None,
+        content_b64: Optional[str] = None,
+        max_sample_bytes: int = 65536,
+        **_: Any,
+    ) -> dict[str, Any]:
+        raw: bytes
+        if bucket and key:
+            client = s3_client_for_user(user_ctx)
+            if isinstance(client, dict):
+                return client
+            end = max_sample_bytes - 1
+            try:
+                resp = client.get_object(
+                    Bucket=bucket, Key=key, Range=f"bytes=0-{end}"
+                )
+                raw = resp["Body"].read()
+            except Exception as e:  # noqa: BLE001
+                return map_s3_error(e, bucket, key)
+        elif content_b64:
+            try:
+                raw = base64.b64decode(content_b64, validate=True)[:max_sample_bytes]
+            except Exception:  # noqa: BLE001
+                return err(ErrorCode.FORMAT_CORRUPT, "content_b64 is not valid base64")
+        else:
+            return err(
+                ErrorCode.FORMAT_CORRUPT,
+                "provide bucket+key or content_b64",
+            )
+
+        try:
+            source_encoding, text = decode_kanken_bytes(raw)
+        except ValueError as e:
+            return err(ErrorCode.FORMAT_ENCODING_UNKNOWN, str(e))
+
+        if not is_kanken_text(text):
+            return ok(
+                {
+                    "format": "text",
+                    "supported": False,
+                    "reason": "file does not match kanken meta/header pattern",
+                }
+            )
+
+        parsed = parse_kanken_bytes(raw)
+        return ok(
+            {
+                "format": "kanken",
+                "supported": True,
+                "encoding": "utf-8",
+                "source_encoding": source_encoding,
+                "header_row": parsed.get("header_row"),
+                "meta_kv": parsed.get("meta_kv") or {},
+                "row_count_hint": parsed.get("row_count", 0),
+                "columns": parsed.get("columns") or [],
+                "preview_rows": (parsed.get("rows") or [])[:5],
+            }
+        )
 
 
 # ------------------------------------------------------------------ #

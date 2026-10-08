@@ -11,7 +11,7 @@ Agent と Tool の対応 (プラン通り):
                         ParquetMetaTool, DataFramePreviewTool
   SchemaDrafterAgent -> TypeInferTool, NameProposerTool, SimilarTableSearchTool
   TableCreatorAgent  -> TableExistsTool, TrinoMetaTool, IcebergCreateTableTool
-  GraphLoaderAgent   -> Neo4jGraphLoadTool
+  GraphLoaderAgent   -> ManufacturingGraphLoadTool
   OssieDrafterAgent    -> OssieWriteTool
   SearchIndexerAgent   -> OpenSearchIndexTool
 
@@ -27,8 +27,10 @@ from solomon.tools import (
     DataFramePreviewTool,
     ExcelHeaderDetectTool,
     IcebergCreateTableTool,
+    IcebergLoadDataTool,
+    KankenSniffTool,
     MagicByteTool,
-    Neo4jGraphLoadTool,
+    ManufacturingGraphLoadTool,
     NameProposerTool,
     OpenSearchIndexTool,
     OssieWriteTool,
@@ -85,9 +87,11 @@ def make_format_sniffer_agent(llm: Optional[Any] = None) -> Agent:
         role="Format Sniffer",
         goal=(
             "S3 上のファイルのマジックバイト・拡張子・先頭 1MB のバイナリを"
-            "分析し、フォーマット (csv/tsv/xlsx/xls/parquet/json) と "
-            "encoding / delimiter / sheet / header_row を確定する。"
-            "未対応フォーマットは FORMAT_UNSUPPORTED で早期終了させる。"
+            "分析し、フォーマット (csv/tsv/xlsx/xls/parquet/json/kanken) と "
+            "encoding / delimiter / sheet / header_row / meta_kv を確定する。"
+            "J5 完検 (kanken) は KankenSniffTool で Shift-JIS デコードと"
+            " メタ行/測定行境界を特定する。未対応フォーマットは"
+            " FORMAT_UNSUPPORTED で早期終了させる。"
         ),
         backstory=(
             "文字コード判定と Excel の複雑なヘッダー構造 (メタ K/V → 空行 →"
@@ -97,6 +101,7 @@ def make_format_sniffer_agent(llm: Optional[Any] = None) -> Agent:
         tools=[
             MagicByteTool(),
             CSVSnifferTool(),
+            KankenSniffTool(),
             ExcelHeaderDetectTool(),
             ParquetMetaTool(),
             DataFramePreviewTool(),
@@ -149,7 +154,12 @@ def make_table_creator_agent(llm: Optional[Any] = None) -> Agent:
             "受けるユーザー権限で DDL を発行する。副作用ありなので "
             "max_retries=0 を守る。"
         ),
-        tools=[TableExistsTool(), TrinoMetaTool(), IcebergCreateTableTool()],
+        tools=[
+            TableExistsTool(),
+            TrinoMetaTool(),
+            IcebergCreateTableTool(),
+            IcebergLoadDataTool(),
+        ],
         llm=llm,
         allow_delegation=False,
         verbose=False,
@@ -164,17 +174,17 @@ def make_graph_loader_agent(llm: Optional[Any] = None) -> Agent:
     return Agent(
         role="Graph Loader",
         goal=(
-            "Iceberg テーブル作成後、取り込みメタデータを Neo4j グラフDBへ"
-            "反映する。System / Document / Dataset / Column / SourceFile ノードと"
-            " OWNS_DATASET / HAS_DOCUMENT / REFERENCES_DATASET 等のリレーションを"
-            "作成する。NEO4J_URI が未設定の場合は skipped=true で返し、取り込み"
-            "全体は失敗させない。"
+            "Iceberg データ投入後、J5 受領データ (VB試験 / メインID / 完検 / 出検ID)"
+            "を Neo4j 製造トレーサビリティグラフへ MERGE する。"
+            "Board(KIBAN), AssemblyUnit, ValveBody, TestRecord, MemoryDump, "
+            "Measurement ノードとリレーションを作成する。"
+            "NEO4J_URI 未設定時は skipped=true で返し、取り込み全体は失敗させない。"
         ),
         backstory=(
-            "データカタログとリネージをグラフで表現するデータエンジニア。"
-            "System と Document を Dataset に結び付け、横断検索の基盤を作る。"
+            "A/T · e-Axle 製造工程に詳しいグラフエンジニア。"
+            "KIBAN と A/T 機番で部品単体から出荷までを横断トレースする。"
         ),
-        tools=[Neo4jGraphLoadTool()],
+        tools=[ManufacturingGraphLoadTool()],
         llm=llm,
         allow_delegation=False,
         verbose=False,

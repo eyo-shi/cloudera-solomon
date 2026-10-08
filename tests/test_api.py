@@ -413,6 +413,68 @@ def test_files_preview_jsonl_success(client: TestClient) -> None:
     assert body["rows"] == [{"n": 1}, {"n": 2}]
 
 
+def test_files_preview_txt_as_plain_text(client: TestClient) -> None:
+    """``.txt`` はタブ区切りでも TSV 表にせずプレーンテキストで返す。"""
+    txt_bytes = b"VERSION\t1\nKIBAN\t26GYP05301\nHINBAN\t9\n"
+    fake_client = mock.MagicMock()
+    fake_client.get_object.side_effect = _fake_get_object(
+        txt_bytes, content_type="text/plain"
+    )
+    with mock.patch(
+        "solomon.api.routes.files.s3_client_for_user", return_value=fake_client
+    ):
+        r = client.get(
+            "/api/files/preview?bucket=demo&key=260707234643.rlt.品質.txt",
+            headers={"Authorization": "Bearer fake.jwt.token"},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["format"] == "text"
+    assert "VERSION\t1" in body["text"]
+    assert body["line_count"] == 3
+    assert "rows" not in body
+
+
+def test_files_preview_log_as_plain_text(client: TestClient) -> None:
+    """``.log`` は先頭 ``[`` があっても JSON ではなくテキスト表示する。"""
+    log_bytes = b"[2026-01-01 12:00:00] INFO started\n[2026-01-01 12:00:01] INFO done\n"
+    fake_client = mock.MagicMock()
+    fake_client.get_object.side_effect = _fake_get_object(
+        log_bytes, content_type="text/plain"
+    )
+    with mock.patch(
+        "solomon.api.routes.files.s3_client_for_user", return_value=fake_client
+    ):
+        r = client.get(
+            "/api/files/preview?bucket=demo&key=app/service.log",
+            headers={"Authorization": "Bearer fake.jwt.token"},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["format"] == "log"
+    assert "INFO started" in body["text"]
+    assert body.get("mode") != "json"
+
+
+def test_files_preview_json_includes_json_field(client: TestClient) -> None:
+    """JSON プレビューは UI 向けに ``json`` フィールドも返す。"""
+    json_bytes = b'{"ok": true}'
+    fake_client = mock.MagicMock()
+    fake_client.get_object.side_effect = _fake_get_object(
+        json_bytes, content_type="application/json"
+    )
+    with mock.patch(
+        "solomon.api.routes.files.s3_client_for_user", return_value=fake_client
+    ):
+        r = client.get(
+            "/api/files/preview?bucket=demo&key=data.json",
+            headers={"Authorization": "Bearer fake.jwt.token"},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["json"] == {"ok": True}
+
+
 def test_files_preview_unsupported_format(client: TestClient) -> None:
     """PNG のような未対応形式は format + note を返す (200)。"""
     png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100

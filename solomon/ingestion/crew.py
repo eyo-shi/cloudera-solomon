@@ -34,6 +34,7 @@ from solomon.ingestion.tasks import (
     conflict_permissions_guardrail,
     make_check_conflict_and_permissions_task,
     make_create_iceberg_table_task,
+    make_load_iceberg_data_task,
     make_load_neo4j_graph_task,
     make_draft_ossie_task,
     make_index_opensearch_task,
@@ -114,13 +115,17 @@ def build_ingestion_crew(
     t_create = make_create_iceberg_table_task(
         table_creator, context=[t_propose, t_check]
     )
+    t_load = make_load_iceberg_data_task(
+        table_creator,
+        context=[t_locate, t_sniff, t_propose, t_create],
+    )
     t_graph = make_load_neo4j_graph_task(
         graph_loader,
-        context=[t_locate, t_sniff, t_extract, t_propose, t_create],
+        context=[t_locate, t_sniff, t_extract, t_propose, t_create, t_load],
     )
     t_ossie = make_draft_ossie_task(
         ossie_drafter,
-        context=[t_locate, t_propose, t_create, t_extract],
+        context=[t_locate, t_propose, t_create, t_load, t_extract],
     )
     t_index = make_index_opensearch_task(
         search_indexer,
@@ -128,7 +133,7 @@ def build_ingestion_crew(
     )
     t_wrap = make_wrap_up_task(
         ossie_drafter,
-        context=[t_locate, t_propose, t_create, t_graph, t_ossie, t_index],
+        context=[t_locate, t_propose, t_create, t_load, t_graph, t_ossie, t_index],
     )
 
     crew = Crew(
@@ -148,6 +153,7 @@ def build_ingestion_crew(
             t_propose,
             t_check,
             t_create,
+            t_load,
             t_graph,
             t_ossie,
             t_index,

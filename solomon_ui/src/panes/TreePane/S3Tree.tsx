@@ -253,9 +253,6 @@ function S3PrefixList({
           </li>
         );
       })}
-      {filteredSubs.length === 0 && filteredObjs.length === 0 && (
-        <li className="placeholder tree-child">(empty)</li>
-      )}
     </ul>
   );
 }

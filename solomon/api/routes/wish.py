@@ -512,12 +512,15 @@ def _format_report_markdown(
         return f"s3://{bucket}/{key} の取り込みを試みましたが、結果が取得できませんでした。"
     fq = report.get("fq_table_name", "?")
     cols = report.get("column_count", 0)
+    inserted = report.get("inserted_rows")
     ossie = report.get("ossie_yaml_path", "")
     similar = report.get("similar_tables") or []
     lines = [
         f"**取り込み完了**: `{fq}` (columns: {cols})",
         f"- source: `s3://{bucket}/{key}`",
     ]
+    if inserted is not None:
+        lines.append(f"- inserted_rows: {inserted}")
     if ossie:
         lines.append(f"- Ossie: `{ossie}`")
     if similar:

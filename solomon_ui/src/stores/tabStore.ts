@@ -24,6 +24,7 @@ interface TabState {
   openTab: (input: OpenTabInput) => string;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
+  patchTabRef: (id: string, patch: Record<string, unknown>) => void;
   clear: () => void;
 }
 
@@ -75,5 +76,12 @@ export const useTabStore = create<TabState>((set, get) => ({
     });
   },
   setActive: (id) => set({ activeId: id }),
+  patchTabRef: (id, patch) => {
+    set((s) => ({
+      tabs: s.tabs.map((t) =>
+        t.id === id ? { ...t, ref: { ...t.ref, ...patch } } : t,
+      ),
+    }));
+  },
   clear: () => set({ tabs: [], activeId: null }),
 }));

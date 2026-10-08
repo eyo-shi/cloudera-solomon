@@ -15,6 +15,7 @@ import time
 import traceback
 from typing import Any
 
+from solomon.tools._schema_args import normalize_tool_kwargs
 from solomon.transport.errors import ErrorCode, err
 from solomon.transport.logging import get_logger
 from solomon.transport.user_context import UserContext, get_user_context_optional
@@ -56,6 +57,8 @@ class BaseSolomonTool(_CrewBaseTool):
                 ErrorCode.AUTH_MISSING,
                 f"Tool {self.name!r} requires an authenticated user context.",
             )
+
+        kwargs = normalize_tool_kwargs(kwargs)
 
         start = time.perf_counter()
         try:

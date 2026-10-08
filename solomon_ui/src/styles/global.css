@@ -82,6 +82,7 @@ body,
 .app-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   height: var(--header-h);
   padding: 0 1rem;
   background: var(--bg);
@@ -102,6 +103,19 @@ body,
   max-width: none;
   object-fit: contain;
 }
+.app-header__settings {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  opacity: 0.85;
+  pointer-events: none;
+}
+.app-header__settings-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  display: block;
+}
 
 /* --------------------------- panes --------------------------- */
 .pane {
@@ -111,8 +125,7 @@ body,
   background: var(--bg);
 }
 .pane--left {
-  border-right: 1px solid var(--border);
-  background: var(--bg-sidebar);
+  background: var(--workspace-panel-bg);
 }
 .pane--center {
   background: var(--workspace-panel-bg);
@@ -128,11 +141,24 @@ body,
 }
 .pane-handle {
   position: relative;
-  width: 5px;
-  background: var(--workspace-panel-bg);
+  flex: 0 0 1px;
+  width: 1px;
+  min-width: 1px;
+  background: var(--border);
   cursor: col-resize;
   transition: background 0.15s ease;
   flex-shrink: 0;
+  z-index: 2;
+}
+/* ドラッグしやすい透明ヒットエリア (見た目は 1px 線のまま) */
+.pane-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+  cursor: col-resize;
 }
 /* ペイン間ハンドル上でもヘッダー下線を左右ペインと一直線に */
 .pane-handle::after {
@@ -152,7 +178,7 @@ body,
 }
 .pane-handle:hover,
 .pane-handle[data-resize-handle-active] {
-  background: #d6d5d6;
+  background: var(--border-strong);
 }
 .pane-header {
   display: flex;
@@ -225,7 +251,7 @@ body,
   padding: 0 0.5rem;
   box-sizing: border-box;
   border-bottom: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--workspace-panel-bg);
   flex-shrink: 0;
 }
 .explorer-toolbar__btn {
@@ -704,6 +730,9 @@ body,
 .graph-frame--maximized .graph-frame__main .graph-canvas-wrap {
   min-height: 0;
   height: 100%;
+}
+.graph-frame:not(.graph-frame--maximized) .graph-frame__main .graph-canvas-wrap {
+  height: auto;
 }
 .graph-frame--maximized .graph-frame__table-panel,
 .graph-frame--maximized .graph-frame__raw-panel {
@@ -1313,10 +1342,10 @@ body,
   color: var(--text);
   font-weight: 600;
 }
-/* 展開ガイド線: 各行の chevron (^) の右端に合わせる */
+/* 展開ガイド線 + 階層インデント (深いパスでもラベルが切れにくいようコンパクトに) */
 .explorer-view--storage {
-  --storage-tree-guide: calc(0.25rem + 0.625rem + 1em);
-  --storage-tree-indent: calc(var(--storage-tree-guide) + 0.375rem);
+  --storage-tree-indent: 0.75rem;
+  --storage-tree-guide: 0.375rem;
 }
 .explorer-view--storage .tree-child-list {
   padding-left: var(--storage-tree-indent);
@@ -1628,10 +1657,20 @@ body,
   color: var(--text);
   background: var(--bg);
   font-weight: 500;
-  /* タブバー下線を白で上書きし、表示部と一体化 */
   border-bottom: 1px solid var(--bg);
   margin-bottom: -1px;
-  z-index: 1;
+  z-index: 2;
+}
+/* アクティブタブ直下の tab-bar 下線を確実に隠し、表示部と一体化 */
+.tab-chip--active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--bg);
+  pointer-events: none;
 }
 .tab-chip-icon {
   flex-shrink: 0;
@@ -1665,6 +1704,15 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 140px;
+}
+/* ファイルプレビュー: ファイル名の長さに合わせてタブ幅を自動拡張 */
+.tab-chip--file-preview {
+  max-width: none;
+}
+.tab-chip--file-preview .tab-chip-title {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
 }
 .tab-chip-close {
   background: transparent;
@@ -1745,6 +1793,34 @@ body,
   background: #fef3c7;
   color: var(--warn);
 }
+.file-preview-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  flex-shrink: 0;
+}
+.file-preview-view-toggle__btn {
+  border: none;
+  background: transparent;
+  padding: 0.1875rem 0.625rem;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: inherit;
+  line-height: 1.3;
+}
+.file-preview-view-toggle__btn:hover:not(.file-preview-view-toggle__btn--active) {
+  color: var(--text);
+}
+.file-preview-view-toggle__btn--active {
+  background: var(--bg-alt);
+  color: var(--text);
+  font-weight: 500;
+}
+.markdown-file-preview .text-preview-scroll {
+  padding: 0.75rem 1rem;
+}
 .tab-btn {
   padding: 3px 10px;
   background: white;
@@ -1772,6 +1848,60 @@ body,
 .tab-error pre {
   font-size: inherit;
   overflow: auto;
+}
+
+/* ---- plain text preview (line numbers) ---- */
+.text-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+}
+.text-preview-note {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.text-preview-scroll {
+  overflow: auto;
+  max-height: calc(100vh - 200px);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: white;
+}
+.text-preview-body {
+  margin: 0;
+  padding: 0.5rem 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+.text-preview-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  min-height: 1.5em;
+}
+.text-preview-line:hover {
+  background: var(--bg-alt);
+}
+.text-preview-ln {
+  flex: 0 0 3.25rem;
+  padding: 0 0.625rem 0 0.5rem;
+  text-align: right;
+  color: var(--text-muted);
+  user-select: none;
+  border-right: 1px solid var(--border);
+  background: var(--bg-alt);
+}
+.text-preview-content {
+  flex: 1;
+  min-width: 0;
+  padding: 0 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  background: transparent;
 }
 
 /* ---- preview table ---- */
@@ -1950,7 +2080,6 @@ body,
   background: var(--chat-bg);
   color: var(--chat-text);
   font-family: var(--chat-font);
-  border-left: 1px solid var(--border);
 }
 
 .chat-pane__header {

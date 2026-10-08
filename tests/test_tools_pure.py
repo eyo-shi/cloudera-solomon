@@ -71,6 +71,16 @@ class TestMagicByteTool:
         result = self.tool.run(user_ctx=None, content_b64=_b64(tsv_bytes))
         assert result["format"] == "tsv"
 
+    def test_kanken_meta_header(self) -> None:
+        from pathlib import Path
+
+        raw = (
+            Path(__file__).parent / "fixtures" / "kanken_sample_cp932.txt"
+        ).read_bytes()
+        result = self.tool.run(user_ctx=None, content_b64=_b64(raw))
+        assert result["status"] == "ok"
+        assert result["format"] == "kanken"
+
     def test_utf8_bom_stripped_then_json(self) -> None:
         result = self.tool.run(
             user_ctx=None, content_b64=_b64(b"\xef\xbb\xbf{\"a\": 1}")

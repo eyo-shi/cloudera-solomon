@@ -132,10 +132,16 @@ export interface FilePreviewResponse {
   // JSON
   json?: unknown;
   jsonl?: unknown[];
+  mode?: "json" | "jsonl";
+  value?: unknown;
   // Parquet
   schema?: Array<{ name: string; type: string }>;
   num_row_groups?: number;
   num_rows?: number;
+  // Plain text
+  text?: string;
+  line_count?: number;
+  truncated?: boolean;
   // Error
   error_code?: string;
   message?: string;

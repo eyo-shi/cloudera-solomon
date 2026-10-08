@@ -48,3 +48,25 @@ def test_trino_meta_args_accepts_target_schema_alias() -> None:
         {"catalog": "iceberg", "target_schema": "demo", "table": "orders"}
     )
     assert args.schema_ == "demo"
+
+
+def test_table_exists_run_accepts_target_schema_kwarg(monkeypatch) -> None:
+    from unittest import mock
+
+    from solomon.tools.iceberg import TableExistsTool
+
+    conn = mock.MagicMock()
+    cur = conn.cursor.return_value
+    cur.fetchone.return_value = None
+    monkeypatch.setattr(
+        "solomon.tools.iceberg.trino_connection_for_user",
+        lambda *_a, **_kw: conn,
+    )
+
+    result = TableExistsTool()._run(
+        catalog="iceberg",
+        target_schema="demo",
+        table="orders",
+    )
+    assert result["status"] == "ok"
+    assert result["schema"] == "demo"

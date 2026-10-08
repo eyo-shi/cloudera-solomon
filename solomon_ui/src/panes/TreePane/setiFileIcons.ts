@@ -20,10 +20,17 @@ const SETI: Record<string, SetiIconDef> = {
   db: { glyph: glyph(0xe022), color: "#dd4b78" },
   zip: { glyph: glyph(0xe0a9), color: "#b8383d" },
   markdown: { glyph: glyph(0xe060), color: "#498ba7" },
+  markdownPreview: { glyph: glyph(0xe048), color: "#519aba" },
+  yaml: { glyph: glyph(0xe0a8), color: "#9068b0" },
+  log: { glyph: glyph(0xe012), color: "#bfc2c1" },
+  config: { glyph: glyph(0xe019), color: "#9068b0" },
+  text: { glyph: glyph(0xe023), color: "#bfc2c1" },
   pdf: { glyph: glyph(0xe06d), color: "#b8383d" },
   image: { glyph: glyph(0xe04c), color: "#9068b0" },
   default: { glyph: glyph(0xe023), color: "#bfc2c1" },
 };
+
+export type FileIconVariant = "default" | "markdown-preview";
 
 /** 拡張子 → Seti アイコン種別 (Cursor fileExtensions に準拠)。 */
 const EXT_ICON: Record<string, keyof typeof SETI> = {
@@ -36,8 +43,18 @@ const EXT_ICON: Record<string, keyof typeof SETI> = {
   parquet: "db",
   orc: "db",
   avro: "json",
-  txt: "default",
+  txt: "text",
   md: "markdown",
+  log: "log",
+  yaml: "yaml",
+  yml: "yaml",
+  dat: "db",
+  conf: "config",
+  cfg: "config",
+  ini: "config",
+  env: "config",
+  properties: "config",
+  sql: "db",
   pdf: "pdf",
   zip: "zip",
   gz: "zip",
@@ -56,8 +73,14 @@ export function fileExtension(filename: string): string {
   return base.slice(dot + 1).toLowerCase();
 }
 
-export function resolveSetiFileIcon(filename: string): SetiIconDef {
+export function resolveSetiFileIcon(
+  filename: string,
+  variant: FileIconVariant = "default",
+): SetiIconDef {
   const ext = fileExtension(filename);
+  if (variant === "markdown-preview" && ext === "md") {
+    return SETI.markdownPreview;
+  }
   const key = ext ? EXT_ICON[ext] : undefined;
   return SETI[key ?? "default"];
 }

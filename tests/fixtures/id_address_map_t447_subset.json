@@ -1,0 +1,274 @@
+[
+  {
+    "address_hex": "0006(H)",
+    "address": 6,
+    "info": "パレット種別（上位桁）+パレットNo（下位桁）シュベツジョウイケタカイケタ",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "F:符号無BCD1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0007(H)",
+    "address": 7,
+    "info": "パレットNo",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "F:符号無BCD1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0008(H)",
+    "address": 8,
+    "info": "シーケンスNo. (上位)ジョウイ",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0009(H)",
+    "address": 9,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "000A(H)",
+    "address": 10,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "000B(H)",
+    "address": 11,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "000C(H)",
+    "address": 12,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "000D(H)",
+    "address": 13,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0010(H)",
+    "address": 16,
+    "info": "製造区分ｺｰﾄﾞセイゾウクブン",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0011(H)",
+    "address": 17,
+    "info": "仕様区分ｺｰﾄﾞシヨウクブン",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0016(H)",
+    "address": 22,
+    "info": "顧客品番 (上位)コキャクヒンバンジョウイ",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0017(H)",
+    "address": 23,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0018(H)",
+    "address": 24,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0019(H)",
+    "address": 25,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "001A(H)",
+    "address": 26,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "001B(H)",
+    "address": 27,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "001C(H)",
+    "address": 28,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "001D(H)",
+    "address": 29,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "001E(H)",
+    "address": 30,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "001F(H)",
+    "address": 31,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0036(H)",
+    "address": 54,
+    "info": "A/T機番 製造年 (上位)キバンセイゾウネンジョウイ",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0037(H)",
+    "address": 55,
+    "info": "製造年 (下位)セイゾウネンカイ",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0038(H)",
+    "address": 56,
+    "info": "製造月  1月(A)～12月(M)セイゾウツキガツガツ",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "0039(H)",
+    "address": 57,
+    "info": "ﾓﾃﾞﾙｺｰﾄﾞ (****) ﾎｽﾄにて任意で入力（顧客ﾗﾍﾞﾙ構成1より引用）ニンイニュウリョクコキャクコウセイインヨウ",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "003A(H)",
+    "address": 58,
+    "info": "ﾓﾃﾞﾙｺｰﾄﾞ (****) ﾎｽﾄにて任意で入力（顧客ﾗﾍﾞﾙ構成1より引用）ニンイニュウリョクコキャクコウセイインヨウ",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "003B(H)",
+    "address": 59,
+    "info": "ｼﾘｱﾙNo. (上位)ジョウイ",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "003C(H)",
+    "address": 60,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "003D(H)",
+    "address": 61,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "003E(H)",
+    "address": 62,
+    "info": "↑",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "003F(H)",
+    "address": 63,
+    "info": "ｼﾘｱﾙNo. (下位)カイ",
+    "timing": "ﾒｲﾝｱｳﾄ",
+    "scale": "0:文字 1/1",
+    "process_name": "生産指示セイサンシジ"
+  },
+  {
+    "address_hex": "1540(H)",
+    "address": 5440,
+    "info": "総合判定　モータ絶縁ソウゴウハンテイゼツエン",
+    "timing": "出検ｱｳﾄシュッケン",
+    "scale": "F:符号無BCD1/1",
+    "process_name": "INV組立クミタテ"
+  },
+  {
+    "address_hex": "1550(H)",
+    "address": 5456,
+    "info": "総合判定　INV組立ソウゴウハンテイクミタテ",
+    "timing": "出検ｱｳﾄシュッケン",
+    "scale": "F:符号無BCD1/1",
+    "process_name": "INV組立クミタテ"
+  },
+  {
+    "address_hex": "1552(H)",
+    "address": 5458,
+    "info": "INV　QRシリアル",
+    "timing": "出検ｱｳﾄシュッケン",
+    "scale": "0:文字 1/1",
+    "process_name": "-"
+  },
+  {
+    "address_hex": "1D50(H)",
+    "address": 7504,
+    "info": "ECU品番（１文字目）ヒンバンモジメ",
+    "timing": "出検ｱｳﾄシュッケン",
+    "scale": "ASCII",
+    "process_name": "レゾルバ補正値書込みホセイチカコ"
+  }
+]

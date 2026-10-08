@@ -3,7 +3,7 @@
 LLM を呼ばずに以下だけを確認する:
 
   * 7 Agent が正しい Tool set を持って生成される
-  * 10 Task が正しい順序 + context 依存で組み立てられる
+  * 11 Task が正しい順序 + context 依存で組み立てられる
   * guardrail 関数が期待通り (blocked / passed) の判定を返す
   * kickoff_ingestion は crewai 未インストール環境でも構造化エラーで返る
 
@@ -44,6 +44,7 @@ def test_format_sniffer_has_format_tools() -> None:
     assert _tool_names(agent) == {
         "magic_byte",
         "csv_sniff",
+        "kanken_sniff",
         "excel_header_detect",
         "parquet_meta",
         "dataframe_preview",
@@ -65,12 +66,13 @@ def test_table_creator_has_iceberg_tools() -> None:
         "table_exists",
         "trino_meta",
         "iceberg_create_table",
+        "iceberg_load_data",
     }
 
 
 def test_graph_loader_has_neo4j_tool() -> None:
     agent = make_graph_loader_agent()
-    assert _tool_names(agent) == {"neo4j_graph_load"}
+    assert _tool_names(agent) == {"manufacturing_graph_load"}
 
 
 def test_ossie_drafter_has_ossie_tool() -> None:
@@ -90,9 +92,9 @@ def test_build_ingestion_crew_shape() -> None:
     crew = build_ingestion_crew(memory=False)
     agents = list(getattr(crew, "agents", []))
     tasks = list(getattr(crew, "tasks", []))
-    # 7 agents / 10 tasks
+    # 7 agents / 11 tasks
     assert len(agents) == 7
-    assert len(tasks) == 10
+    assert len(tasks) == 11
     # sequential
     assert str(getattr(crew, "process", "")).endswith("sequential")
 
@@ -108,6 +110,7 @@ def test_task_context_chain() -> None:
         t_propose,
         t_check,
         t_create,
+        t_load,
         t_graph,
         t_ossie,
         t_index,
@@ -130,28 +133,32 @@ def test_task_context_chain() -> None:
     # create は propose + check を受ける
     create_ctx = getattr(t_create, "context", [])
     assert t_propose in create_ctx and t_check in create_ctx
-    # graph は create + propose + extract + sniff + locate を受ける
+    # load は create + propose + sniff + locate を受ける
+    load_ctx = getattr(t_load, "context", [])
+    assert t_create in load_ctx and t_propose in load_ctx and t_sniff in load_ctx
+    # graph は create + load + propose + extract + sniff + locate を受ける
     graph_ctx = getattr(t_graph, "context", [])
-    assert t_create in graph_ctx and t_propose in graph_ctx
-    # ossie は create + propose + extract + locate を受ける
+    assert t_create in graph_ctx and t_load in graph_ctx and t_propose in graph_ctx
+    # ossie は create + load + propose + extract + locate を受ける
     ossie_ctx = getattr(t_ossie, "context", [])
-    assert t_create in ossie_ctx and t_propose in ossie_ctx
+    assert t_create in ossie_ctx and t_load in ossie_ctx and t_propose in ossie_ctx
     # index は graph + ossie を受ける
     index_ctx = getattr(t_index, "context", [])
     assert t_graph in index_ctx and t_ossie in index_ctx
-    # wrap は create + graph + ossie + index を受ける
+    # wrap は create + load + graph + ossie + index を受ける
     wrap_ctx = getattr(t_wrap, "context", [])
-    assert t_create in wrap_ctx and t_graph in wrap_ctx and t_ossie in wrap_ctx
-    assert t_index in wrap_ctx
+    assert t_create in wrap_ctx and t_load in wrap_ctx and t_graph in wrap_ctx
+    assert t_ossie in wrap_ctx and t_index in wrap_ctx
 
 
 def test_side_effect_tasks_have_zero_retries() -> None:
     """CREATE / Git commit のタスクは max_retries=0 を守っていること。"""
     crew = build_ingestion_crew(memory=False)
     tasks = list(getattr(crew, "tasks", []))
-    _, _, _, _, t_check, t_create, t_graph, t_ossie, t_index, _ = tasks
+    _, _, _, _, t_check, t_create, t_load, t_graph, t_ossie, t_index, _ = tasks
     assert getattr(t_check, "max_retries", None) == 1
     assert getattr(t_create, "max_retries", None) == 0
+    assert getattr(t_load, "max_retries", None) == 0
     assert getattr(t_graph, "max_retries", None) == 0
     assert getattr(t_ossie, "max_retries", None) == 0
     assert getattr(t_index, "max_retries", None) == 0

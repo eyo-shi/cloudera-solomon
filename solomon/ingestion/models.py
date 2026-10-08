@@ -44,12 +44,23 @@ class LocateS3ObjectResult(BaseModel):
 class SniffFormatResult(BaseModel):
     """フォーマット判定結果 (MagicByte / CSVSniffer / ExcelHeaderDetect の集約)。"""
 
-    format: str = Field(..., description="csv / tsv / xlsx / xls / parquet / json")
+    format: str = Field(
+        ...,
+        description="csv / tsv / xlsx / xls / parquet / json / kanken",
+    )
     confidence: float = Field(1.0, ge=0.0, le=1.0)
-    encoding: Optional[str] = None  # csv/tsv 用
+    encoding: Optional[str] = None  # csv/tsv / kanken 用
+    source_encoding: Optional[str] = Field(
+        None, description="kanken 等の元ファイル文字コード (例: cp932)"
+    )
     delimiter: Optional[str] = None  # csv/tsv 用
     sheet: Optional[str] = None  # xlsx/xls 用
-    header_row: Optional[int] = Field(None, description="0-indexed. xlsx で必要")
+    header_row: Optional[int] = Field(
+        None, description="0-indexed. xlsx / kanken / csv(メタ行スキップ) で使用"
+    )
+    meta_kv: dict[str, str] = Field(
+        default_factory=dict, description="kanken / Excel のメタ key/value"
+    )
     supported: bool = True
     reason: Optional[str] = None  # supported=False のときの説明
 
@@ -120,15 +131,30 @@ class CreateIcebergTableResult(BaseModel):
     column_count: int
 
 
+class LoadIcebergDataResult(BaseModel):
+    fq_table_name: str
+    inserted_rows: int
+    column_count: int
+    source_format: str
+
+
 # ------------------------------------------------------------------ #
 # 7. load_neo4j_graph
 # ------------------------------------------------------------------ #
 class LoadNeo4jGraphResult(BaseModel):
-    dataset_id: str
-    source_id: str
+    data_type: Optional[str] = None
+    kiban: Optional[str] = None
+    at_serial: Optional[str] = None
+    customer_part_no: Optional[str] = None
+    dataset_id: Optional[str] = None
+    source_id: Optional[str] = None
     system_id: Optional[str] = None
     system_name: Optional[str] = None
+    test_record_id: Optional[str] = None
+    board_id: Optional[str] = None
+    assembly_unit_id: Optional[str] = None
     document_ids: list[str] = Field(default_factory=list)
+    documents: list[dict[str, Any]] = Field(default_factory=list)
     neo4j_uri: Optional[str] = None
     counts: dict[str, int] = Field(default_factory=dict)
     skipped: bool = False
@@ -168,6 +194,7 @@ class IngestionReport(BaseModel):
     fq_table_name: str
     ddl: str
     column_count: int
+    inserted_rows: int = 0
     ossie_yaml_path: str
     neo4j_dataset_id: Optional[str] = None
     neo4j_system_id: Optional[str] = None
