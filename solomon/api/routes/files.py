@@ -50,7 +50,8 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 # / :class:`ParquetMetaTool` の要件)。
 _PREVIEW_RANGE_BYTES = 2 * 1024 * 1024  # 2 MB
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
-_UPLOAD_KEY_PREFIX = "solomon-uploads"
+# CDP datalake バケットの IAM が data/* のみ PutObject 許可のため prefix を固定。
+_UPLOAD_KEY_PREFIX = "data/solomon-uploads"
 
 
 # ------------------------------------------------------------------ #
