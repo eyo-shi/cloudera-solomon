@@ -13,7 +13,7 @@ prototype_version: 0.0.1
 runtimes:
   - editor: PBJ Workbench
     kernel: Python 3.12
-    edition: Standard
+    edition: Solomon Edition
 
 # ---------------------------------------------------------------------------
 # Deploy フォーム (AMP Configuration 画面に表示される Environment Variables)
@@ -94,11 +94,11 @@ tasks:
   - type: run_session
     name: Install Python dependencies
     script: amp/01_install_python_deps.py
-    short_summary: pip install -e . で solomon パッケージと依存を導入
+    short_summary: pip install -e . --no-deps で solomon パッケージのみ editable install
     long_summary: >-
-      pyproject.toml の dependencies を editable install する。 crewai>=0.70,
-      boto3, trino, pyarrow, pandas, openpyxl, GitPython, structlog, FastAPI,
-      Pydantic v2, PyJWT[crypto] を含む。追加で dev extras (pytest) も入れる。
+      Solomon Edition カスタム Runtime に bake 済みの依存 (crewai, boto3, trino,
+      neo4j, FastAPI 等) を使い、solomon 本体だけ pip install -e . --no-deps する。
+      イメージ構築は amp/Dockerfile.solomon-runtime と requirements-runtime.txt 参照。
     kernel: python3
     cpu: 2
     memory: 4

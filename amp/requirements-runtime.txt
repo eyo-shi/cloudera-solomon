@@ -1,0 +1,40 @@
+# Solomon カスタム Runtime 用依存リスト
+#
+# pyproject.toml [project] dependencies と同期すること。
+# 用途: amp/Dockerfile.solomon-runtime で pip install -r する。
+# dev 依存 (pytest / ruff / mypy 等) は含めない — 本番 AMP Runtime 向け。
+#
+# Deploy 時は amp/01_install_python_deps.py が pip install -e . --no-deps のみ実行し、
+# ここに列挙したパッケージはイメージに事前 bake 済みとする。
+
+# --- Agent framework / LLM ---
+crewai>=0.70,<1.0
+litellm>=1.40
+
+# --- Web API ---
+fastapi>=0.111
+uvicorn[standard]>=0.30
+sse-starlette>=2.1
+pydantic>=2.7
+python-multipart>=0.0.9
+
+# --- Data / storage ---
+boto3>=1.34
+trino>=0.328
+duckdb>=1.0
+pyarrow>=16
+pandas>=2.2
+openpyxl>=3.1
+charset-normalizer>=3.3
+neo4j>=5.20
+opensearch-py>=2.0
+kubernetes>=29.0
+
+# --- Auth / infra ---
+pyjwt[crypto]>=2.8
+httpx>=0.27
+requests>=2.32
+GitPython>=3.1
+PyYAML>=6.0
+python-dotenv>=1.0
+structlog>=24.1

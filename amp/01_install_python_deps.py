@@ -1,8 +1,8 @@
-"""AMP セットアップ Step 1: Python 依存を editable install する。
+"""AMP セットアップ Step 1: solomon パッケージを editable install する。
 
-Workbench の run_session 環境で pip install -e .[dev] を走らせる。
-pyproject.toml の [project] dependencies と [project.optional-dependencies].dev
-がすべて入る。
+Solomon Edition カスタム Runtime (amp/Dockerfile.solomon-runtime) では
+本番依存はイメージに bake 済みのため、ここでは ``pip install -e . --no-deps``
+のみ実行する (Deploy 時間短縮)。
 """
 from __future__ import annotations
 
@@ -34,8 +34,8 @@ REPO_ROOT = _repo_root()
 
 
 def main() -> int:
-    print(f"[amp:01] pip install -e .[dev]  (cwd={REPO_ROOT})", flush=True)
-    cmd = [sys.executable, "-m", "pip", "install", "-e", ".[dev]"]
+    print(f"[amp:01] pip install -e . --no-deps  (cwd={REPO_ROOT})", flush=True)
+    cmd = [sys.executable, "-m", "pip", "install", "-e", ".", "--no-deps"]
     proc = subprocess.run(cmd, cwd=REPO_ROOT)
     if proc.returncode != 0:
         print("[amp:01] pip install failed", file=sys.stderr, flush=True)
