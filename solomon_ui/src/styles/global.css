@@ -485,6 +485,12 @@ body,
 .explorer-tree-row--table {
   padding-left: 0.375rem;
 }
+.explorer-tree-row__count {
+  flex-shrink: 0;
+  margin-left: 0.25rem;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
 .explorer-catalog-tree__tables {
   margin-left: 0.625rem;
   padding-left: 0.875rem;
@@ -1323,8 +1329,9 @@ body,
   padding: 0 0.25rem;
 }
 
-/* Storage ツリー: ディレクトリ展開 chevron（Graph 結果パネルと同型） */
-.explorer-view--storage .tree-caret {
+/* Storage / Tables ツリー: ディレクトリ展開 chevron（Graph 結果パネルと同型） */
+.explorer-view--storage .tree-caret,
+.explorer-view--tables .tree-caret {
   width: 1em;
   min-width: 1em;
   display: inline-flex;
@@ -1333,7 +1340,8 @@ body,
   flex-shrink: 0;
   color: var(--text-muted);
 }
-.explorer-view--storage .tree-caret-icon {
+.explorer-view--storage .tree-caret-icon,
+.explorer-view--tables .tree-caret-icon {
   width: 0.875rem;
   height: 0.875rem;
   display: block;

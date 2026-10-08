@@ -1,5 +1,5 @@
 /**
- * テーブル Explore ビュー — スキーマを accordion 展開し、テーブル一覧をネスト表示。
+ * テーブル Explore ビュー — database (schema) を accordion 展開し、テーブル一覧をネスト表示。
  */
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { isSetupGuideError } from "../../api/client";
@@ -9,7 +9,7 @@ import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 import { useChatStore } from "../../stores/chatStore";
 import { useTablesStore } from "../../stores/tablesStore";
 import { ExplorerRefreshButton } from "./ExplorerRefreshButton";
-import { IconDatabase, IconTableGrid } from "./ExplorerIcons";
+import { IconChevronToggle, IconDatabase, IconTableGrid } from "./ExplorerIcons";
 import { NodeMenu } from "./NodeMenu";
 import { TableColumnTooltip } from "./TableColumnTooltip";
 
@@ -76,7 +76,7 @@ export function ExploreView({ filter }: ExploreViewProps) {
 
   const sectionHead = (
     <div className="explorer-section-head">
-      <span className="explorer-section-title">Tables</span>
+      <span className="explorer-section-title">Databases</span>
       <span className="explorer-section-count">({sectionCount})</span>
       <div className="explorer-section-actions">
         <ExplorerRefreshButton
@@ -109,7 +109,7 @@ export function ExploreView({ filter }: ExploreViewProps) {
     return (
       <div className="explorer-view explorer-view--tables">
         {sectionHead}
-        <p className="explorer-error">スキーマ取得に失敗</p>
+        <p className="explorer-error">データベース取得に失敗</p>
       </div>
     );
   }
@@ -124,37 +124,26 @@ export function ExploreView({ filter }: ExploreViewProps) {
       <ul className="tree-list explorer-catalog-tree">
         {filteredSchemas.map((schema) => {
           const schemaKey = `${CATALOG}.${schema}`;
-          const isOpen = expanded.has(schemaKey);
           return (
-            <li key={schemaKey} className="tree-node">
-              <button
-                type="button"
-                className="tree-row tree-row--schema explorer-tree-row"
-                onClick={() => toggleSchema(schemaKey)}
-              >
-                <span className="tree-caret">{isOpen ? "▾" : "▸"}</span>
-                <IconDatabase />
-                <span className="tree-label">{schema}</span>
-              </button>
-              {isOpen && (
-                <SchemaTables
-                  catalog={CATALOG}
-                  schema={schema}
-                  filter={filter}
-                  onOpen={openTable}
-                  onHover={(fq, rect) => setHovered({ fq, rect })}
-                  onHoverEnd={() => setHovered(null)}
-                  onMenu={(e, node) => {
-                    e.preventDefault();
-                    setMenuFor({ x: e.clientX, y: e.clientY, node });
-                  }}
-                />
-              )}
-            </li>
+            <SchemaNode
+              key={schemaKey}
+              catalog={CATALOG}
+              schema={schema}
+              filter={filter}
+              isOpen={expanded.has(schemaKey)}
+              onToggle={() => toggleSchema(schemaKey)}
+              onOpen={openTable}
+              onHover={(fq, rect) => setHovered({ fq, rect })}
+              onHoverEnd={() => setHovered(null)}
+              onMenu={(e, node) => {
+                e.preventDefault();
+                setMenuFor({ x: e.clientX, y: e.clientY, node });
+              }}
+            />
           );
         })}
         {filteredSchemas.length === 0 && (
-          <li className="explorer-placeholder">スキーマが見つかりません</li>
+          <li className="explorer-placeholder">データベースが見つかりません</li>
         )}
       </ul>
 
@@ -193,9 +182,68 @@ export function ExploreView({ filter }: ExploreViewProps) {
   );
 }
 
-interface SchemaTablesProps {
+interface SchemaNodeProps {
   catalog: string;
   schema: string;
+  filter: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  onOpen: (fq: string) => void;
+  onHover: (fq: string, rect: DOMRect) => void;
+  onHoverEnd: () => void;
+  onMenu: (e: ReactMouseEvent, node: TableNode) => void;
+}
+
+function SchemaNode({
+  catalog,
+  schema,
+  filter,
+  isOpen,
+  onToggle,
+  onOpen,
+  onHover,
+  onHoverEnd,
+  onMenu,
+}: SchemaNodeProps) {
+  const { data, isLoading, error } = useTables(schema, catalog);
+  const tables = data?.tables ?? [];
+
+  return (
+    <li className="tree-node">
+      <button
+        type="button"
+        className="tree-row tree-row--schema explorer-tree-row"
+        onClick={onToggle}
+      >
+        <span className="tree-caret">
+          <IconChevronToggle expanded={isOpen} />
+        </span>
+        <IconDatabase />
+        <span className="tree-label">{schema}</span>
+        <span className="explorer-tree-row__count" aria-hidden={isLoading}>
+          {isLoading ? "…" : error ? "" : `(${tables.length})`}
+        </span>
+      </button>
+      {isOpen && (
+        <SchemaTableList
+          tables={tables}
+          isLoading={isLoading}
+          error={error}
+          filter={filter}
+          onOpen={onOpen}
+          onHover={onHover}
+          onHoverEnd={onHoverEnd}
+          onMenu={onMenu}
+        />
+      )}
+    </li>
+  );
+}
+
+interface SchemaTableListProps {
+  tables: { fq: string; name: string }[];
+  isLoading: boolean;
+  error: unknown;
   filter: string;
   onOpen: (fq: string) => void;
   onHover: (fq: string, rect: DOMRect) => void;
@@ -203,16 +251,16 @@ interface SchemaTablesProps {
   onMenu: (e: ReactMouseEvent, node: TableNode) => void;
 }
 
-function SchemaTables({
-  catalog,
-  schema,
+function SchemaTableList({
+  tables,
+  isLoading,
+  error,
   filter,
   onOpen,
   onHover,
   onHoverEnd,
   onMenu,
-}: SchemaTablesProps) {
-  const { data, isLoading, error } = useTables(schema, catalog);
+}: SchemaTableListProps) {
   if (isLoading) {
     return <p className="explorer-placeholder explorer-catalog-tree__loading">…</p>;
   }
@@ -220,7 +268,6 @@ function SchemaTables({
     return <p className="tree-error explorer-catalog-tree__error">読み込み失敗</p>;
   }
 
-  const tables = data?.tables ?? [];
   const f = filter.trim().toLowerCase();
   const filtered = f
     ? tables.filter(

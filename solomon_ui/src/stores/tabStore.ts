@@ -5,7 +5,16 @@
  * - closeTab で消えると近傍のタブが active になる
  */
 import { create } from "zustand";
+import { useExplorerStore } from "./explorerStore";
 import type { ArtifactType, TabDescriptor } from "../types";
+
+function syncExplorerToTab(id: string | null, tabs: TabDescriptor[]): void {
+  if (!id) return;
+  const tab = tabs.find((t) => t.id === id);
+  if (tab) {
+    useExplorerStore.getState().syncToTabKind(tab.kind);
+  }
+}
 
 interface OpenTabInput {
   title: string;
@@ -49,6 +58,7 @@ export const useTabStore = create<TabState>((set, get) => ({
     });
     if (existing) {
       set({ activeId: existing.id });
+      syncExplorerToTab(existing.id, get().tabs);
       return existing.id;
     }
     const id = nextId(input.kind);
@@ -60,6 +70,7 @@ export const useTabStore = create<TabState>((set, get) => ({
       dedupeKey: input.dedupeKey,
     };
     set((s) => ({ tabs: [...s.tabs, tab], activeId: id }));
+    syncExplorerToTab(id, get().tabs);
     return id;
   },
   closeTab: (id) => {
@@ -74,8 +85,12 @@ export const useTabStore = create<TabState>((set, get) => ({
       }
       return { tabs: nextTabs, activeId: nextActive };
     });
+    syncExplorerToTab(get().activeId, get().tabs);
   },
-  setActive: (id) => set({ activeId: id }),
+  setActive: (id) => {
+    set({ activeId: id });
+    syncExplorerToTab(id, get().tabs);
+  },
   patchTabRef: (id, patch) => {
     set((s) => ({
       tabs: s.tabs.map((t) =>
