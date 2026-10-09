@@ -163,7 +163,8 @@ crews:
   - name: create_iceberg_table
     agent: iceberg_table_creator
     description: check_conflict_and_permissions が通っている前提で、IcebergCreateTableTool に catalog / target_schema / resolved_table
-      / columns / partitioning を渡し、Iceberg テーブルを作成せよ。DDL は Tool 内で組み立てられるので、Agent が手で SQL を書いてはいけない。副作用ありのため max_retries=0。エラーはそのまま返す
+      / columns / partitioning を渡し、Iceberg テーブルを作成せよ。DDL は Tool 内で組み立てられるので、Agent が手で SQL を書いてはいけない。Tool が返した fq_table_name
+      / ddl / column_count を CreateIcebergTableResult JSON としてそのまま Task 出力にコピーすること (空行のみ禁止)。副作用ありのため max_retries=0。エラーはそのまま返す
       (再試行しない)。
     expected_output: CreateIcebergTableResult の JSON。fq_table_name, ddl, column_count を含む。
     output_model: CreateIcebergTableResult

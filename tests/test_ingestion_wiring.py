@@ -217,6 +217,26 @@ def test_create_guardrail_normalizes_ossie_catalog(monkeypatch) -> None:
     assert feedback is not None
 
 
+def test_create_guardrail_recovers_from_tool_dict() -> None:
+    payload = {
+        "status": "ok",
+        "fq_table_name": "iceberg.demo.t1",
+        "ddl": 'CREATE TABLE iceberg.demo.t1 ("c1" varchar)',
+        "column_count": 1,
+    }
+
+    class _Tool:
+        def _run(self, **_: object) -> dict:
+            return {"status": "ok", "exists": True}
+
+    from solomon.ingestion.tasks import create_iceberg_guardrail
+    from unittest.mock import patch
+
+    with patch("solomon.tools.iceberg.TableExistsTool", lambda: _Tool()):
+        ok_, _ = create_iceberg_guardrail(payload)
+    assert ok_ is True
+
+
 def test_create_guardrail_passes_when_table_exists(monkeypatch) -> None:
     out = CreateIcebergTableResult(
         fq_table_name="iceberg.demo.ok_table",

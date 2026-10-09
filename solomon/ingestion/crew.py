@@ -170,9 +170,29 @@ def build_ingestion_crew(
     if on_task_complete is not None:
 
         def _task_callback(_output: Any) -> None:
-            on_task_complete()
+            from solomon.ingestion.pipeline_context import record_ingestion_task_output
 
+            record_ingestion_task_output(
+                getattr(_task_callback, "_task_index", 0), _output
+            )
+            on_task_complete()
+            _task_callback._task_index = getattr(_task_callback, "_task_index", 0) + 1  # type: ignore[attr-defined]
+
+        _task_callback._task_index = 0  # type: ignore[attr-defined]
         crew_kwargs["task_callback"] = _task_callback
+    else:
+        from solomon.ingestion.pipeline_context import record_ingestion_task_output
+
+        def _record_only_callback(_output: Any) -> None:
+            record_ingestion_task_output(
+                getattr(_record_only_callback, "_task_index", 0), _output
+            )
+            _record_only_callback._task_index = (  # type: ignore[attr-defined]
+                getattr(_record_only_callback, "_task_index", 0) + 1
+            )
+
+        _record_only_callback._task_index = 0  # type: ignore[attr-defined]
+        crew_kwargs["task_callback"] = _record_only_callback
 
     crew = Crew(**crew_kwargs)
     return crew
@@ -230,6 +250,9 @@ def kickoff_ingestion(
 
     token = set_user_context(user_ctx)
     try:
+        from solomon.ingestion.pipeline_context import reset_ingestion_pipeline_context
+
+        reset_ingestion_pipeline_context()
         crew = build_ingestion_crew(
             llm_light=llm_light,
             llm_strong=llm_strong,

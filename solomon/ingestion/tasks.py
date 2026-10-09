@@ -194,8 +194,10 @@ def make_create_iceberg_table_task(agent: Any, context: list[Task]) -> Task:
             "IcebergCreateTableTool に catalog / target_schema / "
             "resolved_table / columns / partitioning を渡し、Iceberg "
             "テーブルを作成せよ。DDL は Tool 内で組み立てられるので、"
-            "Agent が手で SQL を書いてはいけない。副作用ありのため"
-            " max_retries=0。エラーはそのまま返す (再試行しない)。"
+            "Agent が手で SQL を書いてはいけない。Tool が返した "
+            "fq_table_name / ddl / column_count を CreateIcebergTableResult "
+            "JSON としてそのまま Task 出力にコピーすること (空行のみ禁止)。"
+            "副作用ありのため max_retries=0。エラーはそのまま返す (再試行しない)。"
         ),
         expected_output=(
             "CreateIcebergTableResult の JSON。fq_table_name, ddl, column_count"
@@ -205,6 +207,7 @@ def make_create_iceberg_table_task(agent: Any, context: list[Task]) -> Task:
         context=context,
         output_json=CreateIcebergTableResult,
         max_retries=0,
+        guardrail_max_retries=0,
     )
 
 
@@ -342,12 +345,45 @@ def make_wrap_up_task(agent: Any, context: list[Task]) -> Task:
 # ------------------------------------------------------------------ #
 def create_iceberg_guardrail(output: Any) -> tuple[bool, Optional[str]]:
     """CREATE タスク出力を Trino 上の存在確認で検証する (LLM の成功ハルシネーション防止)。"""
+    from solomon.ingestion.create_table import (
+        execute_create_iceberg_from_proposal,
+        synthesize_create_result_if_table_exists,
+    )
+    from solomon.ingestion.pipeline_context import get_last_check, get_last_propose
     from solomon.tools.iceberg import TableExistsTool
     from solomon.transport.guardrail import guardrail_pass_model, parse_guardrail_model
 
     result, err_msg = parse_guardrail_model(output, CreateIcebergTableResult)
     if result is None:
-        return False, err_msg
+        result = _create_result_from_tool_payload(output)
+    if result is None:
+        propose = get_last_propose()
+        check = get_last_check()
+        if propose and check and not check.has_conflict and check.has_create_priv:
+            parts = check.resolved_table.split(".")
+            if len(parts) == 3:
+                catalog, schema, table = parts
+                from solomon.transport.trino_catalog import resolve_trino_catalog
+
+                catalog = resolve_trino_catalog(catalog)
+                exists = TableExistsTool()._run(
+                    catalog=catalog, schema=schema, table=table
+                )
+                if exists.get("status") == "ok" and exists.get("exists"):
+                    result = synthesize_create_result_if_table_exists(propose, check)
+                else:
+                    recovered = execute_create_iceberg_from_proposal(propose, check)
+                    if isinstance(recovered, CreateIcebergTableResult):
+                        result = recovered
+                    elif isinstance(recovered, dict):
+                        msg = recovered.get("message") or err_msg
+                        code = recovered.get("error_code") or "TRINO_DDL_FAILED"
+                        return False, f"Iceberg テーブル作成に失敗 ({code}): {msg}"
+    if result is None:
+        return False, err_msg or (
+            "guardrail: CreateIcebergTableResult を取得できません。"
+            " iceberg_create_table の戻り JSON をそのまま Task 出力にしてください。"
+        )
     if not (result.ddl or "").strip():
         return False, (
             "IcebergCreateTableTool が DDL を返していません。"
@@ -371,6 +407,32 @@ def create_iceberg_guardrail(output: Any) -> tuple[bool, Optional[str]]:
     return False, (
         f"Iceberg テーブル {resolved_fq} の作成を確認できません "
         f"({code}): {detail}"
+    )
+
+
+def _create_result_from_tool_payload(output: Any) -> Optional[CreateIcebergTableResult]:
+    """Agent が Tool の ok dict をそのまま返した場合の救済。"""
+    from solomon.transport.guardrail import unwrap_task_output
+
+    unwrapped = unwrap_task_output(output)
+    if not isinstance(unwrapped, dict):
+        return None
+    if unwrapped.get("status") != "ok":
+        return None
+    ddl = str(unwrapped.get("ddl") or "")
+    fq = str(unwrapped.get("fq_table_name") or "")
+    if not fq or not ddl.strip():
+        return None
+    try:
+        column_count = int(unwrapped.get("column_count") or 0)
+    except (TypeError, ValueError):
+        column_count = 0
+    if column_count <= 0:
+        return None
+    return CreateIcebergTableResult(
+        fq_table_name=fq,
+        ddl=ddl,
+        column_count=column_count,
     )
 
 

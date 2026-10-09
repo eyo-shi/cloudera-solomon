@@ -29,6 +29,8 @@ def unwrap_task_output(output: Any) -> Any:
         if json_dict is not None:
             return json_dict
         raw = getattr(output, "raw", None)
+        if isinstance(raw, str) and not raw.strip():
+            raw = None
         if raw is not None:
             return raw
 
@@ -49,10 +51,20 @@ def parse_guardrail_model(output: Any, model: type[T]) -> tuple[Optional[T], Opt
             return None, f"guardrail: could not parse output: {unwrapped!r}"
 
     if isinstance(unwrapped, str):
+        stripped = unwrapped.strip()
+        if not stripped:
+            return None, (
+                "guardrail: Agent returned empty output. "
+                "Call iceberg_create_table and return its JSON as CreateIcebergTableResult."
+            )
         try:
-            parsed = json.loads(unwrapped)
+            parsed = json.loads(stripped)
         except json.JSONDecodeError:
-            return None, f"guardrail: could not parse output: {unwrapped!r}"
+            from solomon.transport.llm import _parse_json_lenient
+
+            parsed = _parse_json_lenient(stripped)
+            if parsed is None:
+                return None, f"guardrail: could not parse output: {unwrapped!r}"
         if isinstance(parsed, dict):
             try:
                 return model.model_validate(parsed), None
