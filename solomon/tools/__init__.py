@@ -20,6 +20,7 @@ Router / CDV / Viz)。
               :class:`CDVVisualTool`, :class:`CDVDashboardTool`
   Viz:        :class:`VizHeuristicTool`
   Neo4j:      :class:`Neo4jGraphLoadTool`, :class:`Neo4jGraphQueryTool`
+  Mfg graph:  import :class:`ManufacturingGraphLoadTool` from ``manufacturing_graph`` (not re-exported here)
   OpenSearch: :class:`OpenSearchKeywordSearchTool`, :class:`OpenSearchVectorSearchTool`,
               :class:`OpenSearchHybridSearchTool`, :class:`OpenSearchIndexTool`,
               :class:`OpenSearchPingTool`

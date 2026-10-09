@@ -30,7 +30,6 @@ from solomon.tools import (
     IcebergLoadDataTool,
     KankenSniffTool,
     MagicByteTool,
-    ManufacturingGraphLoadTool,
     NameProposerTool,
     OpenSearchIndexTool,
     OssieWriteTool,
@@ -43,6 +42,7 @@ from solomon.tools import (
     TrinoMetaTool,
     TypeInferTool,
 )
+from solomon.tools.manufacturing_graph import ManufacturingGraphLoadTool
 
 try:  # crewai は本番依存。無い環境でも import は通す
     from crewai import Agent  # type: ignore
