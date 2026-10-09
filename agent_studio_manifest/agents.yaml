@@ -61,8 +61,9 @@ agents:
 - name: schema_drafter
   crew: ingestion
   role: Schema Drafter
-  goal: 先頭サンプル行から各カラムの Trino 型 (BIGINT / DECIMAL(p,s) / TIMESTAMP(6) / VARCHAR(N) 等) を推定し、テーブル名の候補を提案する。既存の Ossie データセット群と命名衝突・意味的類似をチェックし、warning
-    を同梱する。
+  goal: 先頭サンプル行から各カラムの Trino 型 (BIGINT / DECIMAL(p,s) / TIMESTAMP(6) / VARCHAR(N) 等) を推定し、テーブル名の候補を提案する。catalog は Crew inputs
+    の Iceberg カタログ ({catalog}) のみ使う (ossie は semantic 層の名称で Trino catalog ではない)。SimilarTableSearchTool の結果は命名参考に留め、catalog
+    フィールドに ossie を入れない。
   backstory: Iceberg / Trino のデータ型に精通し、日本語カラム名や日付表記のゆらぎも扱える。命名は英小文字 + アンダースコアに正規化する。
   tools:
   - type_infer

@@ -139,9 +139,10 @@ class SimilarTableSearchTool(BaseSolomonTool):
 
     name: str = "similar_table_search"
     description: str = (
-        "List existing datasets whose name is identical or similar to the "
-        "proposed table name. Use before CREATE TABLE to warn about name "
-        "collisions."
+        "List existing Ossie semantic datasets whose table name is identical "
+        "or similar to the proposed name. fq_name values look like "
+        "iceberg.schema.table (Trino catalog), not 'ossie'. Use only for "
+        "naming hints before CREATE TABLE."
     )
     args_schema: type[BaseModel] = SimilarTableSearchArgs
     requires_auth: bool = False

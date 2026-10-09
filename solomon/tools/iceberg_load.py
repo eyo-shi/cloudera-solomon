@@ -12,6 +12,7 @@ from solomon.tools._s3_client import map_s3_error, s3_client_for_user
 from solomon.tools._trino_client import trino_connection_for_user
 from solomon.tools.kanken import kanken_rows_to_preview, parse_kanken_bytes
 from solomon.transport.errors import ErrorCode, err, ok
+from solomon.transport.trino_catalog import resolve_trino_catalog
 from solomon.transport.tool_base import BaseSolomonTool
 from solomon.transport.user_context import UserContext
 
@@ -63,6 +64,7 @@ class IcebergLoadDataTool(BaseSolomonTool):
         header_row: Optional[int] = None,
         **_: Any,
     ) -> dict[str, Any]:
+        catalog = resolve_trino_catalog(catalog)
         for ident in (catalog, schema, table):
             if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", ident):
                 return err(

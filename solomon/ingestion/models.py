@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ------------------------------------------------------------------ #
@@ -98,6 +98,15 @@ class ProposeSchemaAndNameResult(BaseModel):
 
     catalog: str = "iceberg"
     target_schema: str
+
+    @field_validator("catalog", mode="before")
+    @classmethod
+    def _normalize_catalog(cls, value: Any) -> str:
+        from solomon.transport.trino_catalog import resolve_trino_catalog
+
+        if value is None:
+            return resolve_trino_catalog(None)
+        return resolve_trino_catalog(str(value))
     proposed_table_name: str
     columns: list[ColumnProposal]
     partitioning: list[str] = Field(default_factory=list)
@@ -120,6 +129,19 @@ class ConflictAndPermissionsResult(BaseModel):
     resolved_table: str
     error_code: Optional[str] = None
     message: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _normalize_resolved_table(self) -> ConflictAndPermissionsResult:
+        from solomon.transport.trino_catalog import resolve_trino_catalog
+
+        parts = self.resolved_table.split(".")
+        if len(parts) != 3:
+            return self
+        catalog, schema, table = parts
+        fixed = resolve_trino_catalog(catalog)
+        if fixed != catalog:
+            self.resolved_table = f"{fixed}.{schema}.{table}"
+        return self
 
 
 # ------------------------------------------------------------------ #

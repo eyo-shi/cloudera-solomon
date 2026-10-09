@@ -1198,8 +1198,9 @@ tools:
     Tool Arguments: {''proposed_name'': {''description'': ''これから作ろうとしているテーブル名'', ''type'': ''str''}, ''top_k'': {''description'':
     None, ''type'': ''int''}}
 
-    Tool Description: List existing datasets whose name is identical or similar to the proposed table name. Use before CREATE
-    TABLE to warn about name collisions.'
+    Tool Description: List existing Ossie semantic datasets whose table name is identical or similar to the proposed name.
+    fq_name values look like iceberg.schema.table (Trino catalog), not ''ossie''. Use only for naming hints before CREATE
+    TABLE.'
   requires_auth: false
   args_schema:
     properties:

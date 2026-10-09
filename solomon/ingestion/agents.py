@@ -122,8 +122,10 @@ def make_schema_drafter_agent(llm: Optional[Any] = None) -> Agent:
         goal=(
             "先頭サンプル行から各カラムの Trino 型 (BIGINT / DECIMAL(p,s) / "
             "TIMESTAMP(6) / VARCHAR(N) 等) を推定し、テーブル名の候補を提案"
-            "する。既存の Ossie データセット群と命名衝突・意味的類似を"
-            "チェックし、warning を同梱する。"
+            "する。catalog は Crew inputs の Iceberg カタログ ({catalog}) のみ"
+            "使う (ossie は semantic 層の名称で Trino catalog ではない)。"
+            "SimilarTableSearchTool の結果は命名参考に留め、catalog フィールド"
+            "に ossie を入れない。"
         ),
         backstory=(
             "Iceberg / Trino のデータ型に精通し、日本語カラム名や日付表記の"

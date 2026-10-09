@@ -15,6 +15,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from solomon.transport.errors import ok
+from solomon.transport.trino_catalog import resolve_trino_catalog
 from solomon.transport.logging import get_logger
 from solomon.transport.tool_base import BaseSolomonTool
 from solomon.transport.user_context import UserContext
@@ -208,6 +209,7 @@ class NameProposerTool(BaseSolomonTool):
         catalog: str = "iceberg",
         **_: Any,
     ) -> dict[str, Any]:
+        catalog = resolve_trino_catalog(catalog)
         stem = source_hint.rsplit("/", 1)[-1]
         stem = stem.rsplit(".", 1)[0] if "." in stem else stem
         base = _SNAKE_STRIP.sub("_", stem).strip("_").lower()

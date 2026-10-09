@@ -156,7 +156,7 @@ def test_side_effect_tasks_have_zero_retries() -> None:
     crew = build_ingestion_crew(memory=False)
     tasks = list(getattr(crew, "tasks", []))
     _, _, _, _, t_check, t_create, t_load, t_graph, t_ossie, t_index, _ = tasks
-    assert getattr(t_check, "max_retries", None) == 1
+    assert getattr(t_check, "max_retries", None) == 0
     assert getattr(t_create, "max_retries", None) == 0
     assert getattr(t_load, "max_retries", None) == 0
     assert getattr(t_graph, "max_retries", None) == 0

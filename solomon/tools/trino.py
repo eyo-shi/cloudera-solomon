@@ -16,6 +16,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from solomon.transport.errors import ErrorCode, err, ok
+from solomon.transport.trino_catalog import resolve_trino_catalog
 from solomon.tools._schema_args import coalesce_schema_field
 from solomon.transport.logging import get_logger
 from solomon.transport.tool_base import BaseSolomonTool
@@ -73,6 +74,7 @@ class TrinoQueryTool(BaseSolomonTool):
         max_rows: int = 1000,
         **_: Any,
     ) -> dict[str, Any]:
+        catalog = resolve_trino_catalog(catalog)
         if not _is_readonly(sql):
             return err(
                 ErrorCode.TRINO_QUERY_FAILED,
@@ -138,6 +140,7 @@ class TrinoDDLTool(BaseSolomonTool):
         schema: Optional[str] = None,
         **_: Any,
     ) -> dict[str, Any]:
+        catalog = resolve_trino_catalog(catalog)
         if _is_readonly(sql):
             return err(
                 ErrorCode.TRINO_DDL_FAILED,
@@ -200,6 +203,7 @@ class TrinoMetaTool(BaseSolomonTool):
         include_stats: bool = True,
         **_: Any,
     ) -> dict[str, Any]:
+        catalog = resolve_trino_catalog(catalog)
         fq = f'"{catalog}"."{schema}"."{table}"'
         conn_or_err = trino_connection_for_user(user_ctx, catalog=catalog, schema=schema)
         if isinstance(conn_or_err, dict):

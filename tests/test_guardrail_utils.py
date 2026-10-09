@@ -54,7 +54,9 @@ def test_table_exists_run_accepts_target_schema_kwarg(monkeypatch) -> None:
     from unittest import mock
 
     from solomon.tools.iceberg import TableExistsTool
+    from solomon.transport.user_context import UserContext, set_user_context
 
+    set_user_context(UserContext(user_name="tester", request_id="t1"))
     conn = mock.MagicMock()
     cur = conn.cursor.return_value
     cur.fetchone.return_value = None
@@ -65,7 +67,7 @@ def test_table_exists_run_accepts_target_schema_kwarg(monkeypatch) -> None:
 
     result = TableExistsTool()._run(
         catalog="iceberg",
-        target_schema="demo",
+        schema="demo",
         table="orders",
     )
     assert result["status"] == "ok"

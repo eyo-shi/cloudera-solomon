@@ -46,6 +46,7 @@ from solomon.ingestion.tasks import (
 )
 from solomon.transport.errors import ErrorCode, err, ok
 from solomon.transport.logging import get_logger
+from solomon.transport.trino_catalog import default_trino_catalog
 from solomon.transport.user_context import (
     UserContext,
     reset_user_context,
@@ -209,6 +210,7 @@ def kickoff_ingestion(
             inputs: dict[str, Any] = {
                 "bucket": bucket,
                 "key": key,
+                "catalog": default_trino_catalog(),
                 "target_schema": target_schema,
             }
             if graph_ingest and node_fields:

@@ -133,8 +133,11 @@ def make_propose_schema_and_name_task(agent: Any, context: list[Task]) -> Task:
         description=(
             "サンプル値から各カラムの Trino 型を TypeInferTool で推定し、"
             "NameProposerTool で英小文字 + アンダースコアのテーブル名候補を"
-            "作れ。target_schema (=Trino スキーマ) はユーザー指定の"
-            " {target_schema} を使う。SimilarTableSearchTool で命名衝突と"
+            "作れ。Trino catalog は必ず Crew inputs の {catalog} "
+            "(Iceberg カタログ。ossie は semantic YAML 用語であり Trino catalog "
+            "名ではない) を catalog フィールドにセットする。target_schema "
+            "(=Trino スキーマ) はユーザー指定の {target_schema} を使う。"
+            "SimilarTableSearchTool で命名衝突と"
             "類似データセットを検索し、exact_conflicts と similar_tables に"
             "積め。role (dimension/measure/time) は数値集計系を measure、"
             "date/timestamp を time、それ以外を dimension として分類する。"
@@ -159,8 +162,9 @@ def make_check_conflict_and_permissions_task(agent: Any, context: list[Task]) ->
         description=(
             "propose_schema_and_name の結果を受け、TableExistsTool で最終的な"
             "衝突チェックと、TrinoMetaTool で CREATE 権限確認を行え。"
-            "両 Tool には必ず catalog, schema (= propose の target_schema), "
-            "table (= propose の proposed_table_name) を渡すこと。"
+            "両 Tool には必ず catalog (= Crew inputs の {catalog} または propose "
+            "の catalog。ossie カタログは使わない), schema (= propose の "
+            "target_schema), table (= propose の proposed_table_name) を渡すこと。"
             "schema 引数は必須 (target_schema を schema にマップして渡す)。"
             "衝突がある (かつ overwrite=false) 場合は has_conflict=true と"
             "error_code=SCHEMA_NAME_CONFLICT を、CREATE 不可なら"
@@ -174,7 +178,7 @@ def make_check_conflict_and_permissions_task(agent: Any, context: list[Task]) ->
         agent=agent,
         context=context,
         output_json=ConflictAndPermissionsResult,
-        max_retries=1,
+        max_retries=0,
     )
 
 
@@ -337,11 +341,16 @@ def conflict_permissions_guardrail(
     Crew.ai の Task には ``guardrail`` パラメータがあり、``(ok, feedback)``
     を返す関数を受け取る。ok=False で Crew は次タスクに進まず停止する。
     """
+    from solomon.ingestion.permissions import verify_create_gate_from_fq
     from solomon.transport.guardrail import parse_guardrail_model
 
     result, err_msg = parse_guardrail_model(output, ConflictAndPermissionsResult)
     if result is None:
         return False, err_msg
+
+    verified = verify_create_gate_from_fq(result.resolved_table)
+    if verified is not None:
+        result = verified
 
     if result.has_conflict:
         return False, (

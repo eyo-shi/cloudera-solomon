@@ -127,13 +127,15 @@ crews:
     guardrail: null
   - name: propose_schema_and_name
     agent: schema_drafter
-    description: サンプル値から各カラムの Trino 型を TypeInferTool で推定し、NameProposerTool で英小文字 + アンダースコアのテーブル名候補を作れ。target_schema (=Trino
-      スキーマ) はユーザー指定の {target_schema} を使う。SimilarTableSearchTool で命名衝突と類似データセットを検索し、exact_conflicts と similar_tables に積め。role
-      (dimension/measure/time) は数値集計系を measure、date/timestamp を time、それ以外を dimension として分類する。
+    description: サンプル値から各カラムの Trino 型を TypeInferTool で推定し、NameProposerTool で英小文字 + アンダースコアのテーブル名候補を作れ。Trino catalog は必ず Crew
+      inputs の {catalog} (Iceberg カタログ。ossie は semantic YAML 用語であり Trino catalog 名ではない) を catalog フィールドにセットする。target_schema
+      (=Trino スキーマ) はユーザー指定の {target_schema} を使う。SimilarTableSearchTool で命名衝突と類似データセットを検索し、exact_conflicts と similar_tables
+      に積め。role (dimension/measure/time) は数値集計系を measure、date/timestamp を time、それ以外を dimension として分類する。
     expected_output: ProposeSchemaAndNameResult の JSON。catalog, target_schema, proposed_table_name, columns[{name, trino_type,
       nullable, role}], partitioning, similar_tables, exact_conflicts を含む。
     output_model: ProposeSchemaAndNameResult
     inputs:
+    - catalog
     - target_schema
     context:
     - locate_s3_object
@@ -143,17 +145,19 @@ crews:
     guardrail: null
   - name: conflict_and_permissions
     agent: iceberg_table_creator
-    description: propose_schema_and_name の結果を受け、TableExistsTool で最終的な衝突チェックと、TrinoMetaTool で CREATE 権限確認を行え。両 Tool には必ず catalog,
-      schema (= propose の target_schema), table (= propose の proposed_table_name) を渡すこと。schema 引数は必須 (target_schema を schema
-      にマップして渡す)。衝突がある (かつ overwrite=false) 場合は has_conflict=true とerror_code=SCHEMA_NAME_CONFLICT を、CREATE 不可なら has_create_priv=false
-      と error_code=PERM_CREATE_DENIED を返せ。どちらも問題ないときのみ後続タスクに進める (Crew.ai の guardrail)。
+    description: propose_schema_and_name の結果を受け、TableExistsTool で最終的な衝突チェックと、TrinoMetaTool で CREATE 権限確認を行え。両 Tool には必ず catalog
+      (= Crew inputs の {catalog} または propose の catalog。ossie カタログは使わない), schema (= propose の target_schema), table (= propose
+      の proposed_table_name) を渡すこと。schema 引数は必須 (target_schema を schema にマップして渡す)。衝突がある (かつ overwrite=false) 場合は has_conflict=true
+      とerror_code=SCHEMA_NAME_CONFLICT を、CREATE 不可なら has_create_priv=false と error_code=PERM_CREATE_DENIED を返せ。どちらも問題ないときのみ後続タスクに進める
+      (Crew.ai の guardrail)。
     expected_output: ConflictAndPermissionsResult の JSON。has_conflict, has_create_priv, resolved_table, error_code, message
       を含む。
     output_model: ConflictAndPermissionsResult
-    inputs: []
+    inputs:
+    - catalog
     context:
     - propose_schema_and_name
-    max_retries: 1
+    max_retries: 0
     guardrail: solomon.ingestion.tasks.conflict_permissions_guardrail
   - name: create_iceberg_table
     agent: iceberg_table_creator

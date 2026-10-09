@@ -14,6 +14,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from solomon.transport.errors import ErrorCode, err, ok
+from solomon.transport.trino_catalog import resolve_trino_catalog
 from solomon.tools._schema_args import coalesce_schema_field
 from solomon.transport.logging import get_logger
 from solomon.transport.tool_base import BaseSolomonTool
@@ -77,6 +78,7 @@ class TableExistsTool(BaseSolomonTool):
         table: str,
         **_: Any,
     ) -> dict[str, Any]:
+        catalog = resolve_trino_catalog(catalog)
         conn_or_err = trino_connection_for_user(user_ctx, catalog=catalog, schema=schema)
         if isinstance(conn_or_err, dict):
             return conn_or_err
@@ -170,6 +172,7 @@ class IcebergCreateTableTool(BaseSolomonTool):
         if_not_exists: bool = True,
         **_: Any,
     ) -> dict[str, Any]:
+        catalog = resolve_trino_catalog(catalog)
         # 名前バリデーション
         for ident in (catalog, schema, table):
             if not _IDENT_RE.match(ident):
