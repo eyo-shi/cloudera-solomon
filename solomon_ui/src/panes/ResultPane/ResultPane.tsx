@@ -11,6 +11,7 @@ import { SummaryTab } from "./tabs/SummaryTab";
 import { GraphTab } from "./tabs/GraphTab";
 import { TablePreviewTab } from "./tabs/TablePreviewTab";
 import { TablesTab } from "./tabs/TablesTab";
+import { WelcomeTab } from "./tabs/WelcomeTab";
 
 export function ResultPane() {
   const tabs = useTabStore((s) => s.tabs);
@@ -22,20 +23,7 @@ export function ResultPane() {
     <div className={"result-pane" + (isEmpty ? " result-pane--empty" : "")}>
       <TabBar />
       <div className="pane-body result-body">
-        {!active && (
-          <div className="welcome">
-            <h2>ようこそ Solomon へ</h2>
-            <p>
-              左の Explorer からテーブルや S3 オブジェクトを選ぶか、右の
-              Solomon に自然言語で指示してください。
-            </p>
-            <ul className="welcome__hints">
-              <li>「s3://demo-bucket/... を取り込んで」</li>
-              <li>「そのテーブルのサマリーを作って」</li>
-              <li>「ダッシュボードを作って」</li>
-            </ul>
-          </div>
-        )}
+        {!active && <WelcomeTab />}
         {active && <TabRenderer tabId={active.id} />}
       </div>
     </div>
@@ -46,6 +34,8 @@ function TabRenderer({ tabId }: { tabId: string }) {
   const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId));
   if (!tab) return null;
   switch (tab.kind) {
+    case "welcome":
+      return <WelcomeTab />;
     case "table_preview":
       return <TablePreviewTab tab={tab} />;
     case "dashboard":

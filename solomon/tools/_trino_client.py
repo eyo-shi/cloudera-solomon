@@ -100,13 +100,13 @@ def map_trino_error(e: Exception, sql: str) -> dict[str, Any]:
         if "create" in lower:
             return err(ErrorCode.PERM_CREATE_DENIED, msg, sql_snippet=_snip(sql))
         return err(ErrorCode.PERM_UNKNOWN, msg, sql_snippet=_snip(sql))
-    # 存在しないテーブル
-    if "does not exist" in lower or "table not found" in lower:
-        return err(ErrorCode.TRINO_TABLE_NOT_FOUND, msg, sql_snippet=_snip(sql))
-    # DDL 系
     upper = sql.strip().upper()
+    # DDL 系 (schema not found 等も TRINO_TABLE_NOT_FOUND に誤分類しない)
     if upper.startswith(("CREATE", "DROP", "ALTER")):
         return err(ErrorCode.TRINO_DDL_FAILED, msg, sql_snippet=_snip(sql))
+    # 存在しないテーブル (DML / メタ参照)
+    if "does not exist" in lower or "table not found" in lower:
+        return err(ErrorCode.TRINO_TABLE_NOT_FOUND, msg, sql_snippet=_snip(sql))
     return err(ErrorCode.TRINO_QUERY_FAILED, msg, sql_snippet=_snip(sql))
 
 

@@ -64,6 +64,9 @@ class ErrorCode:
     OSSIE_NOT_FOUND = "OSSIE_NOT_FOUND"
     OSSIE_GIT_CONFLICT = "OSSIE_GIT_CONFLICT"
 
+    # Ingestion (Crew / guardrail 停止など)
+    INGESTION_FAILED = "INGESTION_FAILED"
+
     # Transport-level
     HTTP_TIMEOUT = "HTTP_TIMEOUT"
     HTTP_UNAVAILABLE = "HTTP_UNAVAILABLE"

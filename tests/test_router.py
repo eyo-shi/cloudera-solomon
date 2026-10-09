@@ -337,6 +337,34 @@ def test_heuristic_casual_chat_not_unknown() -> None:
     assert c.needs_clarification is False
 
 
+def test_resolve_mode_unset_is_heuristic(monkeypatch) -> None:
+    from solomon.router.crew import _resolve_mode
+
+    monkeypatch.delenv("SOLOMON_ROUTER_MODE", raising=False)
+    assert _resolve_mode("auto") == "heuristic"
+
+
+def test_resolve_mode_blank_is_heuristic(monkeypatch) -> None:
+    from solomon.router.crew import _resolve_mode
+
+    monkeypatch.setenv("SOLOMON_ROUTER_MODE", "  ")
+    assert _resolve_mode("auto") == "heuristic"
+
+
+def test_resolve_mode_llm_env(monkeypatch) -> None:
+    from solomon.router.crew import _resolve_mode
+
+    monkeypatch.setenv("SOLOMON_ROUTER_MODE", "LLM")
+    assert _resolve_mode("auto") == "llm"
+
+
+def test_resolve_mode_unknown_falls_back(monkeypatch) -> None:
+    from solomon.router.crew import _resolve_mode
+
+    monkeypatch.setenv("SOLOMON_ROUTER_MODE", "magic")
+    assert _resolve_mode("auto") == "heuristic"
+
+
 def test_kickoff_router_auto_falls_back_to_heuristic_without_llm() -> None:
     ctx = UserContext(user_name="alice", groups=[], knox_jwt=None)
     result = kickoff_router(

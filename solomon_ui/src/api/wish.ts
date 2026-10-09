@@ -144,6 +144,7 @@ function parseSseFrame(raw: string): WishEvent | null {
   }
   switch (event) {
     case "step":
+    case "narrative":
     case "token":
     case "artifact":
     case "error":

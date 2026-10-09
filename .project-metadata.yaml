@@ -50,6 +50,12 @@ environment_variables:
     default: "INFO"
     description: ログレベル (DEBUG / INFO / WARNING / ERROR)。通常は変更不要。
     required: false
+  SOLOMON_ROUTER_MODE:
+    default: "heuristic"
+    description: >-
+      Chat 意図分類 (Deploy 後 Project Settings でも可)。未設定・heuristic = 規則のみ。
+      llm = Router Crew (SOLOMON_LLM_* 必須)。Application 再起動で反映。
+    required: false
   NEO4J_MODE:
     default: "internal"
     description: >-

@@ -11,6 +11,7 @@ import { ActivityTimeline } from "./ActivityTimeline";
 export function MessageList() {
   const messages = useChatStore((s) => s.messages);
   const liveSteps = useChatStore((s) => s.steps);
+  const liveNarratives = useChatStore((s) => s.narratives);
   const streaming = useChatStore((s) => s.streaming);
   const setActive = useTabStore((s) => s.setActive);
   const tabs = useTabStore((s) => s.tabs);
@@ -20,7 +21,7 @@ export function MessageList() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, liveSteps.length, streaming]);
+  }, [messages.length, liveSteps.length, liveNarratives.length, streaming]);
 
   if (messages.length === 0) {
     return (
@@ -41,11 +42,16 @@ export function MessageList() {
           isLiveTurn && liveSteps.length > 0
             ? liveSteps
             : (m.activitySteps ?? []);
-        const showTimeline = steps.length > 0;
+        const narratives =
+          isLiveTurn && liveNarratives.length > 0
+            ? liveNarratives
+            : (m.activityNarratives ?? []);
+        const showTimeline = steps.length > 0 || narratives.length > 0;
         const allSettled =
           steps.length > 0 &&
           steps.every((s) => s.status === "done" || s.status === "skipped");
         const text = m.text?.trim() ?? "";
+        const collapseThinking = Boolean(text) && (isLiveTurn || allSettled);
 
         return (
           <div
@@ -61,8 +67,10 @@ export function MessageList() {
                 {showTimeline && (
                   <ActivityTimeline
                     steps={steps}
+                    narratives={narratives}
                     live={isLiveTurn}
-                    defaultCollapsed={!isLiveTurn && allSettled}
+                    defaultCollapsed={collapseThinking || (!isLiveTurn && allSettled)}
+                    collapseWhenResult={isLiveTurn && Boolean(text)}
                   />
                 )}
                 {m.errorCode && (
@@ -82,9 +90,6 @@ export function MessageList() {
                   <div className="markdown-body chat-md chat-md--after-error">
                     <Markdown remarkPlugins={[remarkGfm]}>{m.text}</Markdown>
                   </div>
-                )}
-                {!text && !m.errorCode && showTimeline && isLiveTurn && (
-                  <p className="chat-turn__placeholder">Solomon が処理しています…</p>
                 )}
                 {m.artifactIds && m.artifactIds.length > 0 && (
                   <div className="chat-artifacts">

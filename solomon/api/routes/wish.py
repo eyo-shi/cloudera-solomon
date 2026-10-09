@@ -6,8 +6,9 @@ ChatPane からのプロンプトを :func:`kickoff_router` に渡し、判定�
 
 Router モードは :func:`kickoff_router` の ``mode='auto'`` に任せる:
 
-  * ``SOLOMON_ROUTER_MODE=llm`` かつ LLM が組み立てられる場合 -> LLM 経路
-  * それ以外 -> heuristic (s3 URI 正規表現 + 日本語キーワード)
+  * ``SOLOMON_ROUTER_MODE`` 未設定・空・``heuristic`` -> 規則ベース分類
+  * ``SOLOMON_ROUTER_MODE=llm`` かつ LLM が組み立てられる場合 -> Router Crew
+  * ``llm`` 指定でも LLM 未構築なら heuristic にフォールバック
 
 **注意**:
 * Knox JWT は :class:`UserContext` に載せて ContextVar にセットしてから
@@ -35,8 +36,20 @@ from solomon.chat.conversation import (
     fallback_chitchat_reply,
     generate_chitchat_reply_async,
 )
-from solomon.api.sse import sse_artifact, sse_done, sse_error, sse_step, sse_token
+from solomon.api.sse import (
+    sse_artifact,
+    sse_done,
+    sse_error,
+    sse_narrative,
+    sse_step,
+    sse_token,
+)
 from solomon.api.state import SessionTurn, get_store
+from solomon.ingestion.chat_report import (
+    format_duration_seconds,
+    format_ingestion_chat_markdown,
+    pipeline_sse_steps,
+)
 from solomon.ingestion.crew import kickoff_ingestion
 from solomon.rag.crew import kickoff_knowledge_rag
 from solomon.router import DispatchPlan, RouterResult, kickoff_router
@@ -98,7 +111,13 @@ async def post_wish(
 
         try:
             # 1) Router — heuristic モードは同期でも十分速い
-            yield sse_step("RouterCrew", "running", "意図を分類しています...")
+            yield sse_narrative("ご依頼の内容を読み取り、実行プランを決めます。")
+            yield sse_step(
+                "RouterCrew",
+                "running",
+                "意図を分類しています...",
+                activity="Classifying intent",
+            )
             router_result = await asyncio.to_thread(
                 _run_router,
                 user_ctx=user_ctx,
@@ -108,11 +127,9 @@ async def post_wish(
                 target_schema_override=body.target_schema,
                 llm_light=llm_light,
             )
-            yield sse_step(
-                "RouterCrew",
-                "done",
-                f"intent={router_result.classification.intent}",
-            )
+            intent = router_result.classification.intent
+            yield sse_step("RouterCrew", "done", f"intent={intent}")
+            yield sse_narrative("ルーティングが完了しました。次の処理に進みます。")
 
             plan = router_result.plan
             if router_result.classification.intent == "CHITCHAT" and (
@@ -153,6 +170,10 @@ async def post_wish(
 
             # 3) 子 Crew ディスパッチ
             if plan.child_crew == "ingestion":
+                yield sse_narrative(
+                    "ファイル取り込みと判断しました。"
+                    "Storage → Iceberg → ナレッジグラフ → セマンティック検索の順で処理します。"
+                )
                 async for chunk in _handle_ingest(
                     request=request,
                     user_ctx=user_ctx,
@@ -423,8 +444,10 @@ async def _handle_ingest(
             f"s3://{bucket}/{key} を取り込み、"
             f"ナレッジグラフに追加します (ノード: {joined})..."
         )
-    yield sse_step("IngestionCrew", "running", step_msg)
-
+    yield sse_narrative(
+        f"`s3://{bucket}/{key}` のフォーマットを判定し、"
+        "Iceberg テーブル作成とデータ投入の準備を進めます。"
+    )
     # UserContext を持ち込む session_id つきの派生を用意
     scoped_ctx = UserContext(
         user_name=user_ctx.user_name,
@@ -433,6 +456,17 @@ async def _handle_ingest(
         aws_credentials=user_ctx.aws_credentials,
         session_id=session_id,
     )
+
+    progress_q: asyncio.Queue[tuple[str, str, str, str]] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+
+    def _progress_cb(
+        agent: str, status: str, activity: str, message: str
+    ) -> None:
+        loop.call_soon_threadsafe(
+            progress_q.put_nowait, (agent, status, activity, message)
+        )
 
     # crew.kickoff は同期 & LLM 呼び出し込みで長い → to_thread で退避
     def _run() -> dict:
@@ -448,32 +482,58 @@ async def _handle_ingest(
                 graph_ingest=graph_ingest,
                 llm_light=llm_light,
                 llm_strong=llm_strong,
+                include_crew_result=True,
+                progress_callback=_progress_cb,
             )
         finally:
             reset_user_context(token)
 
     task = asyncio.create_task(asyncio.to_thread(_run))
 
-    # 実行中は 5 秒に 1 回「進行中」の step イベントを出しつつ、
-    # クライアント切断も監視する
+    async def _drain_progress() -> AsyncIterator[dict]:
+        while True:
+            try:
+                agent, status, activity, message = progress_q.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            yield sse_step(agent, status, message, activity=activity)
+
+    # 実行中は task_callback 由来の activity を流しつつ、クライアント切断も監視
     while not task.done():
+        async for chunk in _drain_progress():
+            yield chunk
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
         except asyncio.TimeoutError:
             if await request.is_disconnected():
                 task.cancel()
                 return
-            yield sse_step("IngestionCrew", "running", "Crew 実行中...")
+            elapsed = int(loop.time() - started)
+            if elapsed == 5 or (elapsed > 5 and elapsed % 30 == 0):
+                yield sse_narrative(
+                    f"Ingestion パイプライン実行中…（{elapsed}秒経過）"
+                )
+
+    async for chunk in _drain_progress():
+        yield chunk
 
     result = await task
+    elapsed = loop.time() - started
     if result.get("status") != "ok":
         code = result.get("error_code", "INGESTION_FAILED")
         msg = result.get("message", "Ingestion failed")
         error_holder[0] = code
+        yield sse_step(
+            "IngestionCrew",
+            "error",
+            f"失敗 · {format_duration_seconds(elapsed)}",
+        )
         yield sse_error(code, msg)
         return
 
-    report = (result.get("payload") or {}).get("report") or {}
+    payload = result.get("payload") or {}
+    report = payload.get("report") or {}
+    crew_raw = payload.get("crew_result")
     fq = report.get("fq_table_name")
     if fq:
         store = get_store()
@@ -498,41 +558,39 @@ async def _handle_ingest(
             ref={"fq": fq},
         )
 
-    md = _format_report_markdown(report, bucket, key)
+    for agent, status, message, activity in pipeline_sse_steps(
+        bucket=bucket, key=key, report=report, crew_raw=crew_raw
+    ):
+        yield sse_step(agent, status, message, activity=activity)
+        if status == "done" and agent == "Ingestion:Locate":
+            yield sse_narrative(f"Storage 上のオブジェクトを確認しました: {message}")
+        elif status == "done" and agent == "Ingestion:Iceberg":
+            yield sse_narrative(f"Lakehouse（Iceberg）へ投入しました: {message}")
+        elif status == "done" and agent == "Ingestion:Graph":
+            yield sse_narrative(f"ナレッジグラフ（Neo4j）を更新しました: {message}")
+        elif status == "done" and agent == "Ingestion:Search":
+            yield sse_narrative(f"セマンティック検索（OpenSearch）を更新しました: {message}")
+        elif status == "skipped":
+            phase = agent.split(":")[-1] if ":" in agent else agent
+            yield sse_narrative(f"{phase} はスキップしました（{message}）。")
+
+    yield sse_narrative("各段階の結果を整理し、チャットに表示します。")
+
+    md = format_ingestion_chat_markdown(
+        bucket=bucket,
+        key=key,
+        report=report,
+        crew_raw=crew_raw,
+        duration_sec=elapsed,
+    )
     response_md_parts.append(md)
     yield sse_token(md)
-    yield sse_step("IngestionCrew", "done", "取り込みが完了しました。")
-
-
-def _format_report_markdown(
-    report: dict, bucket: str, key: str
-) -> str:
-    """IngestionReport を ChatPane に流す Markdown にする。"""
-    if not report:
-        return f"s3://{bucket}/{key} の取り込みを試みましたが、結果が取得できませんでした。"
-    fq = report.get("fq_table_name", "?")
-    cols = report.get("column_count", 0)
-    inserted = report.get("inserted_rows")
-    ossie = report.get("ossie_yaml_path", "")
-    similar = report.get("similar_tables") or []
-    lines = [
-        f"**取り込み完了**: `{fq}` (columns: {cols})",
-        f"- source: `s3://{bucket}/{key}`",
-    ]
-    if inserted is not None:
-        lines.append(f"- inserted_rows: {inserted}")
-    if ossie:
-        lines.append(f"- Ossie: `{ossie}`")
-    if similar:
-        lines.append(
-            "- 類似テーブル: "
-            + ", ".join(f"`{s.get('fq_name', s)}`" for s in similar[:3])
-        )
-    extra = report.get("summary_markdown")
-    if extra:
-        lines.append("")
-        lines.append(extra)
-    return "\n".join(lines) + "\n"
+    yield sse_step(
+        "IngestionCrew",
+        "done",
+        f"取り込み完了 · {format_duration_seconds(elapsed)}",
+        activity="Ingestion complete",
+    )
 
 
 # ------------------------------------------------------------------ #

@@ -3,6 +3,7 @@
 `/api/wish` は Crew の進捗を SSE で逐次配信する。イベント種別:
 
 * ``event: step``      各 Agent / Task のステータス更新
+* ``event: narrative`` Cursor 風の思考ログ (追記のみ・日本語の短い文)
 * ``event: token``     LLM 応答 (もしくは最終メッセージ) の追記
 * ``event: artifact``  ResultPane タブに開かせたい成果物 (table / dashboard 等)
 * ``event: error``     ハンドリング可能なエラー (error_code + message)
@@ -25,6 +26,14 @@ class WishStepEvent(BaseModel):
     agent: str = Field(..., description="現在実行中の Agent 名 (role slug)")
     status: Literal["running", "done", "skipped", "error"] = "running"
     message: str = Field(..., description="人間向けの一言 (日本語 OK)")
+    activity: Optional[str] = Field(
+        None,
+        description="Cursor 風の作業名 (例: Importing to Iceberg)。ヘッダー表示用。",
+    )
+
+
+class WishNarrativeEvent(BaseModel):
+    text: str = Field(..., description="Thinking ブロックに追記する短文 (日本語 OK)")
 
 
 class WishTokenEvent(BaseModel):
@@ -74,10 +83,22 @@ def _envelope(event_name: str, payload: BaseModel) -> dict[str, str]:
     }
 
 
-def sse_step(agent: str, status: str = "running", message: str = "") -> dict[str, str]:
+def sse_step(
+    agent: str,
+    status: str = "running",
+    message: str = "",
+    activity: Optional[str] = None,
+) -> dict[str, str]:
     return _envelope(
-        "step", WishStepEvent(agent=agent, status=status, message=message)
+        "step",
+        WishStepEvent(
+            agent=agent, status=status, message=message, activity=activity
+        ),
     )
+
+
+def sse_narrative(text: str) -> dict[str, str]:
+    return _envelope("narrative", WishNarrativeEvent(text=text))
 
 
 def sse_token(delta: str) -> dict[str, str]:

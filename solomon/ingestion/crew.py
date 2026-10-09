@@ -14,7 +14,7 @@ Crew.ai の :class:`Crew` を組み立て、``Process.sequential`` で 8 タス�
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from solomon.transport.crewai_bootstrap import configure_crewai_runtime
 
@@ -42,6 +42,7 @@ from solomon.ingestion.tasks import (
     make_locate_s3_object_task,
     make_propose_schema_and_name_task,
     make_sniff_format_task,
+    create_iceberg_guardrail,
     make_wrap_up_task,
 )
 from solomon.transport.errors import ErrorCode, err, ok
@@ -83,6 +84,7 @@ def build_ingestion_crew(
     llm_light: Optional[Any] = None,
     llm_strong: Optional[Any] = None,
     memory: bool = False,
+    on_task_complete: Optional[Callable[[], None]] = None,
 ) -> Crew:
     """Ingestion Crew を組み立てる。
 
@@ -116,6 +118,7 @@ def build_ingestion_crew(
     t_create = make_create_iceberg_table_task(
         table_creator, context=[t_propose, t_check]
     )
+    setattr(t_create, "guardrail", create_iceberg_guardrail)
     t_load = make_load_iceberg_data_task(
         table_creator,
         context=[t_locate, t_sniff, t_propose, t_create],
@@ -137,8 +140,8 @@ def build_ingestion_crew(
         context=[t_locate, t_propose, t_create, t_load, t_graph, t_ossie, t_index],
     )
 
-    crew = Crew(
-        agents=[
+    crew_kwargs: dict[str, Any] = {
+        "agents": [
             s3_scout,
             format_sniffer,
             schema_drafter,
@@ -147,7 +150,7 @@ def build_ingestion_crew(
             ossie_drafter,
             search_indexer,
         ],
-        tasks=[
+        "tasks": [
             t_locate,
             t_sniff,
             t_extract,
@@ -160,10 +163,18 @@ def build_ingestion_crew(
             t_index,
             t_wrap,
         ],
-        process=getattr(Process, "sequential"),
-        memory=memory,
-        verbose=False,
-    )
+        "process": getattr(Process, "sequential"),
+        "memory": memory,
+        "verbose": False,
+    }
+    if on_task_complete is not None:
+
+        def _task_callback(_output: Any) -> None:
+            on_task_complete()
+
+        crew_kwargs["task_callback"] = _task_callback
+
+    crew = Crew(**crew_kwargs)
     return crew
 
 
@@ -180,6 +191,8 @@ def kickoff_ingestion(
     graph_ingest: bool = False,
     llm_light: Optional[Any] = None,
     llm_strong: Optional[Any] = None,
+    include_crew_result: bool = False,
+    progress_callback: Optional[Callable[[str, str, str, str], None]] = None,
 ) -> dict[str, Any]:
     """Ingestion Crew を 1 回実行する。
 
@@ -193,10 +206,33 @@ def kickoff_ingestion(
     戻り値は :func:`solomon.transport.errors.ok` / :func:`err` 形式。成功時は
     ``payload["report"]`` に :class:`IngestionReport` の dict を含む。
     """
+    from solomon.ingestion.progress import INGESTION_PHASES, phase_by_index
+
+    def _notify_phase(
+        agent: str, status: str, activity: str, message: str
+    ) -> None:
+        if progress_callback is not None:
+            progress_callback(agent, status, activity, message)
+
+    completed_task_index = {"n": 0}
+
+    def _on_task_complete() -> None:
+        idx = completed_task_index["n"]
+        completed_task_index["n"] = idx + 1
+        phase = phase_by_index(idx)
+        if phase:
+            _notify_phase(phase.agent, "done", phase.activity, phase.done_message)
+        nxt = phase_by_index(idx + 1)
+        if nxt:
+            _notify_phase(nxt.agent, "running", nxt.activity, nxt.running_message)
+
     token = set_user_context(user_ctx)
     try:
         crew = build_ingestion_crew(
-            llm_light=llm_light, llm_strong=llm_strong, memory=False
+            llm_light=llm_light,
+            llm_strong=llm_strong,
+            memory=False,
+            on_task_complete=_on_task_complete if progress_callback else None,
         )
         _logger.info(
             "ingestion.kickoff",
@@ -216,6 +252,11 @@ def kickoff_ingestion(
             if graph_ingest and node_fields:
                 inputs["node_fields"] = ", ".join(node_fields)
                 inputs["graph_ingest"] = "true"
+            if progress_callback and INGESTION_PHASES:
+                p0 = INGESTION_PHASES[0]
+                _notify_phase(
+                    p0.agent, "running", p0.activity, p0.running_message
+                )
             result = crew.kickoff(inputs=inputs)
         except Exception as e:  # noqa: BLE001
             _logger.error(
@@ -230,14 +271,55 @@ def kickoff_ingestion(
             )
 
         report = _extract_report(result)
-        return ok(
-            {
-                "report": report.model_dump(exclude_none=True) if report else None,
-                "raw": _safe_repr(result),
-            }
-        )
+        if report is None:
+            feedback = _guardrail_or_task_failure_message(result)
+            if feedback:
+                return err(_ingestion_failure_error_code(feedback), feedback)
+            return err(
+                ErrorCode.INGESTION_FAILED,
+                "IngestionCrew finished without IngestionReport.",
+            )
+        payload: dict[str, Any] = {
+            "report": report.model_dump(exclude_none=True),
+            "raw": _safe_repr(result),
+        }
+        if include_crew_result:
+            payload["crew_result"] = result
+        return ok(payload)
     finally:
         reset_user_context(token)
+
+
+def _ingestion_failure_error_code(feedback: str) -> str:
+    """Guardrail / 途中停止メッセージから UI 向け error_code を推定する。"""
+    text = feedback.lower()
+    if "permission denied" in text or "perm_create" in text or "create permission" in text:
+        return ErrorCode.PERM_CREATE_DENIED
+    if "conflict" in text or "already exists" in text:
+        return ErrorCode.SCHEMA_NAME_CONFLICT
+    if (
+        "trino_ddl_failed" in text
+        or "存在しません" in feedback
+        or "icebergcreate" in text
+        or "does not exist" in text
+    ):
+        return ErrorCode.TRINO_DDL_FAILED
+    return ErrorCode.INGESTION_FAILED
+
+
+def _guardrail_or_task_failure_message(result: Any) -> Optional[str]:
+    """Crew が guardrail で止まったときのフィードバック文字列を拾う。"""
+    tasks_output = getattr(result, "tasks_output", None)
+    if not tasks_output:
+        return None
+    for task_out in reversed(list(tasks_output)):
+        raw = getattr(task_out, "raw", None) or getattr(task_out, "output", None)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()[:2000]
+        err_msg = getattr(task_out, "error", None)
+        if err_msg:
+            return str(err_msg)[:2000]
+    return None
 
 
 def _extract_report(result: Any) -> Optional[IngestionReport]:

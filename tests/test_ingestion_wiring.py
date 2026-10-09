@@ -22,8 +22,14 @@ from solomon.ingestion.agents import (
     make_table_creator_agent,
 )
 from solomon.ingestion.crew import build_ingestion_crew, kickoff_ingestion
-from solomon.ingestion.models import ConflictAndPermissionsResult
-from solomon.ingestion.tasks import conflict_permissions_guardrail
+from solomon.ingestion.models import (
+    ConflictAndPermissionsResult,
+    CreateIcebergTableResult,
+)
+from solomon.ingestion.tasks import (
+    conflict_permissions_guardrail,
+    create_iceberg_guardrail,
+)
 from solomon.transport.user_context import UserContext
 
 
@@ -130,9 +136,10 @@ def test_task_context_chain() -> None:
     # check は propose を受ける + guardrail が付いている
     assert t_propose in getattr(t_check, "context", [])
     assert callable(getattr(t_check, "guardrail", None))
-    # create は propose + check を受ける
+    # create は propose + check を受ける + guardrail で Trino 存在確認
     create_ctx = getattr(t_create, "context", [])
     assert t_propose in create_ctx and t_check in create_ctx
+    assert callable(getattr(t_create, "guardrail", None))
     # load は create + propose + sniff + locate を受ける
     load_ctx = getattr(t_load, "context", [])
     assert t_create in load_ctx and t_propose in load_ctx and t_sniff in load_ctx
@@ -167,6 +174,91 @@ def test_side_effect_tasks_have_zero_retries() -> None:
 # ------------------------------------------------------------------ #
 # guardrail
 # ------------------------------------------------------------------ #
+def test_create_guardrail_blocks_when_table_missing(monkeypatch) -> None:
+    out = CreateIcebergTableResult(
+        fq_table_name="iceberg.demo.fake_table",
+        ddl='CREATE TABLE iceberg.demo.fake_table ("c1" varchar)',
+        column_count=1,
+    )
+
+    class _Tool:
+        def _run(self, **_: object) -> dict:
+            return {"status": "ok", "exists": False}
+
+    monkeypatch.setattr(
+        "solomon.tools.iceberg.TableExistsTool",
+        lambda: _Tool(),
+    )
+    ok_, msg = create_iceberg_guardrail(out)
+    assert ok_ is False
+    assert msg and "存在しません" in msg
+
+
+def test_create_guardrail_normalizes_ossie_catalog(monkeypatch) -> None:
+    out = CreateIcebergTableResult(
+        fq_table_name="ossie.demo.my_table",
+        ddl='CREATE TABLE iceberg.demo.my_table ("c1" varchar)',
+        column_count=1,
+    )
+    seen: dict[str, str] = {}
+
+    class _Tool:
+        def _run(self, **kwargs: object) -> dict:
+            seen.update({k: str(v) for k, v in kwargs.items()})
+            return {"status": "ok", "exists": True}
+
+    monkeypatch.setattr(
+        "solomon.tools.iceberg.TableExistsTool",
+        lambda: _Tool(),
+    )
+    ok_, feedback = create_iceberg_guardrail(out)
+    assert ok_ is True
+    assert seen.get("catalog") == "iceberg"
+    assert feedback is not None
+
+
+def test_create_guardrail_passes_when_table_exists(monkeypatch) -> None:
+    out = CreateIcebergTableResult(
+        fq_table_name="iceberg.demo.ok_table",
+        ddl='CREATE TABLE iceberg.demo.ok_table ("c1" varchar)',
+        column_count=1,
+    )
+
+    class _Tool:
+        def _run(self, **_: object) -> dict:
+            return {"status": "ok", "exists": True}
+
+    monkeypatch.setattr(
+        "solomon.tools.iceberg.TableExistsTool",
+        lambda: _Tool(),
+    )
+    ok_, feedback = create_iceberg_guardrail(out)
+    assert ok_ is True
+    assert feedback is not None
+
+
+def test_ingestion_failure_error_code_classification() -> None:
+    from solomon.ingestion.crew import _ingestion_failure_error_code
+    from solomon.transport.errors import ErrorCode
+
+    assert (
+        _ingestion_failure_error_code("CREATE permission denied on x")
+        == ErrorCode.PERM_CREATE_DENIED
+    )
+    assert (
+        _ingestion_failure_error_code("Table name conflict for 't'")
+        == ErrorCode.SCHEMA_NAME_CONFLICT
+    )
+    assert (
+        _ingestion_failure_error_code("Iceberg テーブル x の作成を確認できません")
+        == ErrorCode.TRINO_DDL_FAILED
+    )
+    assert (
+        _ingestion_failure_error_code("something else went wrong")
+        == ErrorCode.INGESTION_FAILED
+    )
+
+
 def test_guardrail_blocks_conflict() -> None:
     out = ConflictAndPermissionsResult(
         has_conflict=True,
@@ -255,3 +347,42 @@ def test_kickoff_ingestion_without_crewai_returns_error() -> None:
     # 少なくとも Python 例外は上に投げず dict で返ることを確認
     assert isinstance(res, dict)
     assert "status" in res
+
+
+def test_format_ingestion_chat_markdown_from_report() -> None:
+    from solomon.ingestion.chat_report import (
+        format_duration_seconds,
+        format_ingestion_chat_markdown,
+        pipeline_sse_steps,
+    )
+
+    report = {
+        "fq_table_name": "iceberg.demo.sales_2024",
+        "column_count": 12,
+        "inserted_rows": 500,
+        "ossie_yaml_path": "ossie/datasets/sales_2024.yaml",
+        "neo4j_counts": {"Measurement": 120, "Board": 1},
+        "opensearch_index": "solomon-datasets",
+        "opensearch_indexed_count": 3,
+    }
+    md = format_ingestion_chat_markdown(
+        bucket="b",
+        key="path/file.csv",
+        report=report,
+        duration_sec=125.0,
+    )
+    assert "s3://b/path/file.csv" in md
+    assert "iceberg.demo.sales_2024" in md
+    assert "500" in md
+    assert "Measurement" in md
+    assert "solomon-datasets" in md
+    assert format_duration_seconds(125.0) in md
+
+    steps = pipeline_sse_steps(bucket="b", key="k", report=report)
+    agents = [a for a, _, _, _ in steps]
+    assert agents == [
+        "Ingestion:Locate",
+        "Ingestion:Iceberg",
+        "Ingestion:Graph",
+        "Ingestion:Search",
+    ]

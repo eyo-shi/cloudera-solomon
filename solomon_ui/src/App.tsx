@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { AppHeader } from "./components/AppHeader";
+import { ensureDefaultWorkspaceTabs } from "./initWorkspaceTabs";
 import { ChatPane } from "./panes/ChatPane/ChatPane";
 import { ResultPane } from "./panes/ResultPane/ResultPane";
 import { TreePane } from "./panes/TreePane/TreePane";
@@ -12,6 +14,10 @@ import { TreePane } from "./panes/TreePane/TreePane";
  *   右: ChatPane     (上: 履歴・返信 / 下: 入力欄)
  */
 export default function App() {
+  useEffect(() => {
+    ensureDefaultWorkspaceTabs();
+  }, []);
+
   return (
     <div className="app-root">
       <AppHeader />

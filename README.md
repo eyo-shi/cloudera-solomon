@@ -245,6 +245,10 @@ Ingestion 完了後に Ossie dataset が OpenSearch にインデックスされ�
 
 ### 5. LLM プロバイダ (以下いずれか 1 つを選択)
 
+Router 意図分類は post-deploy の **`SOLOMON_ROUTER_MODE`** で切り替える（未設定 = **`heuristic`**）。
+`heuristic` は s3 URI / キーワードのみ。`llm` は Router Crew（要 LLM 設定）。LLM 未構築時は
+heuristic にフォールバック。Log の `router.llm_kickoff` / `router.heuristic` で確認。
+
 | `SOLOMON_LLM_PROVIDER` | 必須 env | 任意 env |
 |---|---|---|
 | `cai` (default) | `CAI_INFERENCE_BASE_URL`, `CAI_INFERENCE_API_KEY` | `SOLOMON_LLM_ROUTER_MODEL` (default `llama-3-8b-instruct`), `SOLOMON_LLM_ANALYTICS_MODEL` (default `llama-3-70b-instruct`) |

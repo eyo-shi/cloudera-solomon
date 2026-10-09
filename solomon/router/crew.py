@@ -440,17 +440,21 @@ RouterMode = Literal["heuristic", "llm", "auto"]
 
 
 def _resolve_mode(mode: RouterMode) -> RouterMode:
-    """``auto`` を環境変数から解決する。
+    """``auto`` を post-deploy 環境変数 ``SOLOMON_ROUTER_MODE`` から解決する。
 
-    ``SOLOMON_ROUTER_MODE`` が 'llm' で、かつ LLM 環境変数
-    (``CAI_INFERENCE_ENDPOINT`` 等) が最低 1 つ設定されていれば 'llm'、
-    それ以外は 'heuristic'。
+    * 未設定・空文字 → ``heuristic``
+    * ``llm`` → Router Crew（:paramref:`kickoff_router.llm_light` が無いときは heuristic）
+    * ``heuristic`` → 規則ベース分類
+    * その他の値 → warning のうえ ``heuristic``
     """
     if mode != "auto":
         return mode
-    env_mode = os.environ.get("SOLOMON_ROUTER_MODE", "heuristic").lower()
-    if env_mode == "llm":
+    raw = (os.environ.get("SOLOMON_ROUTER_MODE") or "").strip().lower()
+    if not raw or raw == "heuristic":
+        return "heuristic"
+    if raw == "llm":
         return "llm"
+    _logger.warning("router.unknown_mode", configured=raw, fallback="heuristic")
     return "heuristic"
 
 

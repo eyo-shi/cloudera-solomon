@@ -267,12 +267,17 @@ def make_draft_ossie_task(agent: Any, context: list[Task]) -> Task:
             "OssieWriteTool で semantic/datasets/<catalog>/<schema>/<table>.yaml"
             " に書き出せ (commit=true)。dimensions / measures の判別は"
             " propose_schema_and_name の role をそのまま利用。"
+            " create_iceberg_table / load_iceberg_data が失敗している場合は"
+            " ossie_write を呼ばず DraftOssieResult を返す: git_status=\"skipped\","
+            " skip_reason に理由、yaml_path=\"\", commit_sha=null。"
             " sample_queries は 2-3 件、日本語の自然言語質問と対応する Trino"
-            " SQL を提示。副作用ありのため max_retries=0。"
+            " SQL を提示。ossie_write が OSSIE_YAML_INVALID を返したら"
+            " 再試行せず git_status=\"skipped\" + skip_reason で終了する。"
+            "副作用ありのため max_retries=0。"
         ),
         expected_output=(
-            "DraftOssieResult の JSON。fq_name, yaml_path, git_status, "
-            "commit_sha を含む。"
+            "DraftOssieResult の JSON。git_status (committed|skipped), fq_name, "
+            "yaml_path, commit_sha, skip_reason, dataset を含む。"
         ),
         agent=agent,
         context=context,
@@ -333,6 +338,40 @@ def make_wrap_up_task(agent: Any, context: list[Task]) -> Task:
 # ------------------------------------------------------------------ #
 # guardrail helper
 # ------------------------------------------------------------------ #
+def create_iceberg_guardrail(output: Any) -> tuple[bool, Optional[str]]:
+    """CREATE タスク出力を Trino 上の存在確認で検証する (LLM の成功ハルシネーション防止)。"""
+    from solomon.tools.iceberg import TableExistsTool
+    from solomon.transport.guardrail import guardrail_pass_model, parse_guardrail_model
+
+    result, err_msg = parse_guardrail_model(output, CreateIcebergTableResult)
+    if result is None:
+        return False, err_msg
+    if not (result.ddl or "").strip():
+        return False, (
+            "IcebergCreateTableTool が DDL を返していません。"
+            "Tool の error_code / message をそのまま Task 出力に反映してください。"
+        )
+    parts = result.fq_table_name.split(".")
+    if len(parts) != 3:
+        return False, f"Invalid fq_table_name: {result.fq_table_name!r}"
+    catalog, schema, table = parts
+    from solomon.transport.trino_catalog import resolve_trino_catalog
+
+    catalog = resolve_trino_catalog(catalog)
+    resolved_fq = f"{catalog}.{schema}.{table}"
+    if resolved_fq != result.fq_table_name:
+        result = result.model_copy(update={"fq_table_name": resolved_fq})
+    check = TableExistsTool()._run(catalog=catalog, schema=schema, table=table)
+    if check.get("status") == "ok" and check.get("exists"):
+        return guardrail_pass_model(result)
+    detail = check.get("message") or "Table does not exist in Trino."
+    code = check.get("error_code") or "TRINO_DDL_FAILED"
+    return False, (
+        f"Iceberg テーブル {resolved_fq} の作成を確認できません "
+        f"({code}): {detail}"
+    )
+
+
 def conflict_permissions_guardrail(
     output: Any,
 ) -> tuple[bool, Optional[str]]:
@@ -377,5 +416,6 @@ __all__ = [
     "make_draft_ossie_task",
     "make_index_opensearch_task",
     "make_wrap_up_task",
+    "create_iceberg_guardrail",
     "conflict_permissions_guardrail",
 ]

@@ -187,10 +187,16 @@ class LoadNeo4jGraphResult(BaseModel):
 # 8. draft_ossie
 # ------------------------------------------------------------------ #
 class DraftOssieResult(BaseModel):
-    fq_name: str
-    yaml_path: str
-    git_status: str  # "committed" / "skipped"
+    fq_name: str = ""
+    yaml_path: str = ""
+    git_status: str = Field(
+        ...,
+        description='OssieWrite 成功時 "committed"。スキップ時は必ず "skipped"。',
+    )
     commit_sha: Optional[str] = None
+    skip_reason: Optional[str] = Field(
+        None, description="git_status=skipped のときの理由 (日本語可)。"
+    )
     dataset: dict[str, Any] = Field(default_factory=dict)
 
 

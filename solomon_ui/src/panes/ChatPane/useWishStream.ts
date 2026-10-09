@@ -40,6 +40,7 @@ export function useWishStream(): UseWishStream {
   const appendToLastSolomon = useChatStore((s) => s.appendToLastSolomon);
   const removeLastEmptySolomon = useChatStore((s) => s.removeLastEmptySolomon);
   const addStep = useChatStore((s) => s.addStep);
+  const addNarrative = useChatStore((s) => s.addNarrative);
   const markLastRunningStepError = useChatStore((s) => s.markLastRunningStepError);
   const attachStepsToLastSolomon = useChatStore((s) => s.attachStepsToLastSolomon);
   const setLastSolomonError = useChatStore((s) => s.setLastSolomonError);
@@ -108,8 +109,12 @@ export function useWishStream(): UseWishStream {
                   agent: evt.data.agent,
                   status: evt.data.status,
                   message: evt.data.message,
+                  activity: evt.data.activity,
                   at: Date.now(),
                 });
+                break;
+              case "narrative":
+                addNarrative(evt.data.text);
                 break;
               case "token":
                 appendToLastSolomon(evt.data.delta);
@@ -176,7 +181,12 @@ export function useWishStream(): UseWishStream {
             controllerRef.current = null;
             attachStepsToLastSolomon();
             if (userCancelledRef.current) {
-              removeLastEmptySolomon();
+              const last = [...useChatStore.getState().messages]
+                .reverse()
+                .find((m) => m.role === "solomon");
+              if (last && !last.text.trim()) {
+                appendToLastSolomon("（取り込みをキャンセルしました）");
+              }
               userCancelledRef.current = false;
               return;
             }
@@ -199,6 +209,7 @@ export function useWishStream(): UseWishStream {
       appendToLastSolomon,
       removeLastEmptySolomon,
       addStep,
+      addNarrative,
       markLastRunningStepError,
       attachStepsToLastSolomon,
       setLastSolomonError,

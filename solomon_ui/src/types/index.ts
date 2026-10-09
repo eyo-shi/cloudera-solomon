@@ -169,6 +169,7 @@ export interface QueryResponse {
 
 // ---------------- Artifacts ---------------- //
 export type ArtifactType =
+  | "welcome"
   | "table_preview"
   | "tables"
   | "dashboard"
@@ -190,6 +191,10 @@ export interface WishStepEvent {
   agent: string;
   status: "running" | "done" | "skipped" | "error";
   message: string;
+  activity?: string;
+}
+export interface WishNarrativeEvent {
+  text: string;
 }
 export interface WishTokenEvent {
   delta: string;
@@ -211,6 +216,7 @@ export interface WishDoneEvent {
 }
 export type WishEvent =
   | { event: "step"; data: WishStepEvent }
+  | { event: "narrative"; data: WishNarrativeEvent }
   | { event: "token"; data: WishTokenEvent }
   | { event: "artifact"; data: WishArtifactEvent }
   | { event: "error"; data: WishErrorEvent }
@@ -228,4 +234,14 @@ export interface TabDescriptor {
   ref: Record<string, unknown>;
   /** 重複判定用のキー (fq / bucket:key / artifact_id 等) */
   dedupeKey?: string;
+  /** true のタブは閉じられない (Welcome / 既定 Chat 等) */
+  pinned?: boolean;
+}
+
+/** 右ペイン (Chat 等) の UI タブ */
+export interface RightTabDescriptor {
+  id: string;
+  title: string;
+  kind: "chat";
+  pinned?: boolean;
 }

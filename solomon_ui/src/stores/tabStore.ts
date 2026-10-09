@@ -25,6 +25,7 @@ interface OpenTabInput {
    * 未指定なら JSON.stringify(ref) を使う (要素の順序に依存する)。
    */
   dedupeKey?: string;
+  pinned?: boolean;
 }
 
 interface TabState {
@@ -68,6 +69,7 @@ export const useTabStore = create<TabState>((set, get) => ({
       kind: input.kind,
       ref: input.ref,
       dedupeKey: input.dedupeKey,
+      pinned: input.pinned,
     };
     set((s) => ({ tabs: [...s.tabs, tab], activeId: id }));
     syncExplorerToTab(id, get().tabs);
@@ -75,6 +77,9 @@ export const useTabStore = create<TabState>((set, get) => ({
   },
   closeTab: (id) => {
     set((s) => {
+      const target = s.tabs.find((t) => t.id === id);
+      if (!target || target.pinned) return s;
+      if (s.tabs.length <= 1) return s;
       const idx = s.tabs.findIndex((t) => t.id === id);
       if (idx < 0) return s;
       const nextTabs = s.tabs.filter((t) => t.id !== id);

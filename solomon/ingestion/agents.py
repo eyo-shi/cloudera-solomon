@@ -216,6 +216,7 @@ def make_ossie_drafter_agent(llm: Optional[Any] = None) -> Agent:
         allow_delegation=False,
         verbose=False,
         memory=False,
+        max_iter=6,
     )
 
 

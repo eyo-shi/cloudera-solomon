@@ -8,6 +8,7 @@ import { FileTypeIcon } from "../TreePane/FileTypeIcon";
 import { fileExtension } from "../TreePane/setiFileIcons";
 
 const KIND_ICON: Record<string, string> = {
+  welcome: "◇",
   table_preview: "▤",
   dashboard: "📊",
   summary: "📝",
@@ -37,6 +38,7 @@ export function TabBar() {
   if (tabs.length === 0) {
     return <div className="tab-bar tab-bar--empty" aria-hidden="true" />;
   }
+
   return (
     <div className="tab-bar">
       {tabs.map((t) => {
@@ -83,16 +85,19 @@ export function TabBar() {
             <span className="tab-chip-title" title={label}>
               {label}
             </span>
-            <button
-              className="tab-chip-close"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeTab(t.id);
-              }}
-              aria-label="Close tab"
-            >
-              ×
-            </button>
+            {!t.pinned && (
+              <button
+                type="button"
+                className="tab-chip-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(t.id);
+                }}
+                aria-label="Close tab"
+              >
+                ×
+              </button>
+            )}
           </div>
         );
       })}

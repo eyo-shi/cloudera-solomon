@@ -25,6 +25,8 @@ export interface ChatMessage {
   errorMessage?: string;
   /** このターンの Router / Crew 実行ログ (SSE step) */
   activitySteps?: StepEntry[];
+  /** Cursor 風 Thinking 内の短文ログ (SSE narrative) */
+  activityNarratives?: string[];
   createdAt: number;
 }
 
@@ -32,12 +34,16 @@ export interface StepEntry {
   agent: string;
   status: "running" | "done" | "skipped" | "error";
   message: string;
+  /** 例: Importing to Iceberg */
+  activity?: string;
   at: number;
 }
 
 interface ChatState {
   messages: ChatMessage[];
   steps: StepEntry[];
+  /** 現在ターンの narrative 行 (完了時に最後の Solomon メッセージへ移す) */
+  narratives: string[];
   streaming: boolean;
   /** TreePane 等から prompt を予約する。PromptInput が読み取って textarea に反映。 */
   pendingPrompt: string | null;
@@ -49,6 +55,7 @@ interface ChatState {
   appendToLastSolomon: (delta: string) => void;
   removeLastEmptySolomon: () => void;
   addStep: (step: StepEntry) => void;
+  addNarrative: (text: string) => void;
   markLastRunningStepError: (message: string) => void;
   attachStepsToLastSolomon: () => void;
   setLastSolomonError: (errorCode: string, message: string) => void;
@@ -68,6 +75,7 @@ const mid = () => {
 export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   steps: [],
+  narratives: [],
   streaming: false,
   pendingPrompt: null,
   setupErrors: [],
@@ -170,18 +178,31 @@ export const useChatStore = create<ChatState>((set) => ({
       };
       return { steps: next };
     }),
+  addNarrative: (text) =>
+    set((s) => {
+      const line = text.trim();
+      if (!line) return s;
+      const last = s.narratives[s.narratives.length - 1];
+      if (last === line) return s;
+      return { narratives: [...s.narratives, line] };
+    }),
   attachStepsToLastSolomon: () =>
     set((s) => {
-      if (s.steps.length === 0) return s;
+      if (s.steps.length === 0 && s.narratives.length === 0) return s;
       const idx = [...s.messages].reverse().findIndex((m) => m.role === "solomon");
-      if (idx < 0) return { steps: [] };
+      if (idx < 0) return { steps: [], narratives: [] };
       const realIdx = s.messages.length - 1 - idx;
       const nextMessages = [...s.messages];
       nextMessages[realIdx] = {
         ...nextMessages[realIdx],
-        activitySteps: [...s.steps],
+        activitySteps:
+          s.steps.length > 0 ? [...s.steps] : nextMessages[realIdx].activitySteps,
+        activityNarratives:
+          s.narratives.length > 0
+            ? [...s.narratives]
+            : nextMessages[realIdx].activityNarratives,
       };
-      return { messages: nextMessages, steps: [] };
+      return { messages: nextMessages, steps: [], narratives: [] };
     }),
   setLastSolomonError: (errorCode, message) =>
     set((s) => {
@@ -196,7 +217,7 @@ export const useChatStore = create<ChatState>((set) => ({
       };
       return { messages: next };
     }),
-  clearSteps: () => set({ steps: [] }),
+  clearSteps: () => set({ steps: [], narratives: [] }),
   setStreaming: (v) => set({ streaming: v }),
   addArtifactToLastSolomon: (artifactId) => {
     set((s) => {

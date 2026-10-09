@@ -188,6 +188,13 @@ class TestMapTrinoError:
         r = map_trino_error(Exception("boom"), "DROP TABLE foo")
         assert r["error_code"] == "TRINO_DDL_FAILED"
 
+    def test_create_schema_missing_is_ddl_not_table_not_found(self) -> None:
+        r = map_trino_error(
+            Exception("Schema 'missing' does not exist"),
+            "CREATE TABLE iceberg.missing.t (c varchar)",
+        )
+        assert r["error_code"] == "TRINO_DDL_FAILED"
+
     def test_select_query_fallback(self) -> None:
         r = map_trino_error(Exception("syntax boom"), "SELECT * FROM t")
         assert r["error_code"] == "TRINO_QUERY_FAILED"

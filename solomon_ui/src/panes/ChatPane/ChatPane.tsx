@@ -13,8 +13,10 @@ import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 import { useChatStore } from "../../stores/chatStore";
 import { MessageList } from "./MessageList";
 import { PromptInput } from "./PromptInput";
+import { RightTabBar } from "./RightTabBar";
 import { SetupGuide } from "./SetupGuide";
 import { useWishStream } from "./useWishStream";
+import { useRightTabStore } from "../../stores/rightTabStore";
 
 export function ChatPane() {
   const wish = useWishStream();
@@ -22,30 +24,27 @@ export function ChatPane() {
   useReportSetupGuideError(llmSetupError);
   const setupErrors = useChatStore((s) => s.setupErrors);
   const removeSetupError = useChatStore((s) => s.removeSetupError);
+  const activeId = useRightTabStore((s) => s.activeId);
+  const showChat = activeId === "chat-main";
+
   return (
     <div className="chat-pane">
-      <div className="chat-pane__header">
-        <div className="chat-pane__header-brand">
-          <img
-            src="/solomon_logo.svg"
-            alt=""
-            className="chat-pane__header-icon"
-          />
-          <span className="chat-pane__header-title">Solomon</span>
-        </div>
-        <span className="chat-pane__header-hint">Agent</span>
-      </div>
-      <div className="chat-scroll">
-        <MessageList />
-        {setupErrors.map((error) => (
-          <SetupGuide
-            key={error.errorCode}
-            error={error}
-            onDismiss={() => removeSetupError(error.errorCode)}
-          />
-        ))}
-      </div>
-      <PromptInput wish={wish} />
+      <RightTabBar />
+      {showChat && (
+        <>
+          <div className="chat-scroll">
+            <MessageList />
+            {setupErrors.map((error) => (
+              <SetupGuide
+                key={error.errorCode}
+                error={error}
+                onDismiss={() => removeSetupError(error.errorCode)}
+              />
+            ))}
+          </div>
+          <PromptInput wish={wish} />
+        </>
+      )}
     </div>
   );
 }
