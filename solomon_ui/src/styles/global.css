@@ -137,7 +137,7 @@ body,
 }
 .pane--right {
   border-left: none;
-  background: var(--bg);
+  background: var(--workspace-panel-bg);
 }
 .pane-handle {
   position: relative;
@@ -1638,6 +1638,11 @@ body,
 }
 .result-pane:not(.result-pane--empty) .result-body {
   background: var(--bg);
+  border-top: 1px solid var(--border);
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
 }
 .result-pane--empty .result-body {
   display: flex;
@@ -1684,8 +1689,12 @@ body,
   color: var(--workspace-panel-text-muted);
 }
 
-/* ---- tab bar (VS Code / Cursor 風: 直角・白アクティブ・グレー非アクティブ) ---- */
-.tab-bar {
+/* ---- tab bar (中央 / 右ペイン共通レイヤー) ----
+ * L0: グレー背景 (--workspace-panel-bg) — ペイン余白・タブバー・非アクティブタブ
+ * L1: 白 (--bg) — アクティブタブ + 表示部（タブ下の境界線は L0|L1 のみ、タブ|表示部は無し）
+ */
+.tab-bar,
+.tab-bar--right {
   display: flex;
   align-items: stretch;
   gap: 0;
@@ -1700,21 +1709,14 @@ body,
   overflow-y: hidden;
   scrollbar-width: none;
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
 }
 .tab-bar::-webkit-scrollbar {
   display: none;
 }
 .tab-bar--empty {
   padding: 0 0.75rem;
-}
-.tab-bar--right {
-  /* アクティブタブ・プロンプト入力と同色で、タブがその上に載っている見え方に */
-  background: var(--bg);
-  border-bottom: none;
-  flex-shrink: 0;
-}
-.tab-bar--right .tab-chip:not(.tab-chip--active) {
-  background: var(--workspace-panel-bg);
 }
 .tab-chip-icon--logo {
   width: 0.875rem;
@@ -1730,7 +1732,7 @@ body,
   padding: 0 0.75rem;
   box-sizing: border-box;
   border: none;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
   border-radius: 0;
   background: var(--workspace-panel-bg);
   cursor: pointer;
@@ -1742,14 +1744,31 @@ body,
   position: relative;
   flex-shrink: 0;
 }
+.tab-chip:not(.tab-chip--active) {
+  background: var(--workspace-panel-bg);
+}
 .tab-chip:hover:not(.tab-chip--active) {
   color: var(--workspace-panel-text);
+  background: var(--workspace-panel-bg);
 }
 .tab-chip--active {
   color: var(--text);
   background: var(--bg);
   font-weight: 500;
-  z-index: 1;
+  border-bottom: 1px solid var(--bg);
+  margin-bottom: -1px;
+  z-index: 3;
+}
+/* アクティブタブ直下の区切り線を隠し、白い表示部と一体化 */
+.tab-chip--active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--bg);
+  pointer-events: none;
 }
 .tab-chip-icon {
   flex-shrink: 0;
@@ -2177,9 +2196,10 @@ body,
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--chat-bg);
+  background: var(--workspace-panel-bg);
   color: var(--chat-text);
   font-family: var(--chat-font);
+  font-size: var(--workspace-font-size);
 }
 
 .chat-pane__header {
@@ -2227,6 +2247,16 @@ body,
   background: var(--chat-bg-elevated);
 }
 
+.chat-pane__surface {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  position: relative;
+  z-index: 1;
+}
 .chat-scroll {
   flex: 1;
   min-height: 0;
@@ -2235,7 +2265,7 @@ body,
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  background: var(--chat-bg);
+  background: var(--bg);
 }
 
 .chat-empty {
@@ -2290,6 +2320,7 @@ body,
   border: 1px solid var(--chat-border-subtle);
   color: var(--chat-text);
   line-height: 1.5;
+  font-size: var(--workspace-font-size);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -2333,15 +2364,30 @@ body,
 .chat-turn__assistant {
   width: 100%;
   color: var(--chat-text);
-  line-height: 1.6;
-  font-size: inherit;
+  line-height: 1.5;
+  font-size: var(--workspace-font-size);
 }
 .chat-turn__assistant .chat-md {
   color: inherit;
 }
 .chat-turn__assistant .chat-md.markdown-body {
-  font-size: inherit;
-  line-height: inherit;
+  font-size: var(--workspace-font-size);
+  line-height: 1.5;
+}
+.chat-pane .markdown-body h1 {
+  font-size: 1.2em;
+}
+.chat-pane .markdown-body h2 {
+  font-size: 1.12em;
+}
+.chat-pane .markdown-body h3 {
+  font-size: 1.06em;
+}
+.chat-pane .markdown-body h1,
+.chat-pane .markdown-body h2,
+.chat-pane .markdown-body h3 {
+  margin-top: 0.75em;
+  margin-bottom: 0.35em;
 }
 .chat-turn__assistant .chat-md p:first-child {
   margin-top: 0;
@@ -2788,6 +2834,7 @@ body,
   padding: 0.5rem 0.75rem 0.625rem;
   background: var(--bg);
   border-top: none;
+  font-size: var(--workspace-font-size);
 }
 .chat-composer__box {
   position: relative;

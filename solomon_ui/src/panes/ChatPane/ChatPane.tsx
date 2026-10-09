@@ -31,7 +31,7 @@ export function ChatPane() {
     <div className="chat-pane">
       <RightTabBar />
       {showChat && (
-        <>
+        <div className="chat-pane__surface">
           <div className="chat-scroll">
             <MessageList />
             {setupErrors.map((error) => (
@@ -43,7 +43,7 @@ export function ChatPane() {
             ))}
           </div>
           <PromptInput wish={wish} />
-        </>
+        </div>
       )}
     </div>
   );
