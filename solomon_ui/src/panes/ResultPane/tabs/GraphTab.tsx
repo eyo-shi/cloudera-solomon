@@ -21,10 +21,11 @@ export function GraphTab() {
   }, [panels.length]);
 
   useEffect(() => {
-    if (!maximizedPanelId) return;
+    if (maximizedPanelId === null) return;
+    const panelId: string = maximizedPanelId;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        toggleMaximizePanel(maximizedPanelId);
+        toggleMaximizePanel(panelId);
       }
     }
     window.addEventListener("keydown", onKeyDown);
