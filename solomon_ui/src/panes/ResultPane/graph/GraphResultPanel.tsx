@@ -490,9 +490,13 @@ export function GraphResultPanel({ panel, isMaximized = false }: Props) {
                         edges={edges}
                         searchQuery={searchQuery}
                         fillHeight={isMaximized}
-                        layoutRevision={isMaximized ? "maximized" : "normal"}
+                        layoutRevision={
+                          isMaximized
+                            ? `maximized-${panel.id}`
+                            : `normal-${panel.id}`
+                        }
                         onSelectionChange={setGraphSelection}
-                        onNodeDoubleClick={(nodeId) =>
+                        onNodeClick={(nodeId) =>
                           expandNeighborhoodInPanel(panel.id, nodeId)
                         }
                       />

@@ -273,10 +273,11 @@ def query_neighborhood(
     limit: int = 100,
 ) -> GraphQueryResponse:
     depth = max(1, min(depth, _MAX_DEPTH))
-    cypher = """
+    # 可変長パターンの上限は Neo4j でパラメータ化できないため、検証済み depth を直埋めする
+    cypher = f"""
     MATCH (n)
     WHERE coalesce(n.id, elementId(n)) = $node_id
-    MATCH path = (n)-[*1..$depth]-(m)
+    MATCH path = (n)-[*1..{depth}]-(m)
     WITH path
     LIMIT $limit
     UNWIND nodes(path) AS node

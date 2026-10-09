@@ -11,6 +11,7 @@ export function GraphTab() {
   const setQueryInput = useGraphStore((s) => s.setQueryInput);
   const runQueryInput = useGraphStore((s) => s.runQueryInput);
   const maximizedPanelId = useGraphStore((s) => s.maximizedPanelId);
+  const toggleMaximizePanel = useGraphStore((s) => s.toggleMaximizePanel);
   const stackRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -18,6 +19,17 @@ export function GraphTab() {
     if (!stack || panels.length === 0) return;
     stack.scrollTo({ top: 0, behavior: "smooth" });
   }, [panels.length]);
+
+  useEffect(() => {
+    if (!maximizedPanelId) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        toggleMaximizePanel(maximizedPanelId);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [maximizedPanelId, toggleMaximizePanel]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();

@@ -230,9 +230,12 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           node_id: nodeId,
           depth: 1,
         });
+        if (!fetched.graph) {
+          throw new Error("Neighborhood query returned no graph data");
+        }
         useGraphStore.setState((s) => ({
           panels: s.panels.map((p) => {
-            if (p.id !== panelId || !p.data) return p;
+            if (p.id !== panelId || !p.data?.graph) return p;
             const graph = mergeGraphVisualizations(p.data.graph, fetched.graph);
             return {
               ...p,

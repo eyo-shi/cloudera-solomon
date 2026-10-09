@@ -73,6 +73,8 @@ function edgeElement(e: GraphEdgeDTO): ElementDefinition {
 }
 
 const NEW_NODE_RING_RADIUS = 110;
+const CY_MIN_ZOOM = 0.03;
+const CY_MAX_ZOOM = 10;
 
 /** 近傍展開など — 既存ノードは動かさず、追加ノードだけアンカー周りに配置する。 */
 function layoutNewNodes(cy: Core, newNodeIds: string[]): void {
@@ -262,8 +264,8 @@ interface GraphCanvasProps {
   /** 全画面表示などコンテナサイズが変わったときに Cytoscape を再レイアウトする */
   layoutRevision?: string;
   onSelectionChange?: (selection: GraphSelection | null) => void;
-  /** ノードダブルクリック — 近傍グラフを別パネルで開く等 */
-  onNodeDoubleClick?: (nodeId: string) => void;
+  /** ノードクリック — 近傍ノード・リレーションをマージする等 */
+  onNodeClick?: (nodeId: string) => void;
 }
 
 function nodeMatchesSearch(node: NodeSingular, query: string): boolean {
@@ -426,7 +428,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       fillHeight = false,
       layoutRevision,
       onSelectionChange,
-      onNodeDoubleClick,
+      onNodeClick,
     },
     ref,
   ) {
@@ -435,7 +437,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
   const layoutMenuRef = useRef<HTMLDivElement>(null);
   const layoutModeRef = useRef<GraphLayoutMode>("force");
   const onSelectionChangeRef = useRef(onSelectionChange);
-  const onNodeDoubleClickRef = useRef(onNodeDoubleClick);
+  const onNodeClickRef = useRef(onNodeClick);
   const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>("force");
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [pointerInside, setPointerInside] = useState(false);
@@ -445,7 +447,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
   layoutModeRef.current = layoutMode;
   onSelectionChangeRef.current = onSelectionChange;
-  onNodeDoubleClickRef.current = onNodeDoubleClick;
+  onNodeClickRef.current = onNodeClick;
 
   useImperativeHandle(ref, () => ({
     downloadPng: () => {
@@ -498,7 +500,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const syncViewport = () => {
       if (cancelled) return;
       cy.resize();
-      if (layoutRevision === "maximized") {
+      if (layoutRevision?.startsWith("maximized")) {
         cy.fit(undefined, 40);
       }
     };
@@ -567,7 +569,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           },
         },
       ],
-      wheelSensitivity: 0.2,
+      minZoom: CY_MIN_ZOOM,
+      maxZoom: CY_MAX_ZOOM,
+      wheelSensitivity: 0.35,
       autoungrabify: false,
     });
 
@@ -575,6 +579,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
     cy.on("tap", "node", (evt) => {
       const d = evt.target.data();
+      const nodeId = String(evt.target.id());
       evt.target.select();
       onSelectionChangeRef.current?.({
         kind: "node",
@@ -583,11 +588,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         properties: d.properties ?? {},
         extra: { primaryLabel: d.primaryLabel, labels: d.labels },
       });
-    });
-    cy.on("dbltap", "node", (evt) => {
-      const nodeId = String(evt.target.id());
       if (nodeId) {
-        onNodeDoubleClickRef.current?.(nodeId);
+        onNodeClickRef.current?.(nodeId);
       }
     });
     cy.on("tap", "edge", (evt) => {
@@ -634,7 +636,21 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         : null;
     resizeObserver?.observe(container);
 
+    const intersectionObserver =
+      typeof IntersectionObserver !== "undefined" && container
+        ? new IntersectionObserver(
+            (entries) => {
+              if (entries.some((e) => e.isIntersecting)) {
+                requestAnimationFrame(() => cy.resize());
+              }
+            },
+            { threshold: 0.05 },
+          )
+        : null;
+    intersectionObserver?.observe(container);
+
     return () => {
+      intersectionObserver?.disconnect();
       resizeObserver?.disconnect();
       detachDragPhysics();
       cy.removeListener("mousedown", "node", onNodePointerDown);
@@ -656,8 +672,12 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
   function zoomBy(factor: number) {
     const cy = cyRef.current;
     if (!cy) return;
+    const next = Math.min(
+      CY_MAX_ZOOM,
+      Math.max(CY_MIN_ZOOM, cy.zoom() * factor),
+    );
     cy.zoom({
-      level: cy.zoom() * factor,
+      level: next,
       renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
     });
   }
@@ -699,7 +719,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           className="graph-canvas-controls__btn"
           title="Zoom in"
           aria-label="Zoom in"
-          onClick={() => zoomBy(1.25)}
+          onClick={() => zoomBy(1.5)}
         >
           <IconZoomIn />
         </button>
@@ -708,7 +728,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           className="graph-canvas-controls__btn"
           title="Zoom out"
           aria-label="Zoom out"
-          onClick={() => zoomBy(0.8)}
+          onClick={() => zoomBy(1 / 1.5)}
         >
           <IconZoomOut />
         </button>

@@ -648,6 +648,13 @@ body,
   max-height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+.graph-frame--maximized .graph-frame__query-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  flex-shrink: 0;
 }
 .graph-frame--collapsed .graph-frame__query-bar {
   border-bottom: none;
@@ -728,6 +735,12 @@ body,
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
+}
+.graph-frame:not(.graph-frame--maximized) .graph-frame__split {
+  height: 320px;
+  max-height: 320px;
+  min-height: 280px;
 }
 .graph-frame--maximized .graph-frame__body {
   flex: 1;
@@ -744,8 +757,9 @@ body,
   height: 100%;
 }
 .graph-canvas-wrap:not(.graph-canvas-wrap--fill) {
-  flex: 0 1 auto;
-  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 .graph-frame--maximized .graph-frame__table-panel,
 .graph-frame--maximized .graph-frame__raw-panel {
@@ -807,7 +821,8 @@ body,
 .graph-frame__split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 220px;
-  min-height: 280px;
+  min-height: 0;
+  overflow: hidden;
 }
 .graph-frame__split--no-sidebar {
   grid-template-columns: minmax(0, 1fr);
@@ -815,7 +830,9 @@ body,
 .graph-frame__main {
   display: flex;
   flex-direction: column;
-  min-height: 280px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
   border-right: 1px solid var(--border);
   position: relative;
   min-width: 0;
@@ -825,10 +842,10 @@ body,
   min-height: 0;
 }
 .graph-frame__main .graph-canvas-wrap {
-  min-height: 280px;
+  min-height: 0;
 }
 .graph-frame__main .graph-canvas {
-  min-height: 240px;
+  min-height: 0;
 }
 .graph-result-sidebar {
   padding: 0.75rem;
@@ -1129,9 +1146,10 @@ body,
 .graph-canvas-wrap {
   position: relative;
   flex: 1;
-  min-height: 320px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 .graph-canvas-wrap--hand {
   cursor: grab;
@@ -1149,7 +1167,8 @@ body,
 }
 .graph-canvas {
   flex: 1;
-  min-height: 280px;
+  min-height: 0;
+  height: 100%;
   background: white;
 }
 .graph-canvas-controls {
