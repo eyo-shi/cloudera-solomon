@@ -193,6 +193,8 @@ def kickoff_ingestion(
     llm_strong: Optional[Any] = None,
     include_crew_result: bool = False,
     progress_callback: Optional[Callable[[str, str, str, str], None]] = None,
+    proposed_table_name: Optional[str] = None,
+    create_new_table: Optional[bool] = None,
 ) -> dict[str, Any]:
     """Ingestion Crew を 1 回実行する。
 
@@ -252,6 +254,10 @@ def kickoff_ingestion(
             if graph_ingest and node_fields:
                 inputs["node_fields"] = ", ".join(node_fields)
                 inputs["graph_ingest"] = "true"
+            if proposed_table_name and proposed_table_name.strip():
+                inputs["proposed_table_name"] = proposed_table_name.strip()
+            if create_new_table is not None:
+                inputs["create_new_table"] = "true" if create_new_table else "false"
             if progress_callback and INGESTION_PHASES:
                 p0 = INGESTION_PHASES[0]
                 _notify_phase(
@@ -265,6 +271,12 @@ def kickoff_ingestion(
                 error=str(e),
                 request_id=user_ctx.request_id,
             )
+            raw = str(e)
+            feedback = raw
+            if "Last error:" in raw:
+                feedback = raw.split("Last error:", 1)[-1].strip()
+            if "guardrail" in raw.lower() or "TRINO_DDL" in feedback:
+                return err(_ingestion_failure_error_code(feedback), feedback)
             return err(
                 ErrorCode.HTTP_UNAVAILABLE,
                 f"IngestionCrew kickoff failed: {type(e).__name__}: {e}",

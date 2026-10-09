@@ -30,6 +30,11 @@ from solomon.router.tools import (
     EntityMemoryReadTool,
     IngestionKickoffTool,
 )
+from solomon.router.ingest_target import (
+    parse_ingest_target_reply,
+    prompt_specifies_table,
+    resolve_pending_table_ingest,
+)
 from solomon.transport.user_context import UserContext
 
 
@@ -492,3 +497,38 @@ def test_ingestion_kickoff_tool_requires_user_ctx() -> None:
     result = tool._run(bucket="b", key="k", target_schema="demo")
     assert result["status"] == "error"
     assert result["error_code"] == "AUTH_MISSING"
+
+
+def test_prompt_specifies_table() -> None:
+    assert prompt_specifies_table("iceberg.demo.quality_inspection_kanken に入れて") is True
+    assert prompt_specifies_table("S3 の CSV を取り込んで") is False
+
+
+def test_parse_ingest_target_reply() -> None:
+    assert parse_ingest_target_reply("iceberg.demo.my_table を新規作成") == {
+        "target_schema": "demo",
+        "proposed_table_name": "my_table",
+        "create_new_table": True,
+    }
+    assert parse_ingest_target_reply("既存の iceberg.demo.existing に追加") == {
+        "target_schema": "demo",
+        "proposed_table_name": "existing",
+        "create_new_table": False,
+    }
+
+
+def test_resolve_pending_table_ingest() -> None:
+    entity_memory = {
+        "pending_table_ingest": {
+            "bucket": "b",
+            "key": "k.csv",
+            "target_schema": "demo",
+            "file_format": "csv",
+        }
+    }
+    resolved = resolve_pending_table_ingest(
+        "iceberg.demo.t を新規作成", entity_memory
+    )
+    assert resolved is not None
+    assert resolved["proposed_table_name"] == "t"
+    assert resolved["create_new_table"] is True

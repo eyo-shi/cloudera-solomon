@@ -137,7 +137,7 @@ body,
 }
 .pane--right {
   border-left: none;
-  background: transparent;
+  background: var(--bg);
 }
 .pane-handle {
   position: relative;
@@ -1676,7 +1676,7 @@ body,
   padding: 0;
   box-sizing: border-box;
   background: var(--workspace-panel-bg);
-  border-bottom: 1px solid var(--border);
+  border-bottom: none;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -1689,9 +1689,13 @@ body,
   padding: 0 0.75rem;
 }
 .tab-bar--right {
-  background: var(--chat-bg, var(--workspace-panel-bg));
-  border-bottom: 1px solid var(--chat-border, var(--border));
+  /* アクティブタブ・プロンプト入力と同色で、タブがその上に載っている見え方に */
+  background: var(--bg);
+  border-bottom: none;
   flex-shrink: 0;
+}
+.tab-bar--right .tab-chip:not(.tab-chip--active) {
+  background: var(--workspace-panel-bg);
 }
 .tab-chip-icon--logo {
   width: 0.875rem;
@@ -1726,20 +1730,7 @@ body,
   color: var(--text);
   background: var(--bg);
   font-weight: 500;
-  border-bottom: 1px solid var(--bg);
-  margin-bottom: -1px;
-  z-index: 2;
-}
-/* アクティブタブ直下の tab-bar 下線を確実に隠し、表示部と一体化 */
-.tab-chip--active::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  background: var(--bg);
-  pointer-events: none;
+  z-index: 1;
 }
 .tab-chip-icon {
   flex-shrink: 0;
@@ -2147,14 +2138,14 @@ body,
 
 /* --------------------------- ChatPane (Cursor-like) --------------------------- */
 .chat-pane {
-  --chat-bg: var(--workspace-panel-bg);
-  --chat-bg-elevated: #ffffff;
-  --chat-bg-input: #ffffff;
+  --chat-bg: var(--bg);
+  --chat-bg-elevated: var(--bg-alt);
+  --chat-bg-input: var(--bg);
   --chat-border: #e0e0e0;
   --chat-border-subtle: rgba(0, 0, 0, 0.08);
-  --chat-text: var(--workspace-panel-text);
-  --chat-text-muted: var(--workspace-panel-text-muted);
-  --chat-user-bg: #ffffff;
+  --chat-text: var(--text);
+  --chat-text-muted: var(--text-muted);
+  --chat-user-bg: var(--bg-alt);
   --chat-accent: #3794ff;
   --chat-accent-hover: #4da3ff;
   --chat-danger: #dc2626;
@@ -2294,7 +2285,23 @@ body,
   font-size: inherit;
 }
 .chat-turn__attachments li {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
   margin-top: 0.25rem;
+}
+.chat-turn__attachment-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  object-fit: contain;
+  opacity: 0.75;
+}
+.chat-turn__attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 .chat-turn__attachment-uri {
   display: block;
@@ -2760,8 +2767,8 @@ body,
 .chat-composer {
   flex-shrink: 0;
   padding: 0.5rem 0.75rem 0.625rem;
-  background: var(--chat-bg);
-  border-top: 1px solid var(--chat-border-subtle);
+  background: var(--bg);
+  border-top: none;
 }
 .chat-composer__box {
   position: relative;

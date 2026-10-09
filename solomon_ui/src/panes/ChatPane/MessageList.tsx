@@ -119,10 +119,14 @@ export function MessageList() {
                   <ul className="chat-turn__attachments">
                     {m.attachments.map((a) => (
                       <li key={`${a.name}-${a.s3Uri ?? "local"}`}>
-                        📎 {a.name}
-                        {a.s3Uri && (
-                          <span className="chat-turn__attachment-uri">{a.s3Uri}</span>
-                        )}
+                        <img
+                          src="/chat/paperclip.png"
+                          alt=""
+                          className="chat-turn__attachment-icon"
+                          aria-hidden="true"
+                          draggable={false}
+                        />
+                        <span className="chat-turn__attachment-name">{a.name}</span>
                       </li>
                     ))}
                   </ul>

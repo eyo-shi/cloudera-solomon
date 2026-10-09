@@ -133,7 +133,9 @@ def make_propose_schema_and_name_task(agent: Any, context: list[Task]) -> Task:
         description=(
             "サンプル値から各カラムの Trino 型を TypeInferTool で推定し、"
             "NameProposerTool で英小文字 + アンダースコアのテーブル名候補を"
-            "作れ。Trino catalog は必ず Crew inputs の {catalog} "
+            "作れ。Crew inputs の proposed_table_name が空でなければ、"
+            "それを proposed_table_name として採用し NameProposerTool は"
+            "使わない。Trino catalog は必ず Crew inputs の {catalog} "
             "(Iceberg カタログ。ossie は semantic YAML 用語であり Trino catalog "
             "名ではない) を catalog フィールドにセットする。target_schema "
             "(=Trino スキーマ) はユーザー指定の {target_schema} を使う。"

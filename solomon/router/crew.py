@@ -25,6 +25,11 @@ from solomon.router.graph_ingest import (
     parse_node_fields,
     resolve_pending_graph_ingest,
 )
+from solomon.router.ingest_target import (
+    build_ingest_target_clarification,
+    prompt_specifies_table,
+    resolve_pending_table_ingest,
+)
 from solomon.router.models import (
     DispatchPlan,
     IntentClassification,
@@ -157,9 +162,67 @@ def heuristic_classify(
     entity_memory = entity_memory or {}
     p_lower = prompt.lower()
 
-    # 0) グラフ取り込みの聞き返し (pending + フィールド名回答)
+    # 0a) 取り込み先テーブルの聞き返し (pending + 回答)
+    pending_table = resolve_pending_table_ingest(prompt, entity_memory)
+    if pending_table:
+        return IntentClassification(
+            intent="INGEST",
+            confidence=0.92,
+            extracted_args=pending_table,
+            needs_clarification=False,
+            reasoning="resolved pending_table_ingest with target table",
+        )
+
+    pending_table_raw = entity_memory.get("pending_table_ingest")
+    if (
+        isinstance(pending_table_raw, dict)
+        and pending_table_raw.get("bucket")
+        and pending_table_raw.get("key")
+    ):
+        return IntentClassification(
+            intent="INGEST",
+            confidence=0.75,
+            extracted_args={
+                "bucket": str(pending_table_raw["bucket"]),
+                "key": str(pending_table_raw["key"]),
+                "target_schema": str(
+                    pending_table_raw.get("target_schema") or "demo"
+                ),
+                "awaiting_table_target": True,
+                **(
+                    {"graph_ingest": True}
+                    if pending_table_raw.get("graph_ingest")
+                    else {}
+                ),
+            },
+            needs_clarification=True,
+            clarification_prompt=build_ingest_target_clarification(
+                key=str(pending_table_raw["key"]),
+                failure_message=pending_table_raw.get("failure_message"),
+                attempted_fq=pending_table_raw.get("attempted_fq"),
+            ),
+            reasoning="pending table ingest awaiting target specification",
+        )
+
+    # 0b) グラフ取り込みの聞き返し (pending + フィールド名回答)
     pending_ingest = resolve_pending_graph_ingest(prompt, entity_memory)
     if pending_ingest:
+        if not prompt_specifies_table(prompt) and not pending_ingest.get(
+            "proposed_table_name"
+        ):
+            return IntentClassification(
+                intent="INGEST",
+                confidence=0.9,
+                extracted_args={
+                    **pending_ingest,
+                    "awaiting_table_target": True,
+                },
+                needs_clarification=True,
+                clarification_prompt=build_ingest_target_clarification(
+                    key=str(pending_ingest.get("key") or "")
+                ),
+                reasoning="graph fields resolved; awaiting target table",
+            )
         return IntentClassification(
             intent="INGEST",
             confidence=0.92,
@@ -220,6 +283,22 @@ def heuristic_classify(
                         ),
                         reasoning="graph ingest without node_fields",
                     )
+            if not prompt_specifies_table(prompt) and not args.get(
+                "proposed_table_name"
+            ):
+                return IntentClassification(
+                    intent="INGEST",
+                    confidence=0.9,
+                    extracted_args={
+                        **args,
+                        "awaiting_table_target": True,
+                    },
+                    needs_clarification=True,
+                    clarification_prompt=build_ingest_target_clarification(
+                        key=m.group(2)
+                    ),
+                    reasoning="ingest without explicit target table",
+                )
             return IntentClassification(
                 intent="INGEST",
                 confidence=0.95,
@@ -365,10 +444,19 @@ def build_dispatch_plan(
                 ),
                 skip_child=True,
             )
+        ingest_inputs = dict(args)
+        for key in (
+            "proposed_table_name",
+            "create_new_table",
+            "node_fields",
+            "graph_ingest",
+        ):
+            if key in args and args[key] is not None:
+                ingest_inputs[key] = args[key]
         return DispatchPlan(
             intent=intent,
             child_crew="ingestion",
-            inputs=args,
+            inputs=ingest_inputs,
             response_markdown="",
             skip_child=False,
         )

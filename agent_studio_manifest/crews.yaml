@@ -127,10 +127,11 @@ crews:
     guardrail: null
   - name: propose_schema_and_name
     agent: schema_drafter
-    description: サンプル値から各カラムの Trino 型を TypeInferTool で推定し、NameProposerTool で英小文字 + アンダースコアのテーブル名候補を作れ。Trino catalog は必ず Crew
-      inputs の {catalog} (Iceberg カタログ。ossie は semantic YAML 用語であり Trino catalog 名ではない) を catalog フィールドにセットする。target_schema
-      (=Trino スキーマ) はユーザー指定の {target_schema} を使う。SimilarTableSearchTool で命名衝突と類似データセットを検索し、exact_conflicts と similar_tables
-      に積め。role (dimension/measure/time) は数値集計系を measure、date/timestamp を time、それ以外を dimension として分類する。
+    description: サンプル値から各カラムの Trino 型を TypeInferTool で推定し、NameProposerTool で英小文字 + アンダースコアのテーブル名候補を作れ。Crew inputs の proposed_table_name
+      が空でなければ、それを proposed_table_name として採用し NameProposerTool は使わない。Trino catalog は必ず Crew inputs の {catalog} (Iceberg カタログ。ossie
+      は semantic YAML 用語であり Trino catalog 名ではない) を catalog フィールドにセットする。target_schema (=Trino スキーマ) はユーザー指定の {target_schema}
+      を使う。SimilarTableSearchTool で命名衝突と類似データセットを検索し、exact_conflicts と similar_tables に積め。role (dimension/measure/time) は数値集計系を
+      measure、date/timestamp を time、それ以外を dimension として分類する。
     expected_output: ProposeSchemaAndNameResult の JSON。catalog, target_schema, proposed_table_name, columns[{name, trino_type,
       nullable, role}], partitioning, similar_tables, exact_conflicts を含む。
     output_model: ProposeSchemaAndNameResult

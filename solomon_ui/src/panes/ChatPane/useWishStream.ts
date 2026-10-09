@@ -95,7 +95,7 @@ export function useWishStream(): UseWishStream {
       }
 
       const finalPrompt = buildPromptWithAttachments(trimmed, uploaded);
-      appendUser(finalPrompt, uploaded);
+      appendUser(trimmed || "(ファイル添付)", uploaded);
       appendSolomon("");
 
       await streamWish(

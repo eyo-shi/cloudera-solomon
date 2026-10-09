@@ -55,6 +55,11 @@ from solomon.rag.crew import kickoff_knowledge_rag
 from solomon.router import DispatchPlan, RouterResult, kickoff_router
 from solomon.router.crew import build_chitchat_plan
 from solomon.router.graph_ingest import build_graph_ingest_clarification
+from solomon.router.ingest_target import (
+    build_ingest_target_clarification,
+    extract_attempted_fq_from_message,
+)
+from solomon.transport.errors import ErrorCode
 from solomon.router.s3_columns import peek_s3_column_names
 from solomon.api.setup_checks import llm_not_configured_payload
 from solomon.transport.llm_factory import build_llm_pair
@@ -141,7 +146,24 @@ async def post_wish(
             if plan.skip_child:
                 md = router_result.response_markdown or plan.response_markdown or ""
                 extracted = router_result.classification.extracted_args or {}
-                if extracted.get("awaiting_node_fields"):
+                if extracted.get("awaiting_table_target"):
+                    bucket = str(extracted.get("bucket") or "")
+                    key = str(extracted.get("key") or "")
+                    md = md or build_ingest_target_clarification(key=key)
+                    pending_table: dict[str, Any] = {
+                        "bucket": bucket,
+                        "key": key,
+                        "target_schema": extracted.get("target_schema", "demo"),
+                    }
+                    if extracted.get("graph_ingest"):
+                        pending_table["graph_ingest"] = True
+                    if extracted.get("node_fields"):
+                        pending_table["node_fields"] = extracted.get("node_fields")
+                    get_store().update_entity_memory(
+                        session.session_id,
+                        {"pending_table_ingest": pending_table},
+                    )
+                elif extracted.get("awaiting_node_fields"):
                     bucket = str(extracted.get("bucket") or "")
                     key = str(extracted.get("key") or "")
                     columns = await asyncio.to_thread(
@@ -184,6 +206,8 @@ async def post_wish(
                     target_schema=str(plan.inputs.get("target_schema") or "demo"),
                     node_fields=plan.inputs.get("node_fields"),
                     graph_ingest=bool(plan.inputs.get("graph_ingest")),
+                    proposed_table_name=plan.inputs.get("proposed_table_name"),
+                    create_new_table=plan.inputs.get("create_new_table"),
                     llm_light=llm_light,
                     llm_strong=llm_strong,
                     artifacts_created=artifacts_created,
@@ -422,6 +446,8 @@ async def _handle_ingest(
     target_schema: str,
     node_fields: Any = None,
     graph_ingest: bool = False,
+    proposed_table_name: Any = None,
+    create_new_table: Any = None,
     llm_light: Optional[Any],
     llm_strong: Optional[Any],
     artifacts_created: list[str],
@@ -473,6 +499,21 @@ async def _handle_ingest(
         # ContextVar は thread ごとに独立なので、この thread 内で set する
         token = set_user_context(scoped_ctx)
         try:
+            ptn = (
+                str(proposed_table_name).strip()
+                if proposed_table_name is not None
+                else None
+            )
+            cnt: Optional[bool] = None
+            if create_new_table is not None:
+                if isinstance(create_new_table, bool):
+                    cnt = create_new_table
+                else:
+                    cnt = str(create_new_table).strip().lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                    )
             return kickoff_ingestion(
                 user_ctx=scoped_ctx,
                 bucket=bucket,
@@ -480,6 +521,8 @@ async def _handle_ingest(
                 target_schema=target_schema,
                 node_fields=node_fields,
                 graph_ingest=graph_ingest,
+                proposed_table_name=ptn or None,
+                create_new_table=cnt,
                 llm_light=llm_light,
                 llm_strong=llm_strong,
                 include_crew_result=True,
@@ -522,12 +565,57 @@ async def _handle_ingest(
     if result.get("status") != "ok":
         code = result.get("error_code", "INGESTION_FAILED")
         msg = result.get("message", "Ingestion failed")
-        error_holder[0] = code
         yield sse_step(
             "IngestionCrew",
             "error",
             f"失敗 · {format_duration_seconds(elapsed)}",
         )
+        recoverable = (
+            code
+            in (
+                ErrorCode.TRINO_DDL_FAILED,
+                ErrorCode.PERM_CREATE_DENIED,
+                ErrorCode.SCHEMA_NAME_CONFLICT,
+                "TRINO_DDL_FAILED",
+            )
+            or "TRINO_DDL_FAILED" in msg
+            or "Table does not exist in Trino" in msg
+            or "作成を確認できません" in msg
+        )
+        if recoverable:
+            attempted = extract_attempted_fq_from_message(msg)
+            clarify = build_ingest_target_clarification(
+                key=key,
+                failure_message=msg,
+                attempted_fq=attempted,
+            )
+            get_store().update_entity_memory(
+                session_id,
+                {
+                    "pending_table_ingest": {
+                        "bucket": bucket,
+                        "key": key,
+                        "target_schema": target_schema,
+                        "failure_message": msg,
+                        "attempted_fq": attempted,
+                        **(
+                            {"graph_ingest": True}
+                            if graph_ingest
+                            else {}
+                        ),
+                        **(
+                            {"node_fields": node_fields}
+                            if node_fields
+                            else {}
+                        ),
+                    },
+                    "pending_graph_ingest": None,
+                },
+            )
+            response_md_parts.append(clarify)
+            yield sse_token(clarify)
+            return
+        error_holder[0] = code
         yield sse_error(code, msg)
         return
 
@@ -550,6 +638,7 @@ async def _handle_ingest(
                 "last_s3_path": f"s3://{bucket}/{key}",
                 "last_ossie_path": report.get("ossie_yaml_path"),
                 "pending_graph_ingest": None,
+                "pending_table_ingest": None,
             },
         )
         yield sse_artifact(
