@@ -9,7 +9,8 @@ IDBroker で発行されたエンドユーザー STS 資格情報で S3 を叩�
 * ``POST /api/files/upload``  — チャット添付ファイルを S3 に配置
 * ``GET /api/files/list``     — 指定 prefix 下の一覧 (フォルダ + オブジェクト)
 * ``GET /api/files/preview``  — フォーマット判定 + 中身プレビュー
-  (CSV/TSV/JSON/JSONL/Excel/Parquet 対応)
+  (CSV/TSV/JSON/JSONL/Excel/Parquet/PDF 対応)
+* ``GET /api/files/raw``      — バイナリを inline 配信 (PDF ビューア用)
 
 プレビューは Range-GET で先頭 :data:`_PREVIEW_RANGE_BYTES` (2 MB) のみ取得し、
 :mod:`solomon.tools.format` / :mod:`solomon.tools.excel` の判定ロジックを共用する
@@ -26,6 +27,7 @@ import uuid
 from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 
 from solomon.api.auth import require_user_context
 from solomon.transport.errors import ErrorCode, err
@@ -51,6 +53,7 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 # / :class:`ParquetMetaTool` の要件)。
 _PREVIEW_RANGE_BYTES = 2 * 1024 * 1024  # 2 MB
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+_MAX_RAW_BYTES = 50 * 1024 * 1024  # 50 MB — /raw inline 上限
 # CDP datalake バケットの IAM が data/* のみ PutObject 許可のため prefix を固定。
 _UPLOAD_KEY_PREFIX = "data/solomon-uploads"
 
@@ -315,14 +318,19 @@ def preview_object(
 
     fmt = magic_result.get("format", "unknown")
     ext_format = _preview_format_from_extension(key)
+    resolved_format = ext_format or fmt
     base: dict[str, Any] = {
         "bucket": bucket,
         "key": key,
         "size": total_size,
         "content_type": content_type,
-        "format": ext_format or fmt,
+        "format": resolved_format,
         "truncated": total_size > len(head_bytes),
     }
+
+    if resolved_format == "pdf":
+        base.update(_preview_pdf_meta(total_size))
+        return base
 
     # 3) フォーマット別のプレビュー
     if ext_format:
@@ -356,6 +364,58 @@ def preview_object(
 
 
 # ------------------------------------------------------------------ #
+# /api/files/raw  — PDF 等の inline 配信
+# ------------------------------------------------------------------ #
+@router.get("/raw")
+def stream_raw_object(
+    user_ctx: Annotated[UserContext, Depends(require_user_context)],
+    bucket: Annotated[str, Query(min_length=1, max_length=256)],
+    key: Annotated[str, Query(min_length=1, max_length=2048)],
+) -> StreamingResponse:
+    """S3 オブジェクトをそのままストリーム (File Preview の PDF embed 用)。"""
+    client = s3_client_for_user(user_ctx)
+    if isinstance(client, dict):
+        raise HTTPException(status_code=502, detail=client)
+
+    try:
+        head = client.head_object(Bucket=bucket, Key=key)
+        total_size = int(head.get("ContentLength") or 0)
+        if total_size > _MAX_RAW_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=err(
+                    ErrorCode.FORMAT_UNSUPPORTED,
+                    f"Object exceeds inline limit ({_MAX_RAW_BYTES} bytes)",
+                ),
+            )
+        resp = client.get_object(Bucket=bucket, Key=key)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502, detail=map_s3_error(e, bucket, key)
+        ) from e
+
+    filename = key.rsplit("/", 1)[-1]
+    media_type = _media_type_for_key(key, resp.get("ContentType"))
+
+    def _iter_chunks():
+        body = resp["Body"]
+        for chunk in body.iter_chunks(chunk_size=256 * 1024):
+            if chunk:
+                yield chunk
+
+    return StreamingResponse(
+        _iter_chunks(),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{_ascii_filename(filename)}"',
+            "Cache-Control": "private, max-age=120",
+        },
+    )
+
+
+# ------------------------------------------------------------------ #
 # 内部ヘルパ: フォーマット別プレビュー
 # ------------------------------------------------------------------ #
 def _preview_format_from_extension(key: str) -> str | None:
@@ -372,7 +432,29 @@ def _preview_format_from_extension(key: str) -> str | None:
         return "markdown"
     if ext in {"txt", "conf", "cfg", "ini", "properties", "env"}:
         return "text"
+    if ext == "pdf":
+        return "pdf"
     return None
+
+
+def _preview_pdf_meta(total_size: int) -> dict[str, Any]:
+    return {
+        "embed_raw": True,
+        "too_large_for_inline": total_size > _MAX_RAW_BYTES,
+    }
+
+
+def _media_type_for_key(key: str, content_type: str | None) -> str:
+    if key.lower().endswith(".pdf"):
+        return "application/pdf"
+    if content_type and content_type != "application/octet-stream":
+        return content_type
+    return "application/octet-stream"
+
+
+def _ascii_filename(name: str) -> str:
+    safe = re.sub(r"[^\x20-\x7e]+", "_", name) or "download"
+    return safe.replace('"', "'")
 
 
 def _preview_text(head_bytes: bytes) -> dict[str, Any]:

@@ -22,6 +22,9 @@ export interface ChatMessage {
   artifactIds?: string[];
   /** エラーコード (Solomon 側) */
   errorCode?: string;
+  errorMessage?: string;
+  /** このターンの Router / Crew 実行ログ (SSE step) */
+  activitySteps?: StepEntry[];
   createdAt: number;
 }
 
@@ -46,6 +49,9 @@ interface ChatState {
   appendToLastSolomon: (delta: string) => void;
   removeLastEmptySolomon: () => void;
   addStep: (step: StepEntry) => void;
+  markLastRunningStepError: (message: string) => void;
+  attachStepsToLastSolomon: () => void;
+  setLastSolomonError: (errorCode: string, message: string) => void;
   clearSteps: () => void;
   setStreaming: (v: boolean) => void;
   addArtifactToLastSolomon: (artifactId: string) => void;
@@ -135,7 +141,61 @@ export const useChatStore = create<ChatState>((set) => ({
       return { messages: s.messages.filter((_, i) => i !== realIdx) };
     });
   },
-  addStep: (step) => set((s) => ({ steps: [...s.steps, step] })),
+  addStep: (step) =>
+    set((s) => {
+      const idx = s.steps.findIndex((x) => x.agent === step.agent);
+      if (idx >= 0) {
+        const next = [...s.steps];
+        next[idx] = step;
+        return { steps: next };
+      }
+      return { steps: [...s.steps, step] };
+    }),
+  markLastRunningStepError: (message) =>
+    set((s) => {
+      let targetIdx = -1;
+      for (let i = s.steps.length - 1; i >= 0; i -= 1) {
+        if (s.steps[i].status === "running") {
+          targetIdx = i;
+          break;
+        }
+      }
+      if (targetIdx < 0) return s;
+      const next = [...s.steps];
+      next[targetIdx] = {
+        ...next[targetIdx],
+        status: "error",
+        message,
+        at: Date.now(),
+      };
+      return { steps: next };
+    }),
+  attachStepsToLastSolomon: () =>
+    set((s) => {
+      if (s.steps.length === 0) return s;
+      const idx = [...s.messages].reverse().findIndex((m) => m.role === "solomon");
+      if (idx < 0) return { steps: [] };
+      const realIdx = s.messages.length - 1 - idx;
+      const nextMessages = [...s.messages];
+      nextMessages[realIdx] = {
+        ...nextMessages[realIdx],
+        activitySteps: [...s.steps],
+      };
+      return { messages: nextMessages, steps: [] };
+    }),
+  setLastSolomonError: (errorCode, message) =>
+    set((s) => {
+      const idx = [...s.messages].reverse().findIndex((m) => m.role === "solomon");
+      if (idx < 0) return s;
+      const realIdx = s.messages.length - 1 - idx;
+      const next = [...s.messages];
+      next[realIdx] = {
+        ...next[realIdx],
+        errorCode,
+        errorMessage: message,
+      };
+      return { messages: next };
+    }),
   clearSteps: () => set({ steps: [] }),
   setStreaming: (v) => set({ streaming: v }),
   addArtifactToLastSolomon: (artifactId) => {

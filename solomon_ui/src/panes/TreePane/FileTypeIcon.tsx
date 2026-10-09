@@ -1,4 +1,6 @@
+import { PdfFileIcon } from "./PdfFileIcon";
 import {
+  fileExtension,
   type FileIconVariant,
   resolveSetiFileIcon,
 } from "./setiFileIcons";
@@ -15,6 +17,9 @@ export function FileTypeIcon({
   className = "tree-icon seti-file-icon",
   variant = "default",
 }: FileTypeIconProps) {
+  if (fileExtension(filename) === "pdf") {
+    return <PdfFileIcon className={className} />;
+  }
   const { glyph, color } = resolveSetiFileIcon(filename, variant);
   return (
     <span className={className} style={{ color }} aria-hidden="true">

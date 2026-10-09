@@ -132,7 +132,7 @@ def inspect_table_guardrail(
     テーブル未存在 / SELECT 権限なしの場合、SummaryWriter を呼ばずに終了する。
     (LLM トークンの無駄と、ユーザーへの誤解を招くサマリーの生成を防ぐ)。
     """
-    from solomon.transport.guardrail import parse_guardrail_model
+    from solomon.transport.guardrail import guardrail_pass_model, parse_guardrail_model
 
     result, err_msg = parse_guardrail_model(output, TableInspectionResult)
     if result is None:
@@ -148,7 +148,7 @@ def inspect_table_guardrail(
             f"SELECT permission denied on {result.fq_table_name!r}: "
             f"{result.message or 'contact the workspace admin'}."
         )
-    return True, None
+    return guardrail_pass_model(result)
 
 
 # ------------------------------------------------------------------ #
@@ -268,7 +268,7 @@ def ensure_cdv_running_guardrail(
 
     Crew.ai の guardrail 契約は ``(ok, feedback)``。ok=False で後段が走らない。
     """
-    from solomon.transport.guardrail import parse_guardrail_model
+    from solomon.transport.guardrail import guardrail_pass_model, parse_guardrail_model
 
     result, err_msg = parse_guardrail_model(output, CDVStartupResult)
     if result is None:
@@ -281,7 +281,7 @@ def ensure_cdv_running_guardrail(
             "Ask the user to start Cloudera Data Visualization from the "
             "Workbench Data menu once."
         )
-    return True, None
+    return guardrail_pass_model(result)
 
 
 __all__ = [

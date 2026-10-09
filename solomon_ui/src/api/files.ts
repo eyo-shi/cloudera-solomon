@@ -70,6 +70,11 @@ export interface UseFilePreviewArgs {
   rows?: number;
 }
 
+export function fileRawUrl(bucket: string, key: string): string {
+  const params = new URLSearchParams({ bucket, key });
+  return `/api/files/raw?${params.toString()}`;
+}
+
 export function useFilePreview({
   bucket,
   key,

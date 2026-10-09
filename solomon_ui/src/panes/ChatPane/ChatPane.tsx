@@ -14,7 +14,6 @@ import { useChatStore } from "../../stores/chatStore";
 import { MessageList } from "./MessageList";
 import { PromptInput } from "./PromptInput";
 import { SetupGuide } from "./SetupGuide";
-import { StepIndicator } from "./StepIndicator";
 import { useWishStream } from "./useWishStream";
 
 export function ChatPane() {
@@ -38,7 +37,6 @@ export function ChatPane() {
       </div>
       <div className="chat-scroll">
         <MessageList />
-        <StepIndicator />
         {setupErrors.map((error) => (
           <SetupGuide
             key={error.errorCode}

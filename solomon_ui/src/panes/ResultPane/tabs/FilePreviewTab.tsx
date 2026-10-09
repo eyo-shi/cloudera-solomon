@@ -8,6 +8,7 @@
  *   excel       -> シートタブ + データグリッド
  *   parquet     -> スキーマ + サンプル行数
  *   markdown    -> Markdown ソース / Preview 切替
+ *   pdf         -> ブラウザ内 PDF ビューア (iframe)
  *   text/log/yaml -> 行番号付きプレーンテキスト
  *   その他      -> フォーマット + head_bytes を表示
  */
@@ -15,9 +16,10 @@ import { Fragment, useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
-import { useFilePreview } from "../../../api/files";
+import { fileRawUrl, useFilePreview } from "../../../api/files";
 import { useTabStore } from "../../../stores/tabStore";
 import type { FilePreviewResponse, TabDescriptor } from "../../../types";
+import { fileExtension } from "../../TreePane/setiFileIcons";
 
 type MarkdownViewMode = "markdown" | "preview";
 
@@ -76,6 +78,8 @@ export function FilePreviewTab({ tab }: Props) {
         )}
       </div>
       <FormatBody
+        bucket={bucket}
+        objectKey={key}
         data={data}
         sheet={sheet}
         setSheet={setSheet}
@@ -123,17 +127,32 @@ function MarkdownViewToggle({
 }
 
 function FormatBody({
+  bucket,
+  objectKey,
   data,
   sheet,
   setSheet,
   markdownView,
 }: {
+  bucket: string;
+  objectKey: string;
   data: FilePreviewResponse;
   sheet: string | undefined;
   setSheet: (s: string | undefined) => void;
   markdownView: MarkdownViewMode;
 }) {
-  switch (data.format) {
+  const format =
+    data.format ?? (fileExtension(objectKey) === "pdf" ? "pdf" : undefined);
+
+  switch (format) {
+    case "pdf":
+      return (
+        <PdfPreviewBody
+          bucket={bucket}
+          objectKey={objectKey}
+          tooLarge={Boolean(data.too_large_for_inline)}
+        />
+      );
     case "csv":
     case "tsv":
       return (
@@ -178,10 +197,91 @@ function FormatBody({
     default:
       return (
         <p className="placeholder">
-          未対応フォーマット (format={data.format ?? "unknown"})
+          未対応フォーマット (format={format ?? "unknown"})
         </p>
       );
   }
+}
+
+function PdfPreviewBody({
+  bucket,
+  objectKey,
+  tooLarge,
+}: {
+  bucket: string;
+  objectKey: string;
+  tooLarge: boolean;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tooLarge) {
+      setError("PDF が大きすぎます (50MB 上限)。S3 から直接ダウンロードしてください。");
+      return;
+    }
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    setError(null);
+    setBlobUrl(null);
+
+    void (async () => {
+      try {
+        const res = await fetch(fileRawUrl(bucket, objectKey), {
+          credentials: "include",
+        });
+        if (!res.ok) {
+          let detail = res.statusText;
+          try {
+            const payload = await res.json();
+            detail =
+              payload?.detail?.message ??
+              payload?.detail ??
+              payload?.message ??
+              detail;
+          } catch {
+            /* ignore */
+          }
+          throw new Error(String(detail));
+        }
+        const blob = await res.blob();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [bucket, objectKey, tooLarge]);
+
+  if (error) {
+    return (
+      <div className="tab-error">
+        <strong>PDF プレビュー失敗</strong>
+        <p>{error}</p>
+      </div>
+    );
+  }
+  if (!blobUrl) {
+    return <p className="placeholder">PDF を読み込み中…</p>;
+  }
+
+  return (
+    <div className="pdf-preview-wrap">
+      <iframe
+        className="pdf-preview-frame"
+        src={blobUrl}
+        title={`PDF: ${objectKey.split("/").pop() ?? objectKey}`}
+      />
+    </div>
+  );
 }
 
 // ---------------- format-specific bodies ---------------- //

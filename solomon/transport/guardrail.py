@@ -62,4 +62,9 @@ def parse_guardrail_model(output: Any, model: type[T]) -> tuple[Optional[T], Opt
     return None, f"guardrail: unexpected output type: {type(output).__name__}"
 
 
-__all__ = ["unwrap_task_output", "parse_guardrail_model"]
+def guardrail_pass_model(result: BaseModel) -> tuple[bool, str]:
+    """CrewAI 0.8+ — guardrail 成功時は第2要素に None 不可。正規化済み JSON を返す。"""
+    return True, result.model_dump_json()
+
+
+__all__ = ["unwrap_task_output", "parse_guardrail_model", "guardrail_pass_model"]

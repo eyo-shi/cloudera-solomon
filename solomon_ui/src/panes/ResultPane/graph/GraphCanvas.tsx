@@ -46,11 +46,8 @@ function ellipsizeNodeLabel(label: string, maxWidth: number): string {
   return ellipsis;
 }
 
-function toElements(
-  nodes: GraphNodeDTO[],
-  edges: GraphEdgeDTO[],
-): ElementDefinition[] {
-  const nodeEls: ElementDefinition[] = nodes.map((n) => ({
+function nodeElement(n: GraphNodeDTO): ElementDefinition {
+  return {
     data: {
       id: n.id,
       label: ellipsizeNodeLabel(n.caption, NODE_LABEL_MAX_WIDTH),
@@ -60,8 +57,11 @@ function toElements(
       color: primaryNodeColor(n.labels),
       properties: n.properties,
     },
-  }));
-  const edgeEls: ElementDefinition[] = edges.map((e) => ({
+  };
+}
+
+function edgeElement(e: GraphEdgeDTO): ElementDefinition {
+  return {
     data: {
       id: e.id,
       source: e.source,
@@ -69,8 +69,129 @@ function toElements(
       label: e.type,
       properties: e.properties,
     },
-  }));
-  return [...nodeEls, ...edgeEls];
+  };
+}
+
+const NEW_NODE_RING_RADIUS = 110;
+
+/** 近傍展開など — 既存ノードは動かさず、追加ノードだけアンカー周りに配置する。 */
+function layoutNewNodes(cy: Core, newNodeIds: string[]): void {
+  if (newNodeIds.length === 0) return;
+  const newSet = new Set(newNodeIds);
+  const placed = new Set<string>();
+
+  function anchoredNeighbors(id: string): NodeSingular[] {
+    const node = cy.getElementById(id);
+    if (node.empty()) return [];
+    return node.neighborhood("node").filter((n) => {
+      const nid = n.id();
+      return nid !== id && (!newSet.has(nid) || placed.has(nid));
+    }) as unknown as NodeSingular[];
+  }
+
+  let progress = true;
+  let guard = 0;
+  while (progress && guard++ < newNodeIds.length * 4) {
+    progress = false;
+    for (const id of newNodeIds) {
+      if (placed.has(id)) continue;
+      const anchors = anchoredNeighbors(id);
+      if (anchors.length === 0) continue;
+
+      const anchor = anchors[0];
+      const ap = anchor.position();
+      const peers = newNodeIds.filter(
+        (nid) =>
+          !placed.has(nid) &&
+          anchoredNeighbors(nid).some((a) => a.id() === anchor.id()),
+      );
+      const idx = Math.max(0, peers.indexOf(id));
+      const count = Math.max(peers.length, 1);
+      const angle = (2 * Math.PI * idx) / count - Math.PI / 2;
+      cy.getElementById(id).position({
+        x: ap.x + NEW_NODE_RING_RADIUS * Math.cos(angle),
+        y: ap.y + NEW_NODE_RING_RADIUS * Math.sin(angle),
+      });
+      placed.add(id);
+      progress = true;
+    }
+  }
+
+  for (const id of newNodeIds) {
+    if (placed.has(id)) continue;
+    const node = cy.getElementById(id);
+    if (node.empty()) continue;
+    const others = cy.nodes().not(node);
+    if (others.length === 0) {
+      node.position({ x: 0, y: 0 });
+      continue;
+    }
+    const bb = others.boundingBox();
+    const cx = (bb.x1 + bb.x2) / 2;
+    const cyMid = (bb.y1 + bb.y2) / 2;
+    node.position({ x: cx + NEW_NODE_RING_RADIUS, y: cyMid });
+  }
+}
+
+function syncGraphElements(
+  cy: Core,
+  nodes: GraphNodeDTO[],
+  edges: GraphEdgeDTO[],
+  layoutMode: GraphLayoutMode,
+): void {
+  const desiredNodeIds = new Set(nodes.map((n) => n.id));
+  const desiredEdgeIds = new Set(edges.map((e) => e.id));
+
+  cy.nodes().forEach((n) => {
+    if (!desiredNodeIds.has(n.id())) n.remove();
+  });
+  cy.edges().forEach((e) => {
+    if (!desiredEdgeIds.has(e.id())) e.remove();
+  });
+
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  cy.nodes().forEach((el) => {
+    const dto = nodeById.get(el.id());
+    if (!dto) return;
+    el.data({
+      label: ellipsizeNodeLabel(dto.caption, NODE_LABEL_MAX_WIDTH),
+      fullLabel: dto.caption,
+      labels: dto.labels.join(", "),
+      primaryLabel: dto.labels[0] ?? "Node",
+      color: primaryNodeColor(dto.labels),
+      properties: dto.properties,
+    });
+  });
+
+  const existingNodeIds = new Set(cy.nodes().map((n) => n.id()));
+  const newNodes = nodes.filter((n) => !existingNodeIds.has(n.id));
+  const existingEdgeIds = new Set(cy.edges().map((e) => e.id()));
+  const newEdges = edges.filter((e) => !existingEdgeIds.has(e.id));
+
+  const isInitialPopulation = cy.nodes().length === 0 && nodes.length > 0;
+
+  if (newNodes.length > 0 || newEdges.length > 0) {
+    cy.add([
+      ...newNodes.map(nodeElement),
+      ...newEdges.map(edgeElement),
+    ]);
+  }
+
+  if (isInitialPopulation) {
+    cy.layout(
+      layoutOptions(
+        layoutMode,
+        { nodeCount: nodes.length, edgeCount: edges.length },
+        false,
+      ),
+    ).run();
+    cy.fit(undefined, 40);
+  } else if (newNodes.length > 0) {
+    layoutNewNodes(
+      cy,
+      newNodes.map((n) => n.id),
+    );
+  }
 }
 
 interface LayoutGraphShape {
@@ -136,9 +257,13 @@ interface GraphCanvasProps {
   nodes: GraphNodeDTO[];
   edges: GraphEdgeDTO[];
   searchQuery?: string;
+  /** 結果パネル全画面時 — キャンバスを親の高さいっぱいに伸ばす */
+  fillHeight?: boolean;
   /** 全画面表示などコンテナサイズが変わったときに Cytoscape を再レイアウトする */
   layoutRevision?: string;
   onSelectionChange?: (selection: GraphSelection | null) => void;
+  /** ノードダブルクリック — 近傍グラフを別パネルで開く等 */
+  onNodeDoubleClick?: (nodeId: string) => void;
 }
 
 function nodeMatchesSearch(node: NodeSingular, query: string): boolean {
@@ -294,7 +419,15 @@ const LAYOUT_ITEMS: Array<{
 
 export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
   function GraphCanvas(
-    { nodes, edges, searchQuery = "", layoutRevision, onSelectionChange },
+    {
+      nodes,
+      edges,
+      searchQuery = "",
+      fillHeight = false,
+      layoutRevision,
+      onSelectionChange,
+      onNodeDoubleClick,
+    },
     ref,
   ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -302,11 +435,17 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
   const layoutMenuRef = useRef<HTMLDivElement>(null);
   const layoutModeRef = useRef<GraphLayoutMode>("force");
   const onSelectionChangeRef = useRef(onSelectionChange);
+  const onNodeDoubleClickRef = useRef(onNodeDoubleClick);
   const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>("force");
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+  const [pointerInside, setPointerInside] = useState(false);
+  const [nodeGrabbing, setNodeGrabbing] = useState(false);
+  const setNodeGrabbingRef = useRef(setNodeGrabbing);
+  setNodeGrabbingRef.current = setNodeGrabbing;
 
   layoutModeRef.current = layoutMode;
   onSelectionChangeRef.current = onSelectionChange;
+  onNodeDoubleClickRef.current = onNodeDoubleClick;
 
   useImperativeHandle(ref, () => ({
     downloadPng: () => {
@@ -355,18 +494,28 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    const frame = requestAnimationFrame(() => {
+    let cancelled = false;
+    const syncViewport = () => {
+      if (cancelled) return;
       cy.resize();
-      cy.fit(undefined, 40);
+      if (layoutRevision === "maximized") {
+        cy.fit(undefined, 40);
+      }
+    };
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(syncViewport);
     });
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(id);
+    };
   }, [layoutRevision]);
 
   useEffect(() => {
     if (!containerRef.current) return;
     const cy = cytoscape({
       container: containerRef.current,
-      elements: toElements(nodes, edges),
+      elements: [],
       style: [
         {
           selector: "node",
@@ -418,11 +567,6 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           },
         },
       ],
-      layout: layoutOptions(
-        layoutModeRef.current,
-        { nodeCount: nodes.length, edgeCount: edges.length },
-        false,
-      ),
       wheelSensitivity: 0.2,
       autoungrabify: false,
     });
@@ -439,6 +583,12 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         properties: d.properties ?? {},
         extra: { primaryLabel: d.primaryLabel, labels: d.labels },
       });
+    });
+    cy.on("dbltap", "node", (evt) => {
+      const nodeId = String(evt.target.id());
+      if (nodeId) {
+        onNodeDoubleClickRef.current?.(nodeId);
+      }
     });
     cy.on("tap", "edge", (evt) => {
       const d = evt.target.data();
@@ -458,7 +608,21 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       }
     });
 
-    cy.fit(undefined, 40);
+    const releaseNodeGrab = () => setNodeGrabbingRef.current(false);
+    const onNodePointerDown = () => {
+      setNodeGrabbingRef.current(true);
+      const onWindowRelease = () => {
+        releaseNodeGrab();
+        window.removeEventListener("mouseup", onWindowRelease);
+        window.removeEventListener("touchend", onWindowRelease);
+      };
+      window.addEventListener("mouseup", onWindowRelease);
+      window.addEventListener("touchend", onWindowRelease);
+    };
+    cy.on("mousedown", "node", onNodePointerDown);
+    cy.on("touchstart", "node", onNodePointerDown);
+    cy.on("free", "node", releaseNodeGrab);
+
     cyRef.current = cy;
 
     const container = containerRef.current;
@@ -473,10 +637,20 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     return () => {
       resizeObserver?.disconnect();
       detachDragPhysics();
+      cy.removeListener("mousedown", "node", onNodePointerDown);
+      cy.removeListener("touchstart", "node", onNodePointerDown);
+      cy.removeListener("free", "node", releaseNodeGrab);
       onSelectionChangeRef.current?.(null);
+      setNodeGrabbingRef.current(false);
       cy.destroy();
       cyRef.current = null;
     };
+  }, []);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    syncGraphElements(cy, nodes, edges, layoutModeRef.current);
   }, [nodes, edges]);
 
   function zoomBy(factor: number) {
@@ -503,8 +677,21 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
   const activeLayout = LAYOUT_ITEMS.find((item) => item.mode === layoutMode)!;
 
+  const wrapClassName =
+    "graph-canvas-wrap" +
+    (fillHeight ? " graph-canvas-wrap--fill" : "") +
+    (pointerInside ? " graph-canvas-wrap--hand" : "") +
+    (nodeGrabbing ? " graph-canvas-wrap--grabbing" : "");
+
   return (
-    <div className="graph-canvas-wrap">
+    <div
+      className={wrapClassName}
+      onMouseEnter={() => setPointerInside(true)}
+      onMouseLeave={() => {
+        setPointerInside(false);
+        setNodeGrabbing(false);
+      }}
+    >
       <div ref={containerRef} className="graph-canvas" />
       <div className="graph-canvas-controls" ref={layoutMenuRef}>
         <button

@@ -118,7 +118,7 @@ def _make_inspection(
 def test_guardrail_passes_when_table_ok() -> None:
     ok, feedback = inspect_table_guardrail(_make_inspection())
     assert ok is True
-    assert feedback is None
+    assert feedback and "exists" in feedback
 
 
 def test_guardrail_blocks_when_table_not_found() -> None:
@@ -152,7 +152,7 @@ def test_guardrail_accepts_dict_output() -> None:
         }
     )
     assert ok is True
-    assert feedback is None
+    assert feedback and "exists" in feedback
 
 
 def test_guardrail_rejects_broken_output() -> None:
@@ -355,7 +355,7 @@ def test_ensure_cdv_running_guardrail_passes_when_running() -> None:
         CDVStartupResult(running=True, endpoint="https://cdv.example/arc")
     )
     assert ok is True
-    assert feedback is None
+    assert feedback and "exists" in feedback
 
 
 def test_ensure_cdv_running_guardrail_blocks_when_not_running() -> None:
@@ -378,7 +378,7 @@ def test_ensure_cdv_running_guardrail_accepts_dict_output() -> None:
         {"running": True, "endpoint": "https://cdv.example/arc"}
     )
     assert ok is True
-    assert feedback is None
+    assert feedback and "exists" in feedback
 
 
 def test_ensure_cdv_running_guardrail_rejects_broken_output() -> None:

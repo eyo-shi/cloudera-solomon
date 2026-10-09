@@ -342,7 +342,7 @@ def conflict_permissions_guardrail(
     を返す関数を受け取る。ok=False で Crew は次タスクに進まず停止する。
     """
     from solomon.ingestion.permissions import verify_create_gate_from_fq
-    from solomon.transport.guardrail import parse_guardrail_model
+    from solomon.transport.guardrail import guardrail_pass_model, parse_guardrail_model
 
     result, err_msg = parse_guardrail_model(output, ConflictAndPermissionsResult)
     if result is None:
@@ -362,7 +362,7 @@ def conflict_permissions_guardrail(
             f"CREATE permission denied on {result.resolved_table!r}: "
             f"{result.message or 'contact the workspace admin'}."
         )
-    return True, None
+    return guardrail_pass_model(result)
 
 
 __all__ = [

@@ -60,7 +60,7 @@ def test_guardrail_rechecks_fq_with_iceberg(monkeypatch) -> None:
     )
     ok_, msg = conflict_permissions_guardrail(out)
     assert ok_ is True
-    assert msg is None
+    assert msg and "has_create_priv" in msg
 
 
 def test_conflict_result_normalizes_resolved_table() -> None:

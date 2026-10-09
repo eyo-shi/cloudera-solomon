@@ -475,6 +475,25 @@ def test_files_preview_json_includes_json_field(client: TestClient) -> None:
     assert body["json"] == {"ok": True}
 
 
+def test_files_preview_pdf(client: TestClient) -> None:
+    pdf_bytes = b"%PDF-1.4\n" + b"\x00" * 64
+    fake_client = mock.MagicMock()
+    fake_client.get_object.side_effect = _fake_get_object(
+        pdf_bytes, content_type="application/pdf"
+    )
+    with mock.patch(
+        "solomon.api.routes.files.s3_client_for_user", return_value=fake_client
+    ):
+        r = client.get(
+            "/api/files/preview?bucket=demo&key=docs/report.pdf",
+            headers={"Authorization": "Bearer fake.jwt.token"},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["format"] == "pdf"
+    assert body.get("embed_raw") is True
+
+
 def test_files_preview_unsupported_format(client: TestClient) -> None:
     """PNG のような未対応形式は format + note を返す (200)。"""
     png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100

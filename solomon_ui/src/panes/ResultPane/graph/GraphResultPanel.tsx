@@ -18,6 +18,7 @@ export type { GraphPanelView };
 
 interface Props {
   panel: GraphResultPanelState;
+  isMaximized?: boolean;
 }
 
 function IconMaximize({ active }: { active?: boolean }) {
@@ -308,10 +309,12 @@ function propertyTableFromGraph(
   return { columns, rows };
 }
 
-export function GraphResultPanel({ panel }: Props) {
+export function GraphResultPanel({ panel, isMaximized = false }: Props) {
   const removePanel = useGraphStore((s) => s.removePanel);
   const toggleMaximizePanel = useGraphStore((s) => s.toggleMaximizePanel);
-  const isMaximized = useGraphStore((s) => s.maximizedPanelId === panel.id);
+  const expandNeighborhoodInPanel = useGraphStore(
+    (s) => s.expandNeighborhoodInPanel,
+  );
   const viewModes = useMemo(() => resolveViewModes(panel), [
     panel.allowedViews,
     panel.queryType,
@@ -486,8 +489,12 @@ export function GraphResultPanel({ panel }: Props) {
                         nodes={nodes}
                         edges={edges}
                         searchQuery={searchQuery}
+                        fillHeight={isMaximized}
                         layoutRevision={isMaximized ? "maximized" : "normal"}
                         onSelectionChange={setGraphSelection}
+                        onNodeDoubleClick={(nodeId) =>
+                          expandNeighborhoodInPanel(panel.id, nodeId)
+                        }
                       />
                     )}
                   </div>

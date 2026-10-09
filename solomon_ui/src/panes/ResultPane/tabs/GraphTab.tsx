@@ -61,7 +61,11 @@ export function GraphTab() {
         {panels.map((panel) => {
           if (maximizedPanelId && panel.id !== maximizedPanelId) return null;
           return (
-            <GraphResultPanel key={panel.id} panel={panel} />
+            <GraphResultPanel
+              key={panel.id}
+              panel={panel}
+              isMaximized={maximizedPanelId === panel.id}
+            />
           );
         })}
       </div>

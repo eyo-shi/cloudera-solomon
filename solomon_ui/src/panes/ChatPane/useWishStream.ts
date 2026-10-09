@@ -40,6 +40,9 @@ export function useWishStream(): UseWishStream {
   const appendToLastSolomon = useChatStore((s) => s.appendToLastSolomon);
   const removeLastEmptySolomon = useChatStore((s) => s.removeLastEmptySolomon);
   const addStep = useChatStore((s) => s.addStep);
+  const markLastRunningStepError = useChatStore((s) => s.markLastRunningStepError);
+  const attachStepsToLastSolomon = useChatStore((s) => s.attachStepsToLastSolomon);
+  const setLastSolomonError = useChatStore((s) => s.setLastSolomonError);
   const clearSteps = useChatStore((s) => s.clearSteps);
   const setStreaming = useChatStore((s) => s.setStreaming);
   const addArtifactToLastSolomon = useChatStore((s) => s.addArtifactToLastSolomon);
@@ -135,9 +138,8 @@ export function useWishStream(): UseWishStream {
                 }
                 break;
               case "error":
-                appendToLastSolomon(
-                  `\n\n[${evt.data.error_code}] ${evt.data.message}`,
-                );
+                markLastRunningStepError(evt.data.message);
+                setLastSolomonError(evt.data.error_code, evt.data.message);
                 break;
               case "done":
                 if (evt.data.session_id) {
@@ -172,6 +174,7 @@ export function useWishStream(): UseWishStream {
           onClose: () => {
             setStreaming(false);
             controllerRef.current = null;
+            attachStepsToLastSolomon();
             if (userCancelledRef.current) {
               removeLastEmptySolomon();
               userCancelledRef.current = false;
@@ -196,6 +199,9 @@ export function useWishStream(): UseWishStream {
       appendToLastSolomon,
       removeLastEmptySolomon,
       addStep,
+      markLastRunningStepError,
+      attachStepsToLastSolomon,
+      setLastSolomonError,
       addArtifactToLastSolomon,
       clearSteps,
       setStreaming,

@@ -203,7 +203,7 @@ def test_guardrail_passes_clean_output() -> None:
     )
     ok_, msg = conflict_permissions_guardrail(out)
     assert ok_ is True
-    assert msg is None
+    assert msg and "has_conflict" in msg
 
 
 def test_guardrail_accepts_dict_input() -> None:
@@ -235,7 +235,7 @@ def test_guardrail_accepts_task_output_wrapper() -> None:
 
     ok_, msg = conflict_permissions_guardrail(_TaskOutput())
     assert ok_ is True
-    assert msg is None
+    assert msg and "has_conflict" in msg
 
 
 # ------------------------------------------------------------------ #

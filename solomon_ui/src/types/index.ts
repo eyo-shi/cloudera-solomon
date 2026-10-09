@@ -142,6 +142,9 @@ export interface FilePreviewResponse {
   text?: string;
   line_count?: number;
   truncated?: boolean;
+  // PDF
+  embed_raw?: boolean;
+  too_large_for_inline?: boolean;
   // Error
   error_code?: string;
   message?: string;

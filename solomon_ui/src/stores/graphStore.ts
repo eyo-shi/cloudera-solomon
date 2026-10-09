@@ -9,7 +9,11 @@ import {
   propertyCypher,
   relationshipCypher,
 } from "../api/graph";
-import type { GraphQueryResponse, GraphQueryType } from "../types";
+import type {
+  GraphQueryResponse,
+  GraphQueryType,
+  GraphVisualization,
+} from "../types";
 import { useTabStore } from "./tabStore";
 
 export type GraphPanelView = "graph" | "table" | "raw";
@@ -43,7 +47,8 @@ interface GraphState {
   setQueryInput: (value: string) => void;
   appendSidebarQuery: (spec: GraphSidebarQuery) => void;
   runQueryInput: () => void;
-  appendNeighborhood: (nodeId: string) => void;
+  /** 指定パネルのグラフに、ノード近傍（1ホップ）をマージする */
+  expandNeighborhoodInPanel: (panelId: string, nodeId: string) => void;
   appendEntityQuery: (entityHint: string) => void;
   removePanel: (panelId: string) => void;
   rerunPanel: (panelId: string) => void;
@@ -85,6 +90,26 @@ function panelLoader(panel: GraphResultPanel): () => Promise<GraphQueryResponse>
       fetchGraphQuery("entity", { entity_hint: panel.entityHint });
   }
   return () => executeGraphCypher(panel.cypher);
+}
+
+function mergeGraphVisualizations(
+  base: GraphVisualization,
+  added: GraphVisualization,
+): GraphVisualization {
+  const nodeById = new Map(base.nodes.map((n) => [n.id, n]));
+  for (const n of added.nodes) {
+    if (!nodeById.has(n.id)) nodeById.set(n.id, n);
+  }
+  const edgeById = new Map(base.edges.map((e) => [e.id, e]));
+  for (const e of added.edges) {
+    if (!edgeById.has(e.id)) edgeById.set(e.id, e);
+  }
+  return {
+    ...base,
+    nodes: [...nodeById.values()],
+    edges: [...edgeById.values()],
+    truncated: Boolean(base.truncated || added.truncated),
+  };
 }
 
 async function loadPanel(
@@ -192,27 +217,48 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     void loadPanel(panelId, () => executeGraphCypher(cypher));
   },
 
-  appendNeighborhood: (nodeId) => {
-    ensureGraphTab();
+  expandNeighborhoodInPanel: (panelId, nodeId) => {
+    const panel = get().panels.find((p) => p.id === panelId);
+    if (!panel?.data?.graph) return;
+
     const cypher = `MATCH (n) WHERE coalesce(n.id, elementId(n)) = "${nodeId}" MATCH path = (n)-[*1..1]-(m) RETURN path LIMIT 25;`;
-    const panelId = nextPanelId();
-    set((s) => ({
-      queryInput: cypher,
-      panels: [
-        {
-          id: panelId,
-          cypher,
-          queryType: "neighborhood",
-          status: "loading",
-          defaultView: "graph",
-          nodeId,
-        },
-        ...s.panels,
-      ],
-    }));
-    void loadPanel(panelId, () =>
-      fetchGraphQuery("neighborhood", { node_id: nodeId, depth: 1 }),
-    );
+    set({ queryInput: cypher });
+
+    void (async () => {
+      try {
+        const fetched = await fetchGraphQuery("neighborhood", {
+          node_id: nodeId,
+          depth: 1,
+        });
+        useGraphStore.setState((s) => ({
+          panels: s.panels.map((p) => {
+            if (p.id !== panelId || !p.data) return p;
+            const graph = mergeGraphVisualizations(p.data.graph, fetched.graph);
+            return {
+              ...p,
+              error: undefined,
+              data: {
+                ...p.data,
+                graph,
+                node_count: graph.nodes.length,
+                edge_count: graph.edges.length,
+              },
+            };
+          }),
+        }));
+      } catch (err) {
+        useGraphStore.setState((s) => ({
+          panels: s.panels.map((p) =>
+            p.id === panelId
+              ? {
+                  ...p,
+                  error: String((err as Error).message ?? err),
+                }
+              : p,
+          ),
+        }));
+      }
+    })();
   },
 
   appendEntityQuery: (entityHint) => {

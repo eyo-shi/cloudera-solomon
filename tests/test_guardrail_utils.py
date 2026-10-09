@@ -5,7 +5,11 @@ from solomon.ingestion.models import ConflictAndPermissionsResult
 from solomon.ingestion.tasks import conflict_permissions_guardrail
 from solomon.tools.iceberg import TableExistsArgs
 from solomon.tools.trino import TrinoMetaArgs
-from solomon.transport.guardrail import parse_guardrail_model, unwrap_task_output
+from solomon.transport.guardrail import (
+    guardrail_pass_model,
+    parse_guardrail_model,
+    unwrap_task_output,
+)
 
 
 class _TaskOutput:
@@ -18,6 +22,17 @@ class _TaskOutput:
 def test_unwrap_task_output_json_dict() -> None:
     payload = {"has_conflict": False}
     assert unwrap_task_output(_TaskOutput(payload)) == payload
+
+
+def test_guardrail_pass_model_returns_json() -> None:
+    model = ConflictAndPermissionsResult(
+        has_conflict=False,
+        has_create_priv=True,
+        resolved_table="iceberg.demo.t1",
+    )
+    ok, payload = guardrail_pass_model(model)
+    assert ok is True
+    assert payload and "iceberg.demo.t1" in payload
 
 
 def test_parse_guardrail_model_from_task_output() -> None:
