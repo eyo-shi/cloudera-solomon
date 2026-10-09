@@ -258,11 +258,11 @@ tools:
   description: 'Tool Name: dataframe_preview
 
     Tool Arguments: {''bucket'': {''description'': None, ''type'': ''str''}, ''key'': {''description'': None, ''type'': ''str''},
-    ''format'': {''description'': ''csv / tsv / xlsx / xls / parquet / json のいずれか'', ''type'': ''str''}, ''max_rows'': {''description'':
-    None, ''type'': ''int''}, ''encoding'': {''description'': ''CSVSniffer 結果を渡す'', ''type'': ''Union[str, NoneType]''}, ''delimiter'':
-    {''description'': ''CSVSniffer 結果を渡す'', ''type'': ''Union[str, NoneType]''}, ''sheet'': {''description'': None, ''type'':
-    ''Union[str, NoneType]''}, ''header_row'': {''description'': ''ExcelHeaderDetect 結果を渡す (0-indexed)'', ''type'': ''Union[int,
-    NoneType]''}, ''json_lines'': {''description'': ''JSONL 形式なら True'', ''type'': ''bool''}}
+    ''format'': {''description'': ''csv / tsv / xlsx / xls / parquet / json / kanken / vb のいずれか'', ''type'': ''str''}, ''max_rows'':
+    {''description'': None, ''type'': ''int''}, ''encoding'': {''description'': ''CSVSniffer 結果を渡す'', ''type'': ''Union[str,
+    NoneType]''}, ''delimiter'': {''description'': ''CSVSniffer 結果を渡す'', ''type'': ''Union[str, NoneType]''}, ''sheet'': {''description'':
+    None, ''type'': ''Union[str, NoneType]''}, ''header_row'': {''description'': ''ExcelHeaderDetect 結果を渡す (0-indexed)'',
+    ''type'': ''Union[int, NoneType]''}, ''json_lines'': {''description'': ''JSONL 形式なら True'', ''type'': ''bool''}}
 
     Tool Description: Read an S3-hosted file into a pandas DataFrame and return a small preview: column names, per-column
     sample values, first N rows. Format-specific hints (encoding, delimiter, sheet, header_row) should come from the FormatSniffer
@@ -277,7 +277,7 @@ tools:
         title: Key
         type: string
       format:
-        description: csv / tsv / xlsx / xls / parquet / json のいずれか
+        description: csv / tsv / xlsx / xls / parquet / json / kanken / vb のいずれか
         title: Format
         type: string
       max_rows:
@@ -518,6 +518,68 @@ tools:
     - columns
     title: IcebergCreateArgs
     type: object
+- name: iceberg_load_data
+  class_path: solomon.tools.iceberg_load.IcebergLoadDataTool
+  description: 'Tool Name: iceberg_load_data
+
+    Tool Arguments: {''catalog'': {''description'': None, ''type'': ''str''}, ''schema_'': {''description'': None, ''type'':
+    ''str''}, ''table'': {''description'': None, ''type'': ''str''}, ''bucket'': {''description'': None, ''type'': ''str''},
+    ''key'': {''description'': None, ''type'': ''str''}, ''format'': {''description'': ''kanken / csv / tsv'', ''type'': ''str''},
+    ''encoding'': {''description'': None, ''type'': ''Union[str, NoneType]''}, ''delimiter'': {''description'': None, ''type'':
+    ''Union[str, NoneType]''}, ''header_row'': {''description'': ''csv/tsv 用 (0-indexed)'', ''type'': ''Union[int, NoneType]''}}
+
+    Tool Description: Load rows from an S3 file into an existing Iceberg table. Supports kanken (J5 完検) and csv/tsv. For kanken,
+    Shift-JIS is auto-decoded and meta header rows are skipped. Callers MUST set max_retries=0.'
+  requires_auth: true
+  args_schema:
+    properties:
+      catalog:
+        default: iceberg
+        title: Catalog
+        type: string
+      schema:
+        title: Schema
+        type: string
+      table:
+        title: Table
+        type: string
+      bucket:
+        title: Bucket
+        type: string
+      key:
+        title: Key
+        type: string
+      format:
+        description: kanken / csv / tsv
+        title: Format
+        type: string
+      encoding:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Encoding
+      delimiter:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Delimiter
+      header_row:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: csv/tsv 用 (0-indexed)
+        title: Header Row
+    required:
+    - schema
+    - table
+    - bucket
+    - key
+    - format
+    title: IcebergLoadDataArgs
+    type: object
 - name: ingestion_kickoff
   class_path: solomon.router.tools.IngestionKickoffTool
   description: 'Tool Name: ingestion_kickoff
@@ -550,6 +612,45 @@ tools:
     - bucket
     - key
     title: IngestionKickoffArgs
+    type: object
+- name: kanken_sniff
+  class_path: solomon.tools.format.KankenSniffTool
+  description: 'Tool Name: kanken_sniff
+
+    Tool Arguments: {''bucket'': {''description'': None, ''type'': ''Union[str, NoneType]''}, ''key'': {''description'': None,
+    ''type'': ''Union[str, NoneType]''}, ''content_b64'': {''description'': None, ''type'': ''Union[str, NoneType]''}, ''max_sample_bytes'':
+    {''description'': None, ''type'': ''int''}}
+
+    Tool Description: Detect J5 kanken (完成検査) text files: decode Shift-JIS/UTF-8, locate meta key/value header rows and the
+    measurement table header row. Prefer bucket+key for S3 direct read.'
+  requires_auth: false
+  args_schema:
+    properties:
+      bucket:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Bucket
+      key:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Key
+      content_b64:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Content B64
+      max_sample_bytes:
+        default: 65536
+        maximum: 1048576
+        minimum: 1024
+        title: Max Sample Bytes
+        type: integer
+    title: KankenSniffArgs
     type: object
 - name: magic_byte
   class_path: solomon.tools.format.MagicByteTool

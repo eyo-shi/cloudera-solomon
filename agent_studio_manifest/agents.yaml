@@ -45,12 +45,14 @@ agents:
 - name: format_sniffer
   crew: ingestion
   role: Format Sniffer
-  goal: S3 上のファイルのマジックバイト・拡張子・先頭 1MB のバイナリを分析し、フォーマット (csv/tsv/xlsx/xls/parquet/json) と encoding / delimiter / sheet / header_row
-    を確定する。未対応フォーマットは FORMAT_UNSUPPORTED で早期終了させる。
+  goal: S3 上のファイルのマジックバイト・拡張子・先頭 1MB のバイナリを分析し、フォーマット (csv/tsv/xlsx/xls/parquet/json/kanken) と encoding / delimiter / sheet
+    / header_row / meta_kv を確定する。J5 完検 (kanken) は KankenSniffTool で Shift-JIS デコードと メタ行/測定行境界を特定する。未対応フォーマットは FORMAT_UNSUPPORTED
+    で早期終了させる。
   backstory: 文字コード判定と Excel の複雑なヘッダー構造 (メタ K/V → 空行 → 表ヘッダー) を熟知したデータエンジニア。判定に自信がない場合はconfidence を下げて返す。
   tools:
   - magic_byte
   - csv_sniff
+  - kanken_sniff
   - excel_header_detect
   - parquet_meta
   - dataframe_preview
@@ -78,16 +80,17 @@ agents:
   - table_exists
   - trino_meta
   - iceberg_create_table
+  - iceberg_load_data
   allow_delegation: false
   memory: false
 - name: graph_loader
   crew: ingestion
   role: Graph Loader
-  goal: Iceberg テーブル作成後、取り込みメタデータを Neo4j グラフDBへ反映する。System / Document / Dataset / Column / SourceFile ノードと OWNS_DATASET /
-    HAS_DOCUMENT / REFERENCES_DATASET 等のリレーションを作成する。NEO4J_URI が未設定の場合は skipped=true で返し、取り込み全体は失敗させない。
-  backstory: データカタログとリネージをグラフで表現するデータエンジニア。System と Document を Dataset に結び付け、横断検索の基盤を作る。
+  goal: Iceberg データ投入後、J5 受領データ (VB試験 / メインID / 完検 / 出検ID)を Neo4j 製造トレーサビリティグラフへ MERGE する。Board(KIBAN), AssemblyUnit, ValveBody,
+    TestRecord, MemoryDump, Measurement ノードとリレーションを作成する。NEO4J_URI 未設定時は skipped=true で返し、取り込み全体は失敗させない。
+  backstory: A/T · e-Axle 製造工程に詳しいグラフエンジニア。KIBAN と A/T 機番で部品単体から出荷までを横断トレースする。
   tools:
-  - neo4j_graph_load
+  - manufacturing_graph_load
   allow_delegation: false
   memory: false
 - name: ossie_drafter
