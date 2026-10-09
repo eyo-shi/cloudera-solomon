@@ -15,7 +15,7 @@ import time
 import traceback
 from typing import Any
 
-from solomon.tools._schema_args import normalize_tool_kwargs
+from solomon.transport.schema_args import normalize_tool_kwargs
 from solomon.transport.errors import ErrorCode, err
 from solomon.transport.logging import get_logger
 from solomon.transport.user_context import UserContext, get_user_context_optional
