@@ -61,17 +61,17 @@ function guideFor(errorCode: string): GuideDetails {
             hint: "internal (デフォルト) = warehouse-launcher / external = CDW Trino",
           },
           {
-            name: "TRINO_CONNECTION_NAME",
-            hint: "external 時: Site Administration → Data Connections の CDW connection 名",
+            name: "TRINO_URL / TRINO_HOST",
+            hint: "external: CDW coordinator URL（1 行可）/ internal: TRINO_ENDPOINT",
           },
           {
-            name: "TRINO_HOST / TRINO_ENDPOINT",
-            hint: "external: TRINO_HOST / internal: launcher 待ち or TRINO_ENDPOINT 上書き",
+            name: "TRINO_USER / TRINO_PASSWORD",
+            hint: "external + Basic 認証時（省略時は Knox JWT）",
           },
         ],
         extraSteps: [
           "internal: Warehouse Launcher Application が status=running になるまで待つ",
-          "external: Data Connection 登録後 Project Settings に TRINO_CONNECTION_NAME を設定",
+          "external: TRINO_MODE=external と TRINO_URL を Project Settings に設定",
           "Tables タブを Refresh、または Application (Solomon) を Restart",
         ],
       };
@@ -92,6 +92,34 @@ function guideFor(errorCode: string): GuideDetails {
           "Cloudera AI Workbench の Data メニューから CDV を Enable",
           "有効化後に払い出された URL を SOLOMON_CDV_BASE_URL に設定",
           "Project → Settings → Advanced → Environment Variables から Application を Restart",
+        ],
+      };
+    case "S3_ASSUMEROLE_FAILED":
+      return {
+        title: "S3 資格情報を取得できません",
+        envList: [
+          {
+            name: "SOLOMON_IDBROKER_URL",
+            hint: "推奨: Knox → IDBroker → STS（S3 Data Connection 不要）",
+          },
+          {
+            name: "SOLOMON_S3_BUCKETS",
+            hint: "Storage タブの実バケット名（カンマ区切り）",
+          },
+          {
+            name: "SOLOMON_AWS_REGION",
+            hint: "データレイクのリージョン",
+          },
+          {
+            name: "SOLOMON_S3_CONNECTION_NAME",
+            hint: "IDBroker 未使用時のみ: S3 Object Store 等",
+          },
+        ],
+        extraSteps: [
+          "Data Connections に S3 が無い環境では SOLOMON_IDBROKER_URL が必須",
+          "GET /api/files/diagnostics で idbroker_configured を確認",
+          "docs/s3_connectivity.md を参照",
+          "Application を Restart",
         ],
       };
     case "NEO4J_NOT_CONFIGURED":

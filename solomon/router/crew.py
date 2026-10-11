@@ -571,6 +571,23 @@ def kickoff_router(
     sid = session_id or user_ctx.session_id or "unknown"
     entity_memory = entity_memory or {}
 
+    # 取り込み先テーブルの聞き返し (pending + 回答) は LLM/ヒューリスティック共通で最優先。
+    pending_table = resolve_pending_table_ingest(prompt, entity_memory)
+    if pending_table:
+        classification = IntentClassification(
+            intent="INGEST",
+            confidence=0.92,
+            extracted_args=pending_table,
+            needs_clarification=False,
+            reasoning="resolved pending_table_ingest with target table",
+        )
+        plan = build_dispatch_plan(classification)
+        return RouterResult(
+            classification=classification,
+            plan=plan,
+            response_markdown=plan.response_markdown,
+        )
+
     # グラフ取り込みの聞き返し (pending + フィールド名のみの回答) は LLM/ヒューリスティック
     # 共通で最優先。LLM 経路だと「order_id, plant_code」だけの短い返答が UNKNOWN になる。
     pending_ingest = resolve_pending_graph_ingest(prompt, entity_memory)

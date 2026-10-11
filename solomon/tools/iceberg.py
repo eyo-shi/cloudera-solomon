@@ -205,6 +205,12 @@ class IcebergCreateTableTool(BaseSolomonTool):
             return conn_or_err
         try:
             cur = conn_or_err.cursor()
+            if _use_internal_warehouse_ddl():
+                cur.execute(
+                    f'CREATE SCHEMA IF NOT EXISTS "{catalog}"."{schema}"'
+                )
+                if cur.description:
+                    cur.fetchall()
             cur.execute(ddl)
             # CREATE TABLE は cur.description が None なことが多いが念のため
             if cur.description:
@@ -220,6 +226,28 @@ class IcebergCreateTableTool(BaseSolomonTool):
         )
 
 
+def _use_internal_warehouse_ddl(*, internal_warehouse: Optional[bool] = None) -> bool:
+    """TRINO_MODE=internal では DuckDB コネクタ向けの通常 CREATE TABLE を使う。"""
+    if internal_warehouse is not None:
+        return internal_warehouse
+    from solomon.trino.mode import is_internal_trino_mode
+
+    return is_internal_trino_mode()
+
+
+def _column_ddl_lines(cols: list[ColumnDef], *, include_comment: bool) -> list[str]:
+    col_lines: list[str] = []
+    for c in cols:
+        line = f'  "{c.name}" {c.trino_type}'
+        if not c.nullable:
+            line += " NOT NULL"
+        if include_comment and c.comment:
+            escaped = c.comment.replace("'", "''")
+            line += f" COMMENT '{escaped}'"
+        col_lines.append(line)
+    return col_lines
+
+
 def _build_create_ddl(
     catalog: str,
     schema: str,
@@ -228,17 +256,51 @@ def _build_create_ddl(
     partitioning: list[str],
     location: Optional[str],
     if_not_exists: bool,
+    *,
+    internal_warehouse: Optional[bool] = None,
 ) -> str:
-    col_lines = []
-    for c in cols:
-        line = f'  "{c.name}" {c.trino_type}'
-        if not c.nullable:
-            line += " NOT NULL"
-        if c.comment:
-            # Trino の COMMENT は文字列リテラル。シングルクォートをエスケープ
-            escaped = c.comment.replace("'", "''")
-            line += f" COMMENT '{escaped}'"
-        col_lines.append(line)
+    if _use_internal_warehouse_ddl(internal_warehouse=internal_warehouse):
+        return _build_internal_warehouse_create_ddl(
+            catalog, schema, table, cols, if_not_exists
+        )
+    return _build_iceberg_create_ddl(
+        catalog,
+        schema,
+        table,
+        cols,
+        partitioning,
+        location,
+        if_not_exists,
+    )
+
+
+def _build_internal_warehouse_create_ddl(
+    catalog: str,
+    schema: str,
+    table: str,
+    cols: list[ColumnDef],
+    if_not_exists: bool,
+) -> str:
+    """warehouse-launcher (Trino + DuckDB) 向け — Iceberg の WITH 句は付けない。"""
+    col_lines = _column_ddl_lines(cols, include_comment=False)
+    ine = "IF NOT EXISTS " if if_not_exists else ""
+    return (
+        f'CREATE TABLE {ine}"{catalog}"."{schema}"."{table}" (\n'
+        + ",\n".join(col_lines)
+        + "\n)"
+    )
+
+
+def _build_iceberg_create_ddl(
+    catalog: str,
+    schema: str,
+    table: str,
+    cols: list[ColumnDef],
+    partitioning: list[str],
+    location: Optional[str],
+    if_not_exists: bool,
+) -> str:
+    col_lines = _column_ddl_lines(cols, include_comment=True)
     with_parts: list[str] = ["format = 'PARQUET'"]
     if partitioning:
         arr = ", ".join(f"'{p}'" for p in partitioning)
@@ -247,11 +309,10 @@ def _build_create_ddl(
         escaped_loc = location.replace("'", "''")
         with_parts.append(f"location = '{escaped_loc}'")
     ine = "IF NOT EXISTS " if if_not_exists else ""
-    ddl = (
+    return (
         f'CREATE TABLE {ine}"{catalog}"."{schema}"."{table}" (\n'
         + ",\n".join(col_lines)
         + "\n) WITH (\n  "
         + ",\n  ".join(with_parts)
         + "\n)"
     )
-    return ddl

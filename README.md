@@ -166,31 +166,35 @@ Deploy 時に `TRINO_MODE` で接続方式を切り替える (デフォルト `i
 
 - AMP Deploy で `warehouse-launcher` が起動
 - `demo` スキーマに `customers` / `orders` を seed (Tables タブですぐ確認可能)
+- ファイル取り込みはカタログ名 `iceberg` のまま、実体は DuckDB 向けの通常 `CREATE TABLE` + `INSERT`（Iceberg の `WITH (format=…)` は使わない）
 - Solomon は `.solomon/trino_endpoints.json` から HTTP 接続先を自動解決
 - DNS が通らない場合のみ `TRINO_ENDPOINT` を post-deploy で設定
 
 **external (`TRINO_MODE=external`)**
 
-- Site Administration → Data Connections で CDW / Trino connection を登録済みなら、
-  `TRINO_CONNECTION_NAME` にその connection 名を設定する
-  (未設定でも Trino タイプの connection が 1 個なら自動採用)。
-- Data Connections を使わない環境では以下を代わりに設定:
-  - `TRINO_HOST`
-  - `TRINO_PORT` (default 443)
-  - `TRINO_SCHEME` (default `https`)
-  - `TRINO_VERIFY_SSL` (default `true`)
-  - `TRINO_CATALOG` (default `iceberg`)
-  - `TRINO_SCHEMA` (default `demo`)
+Post-deploy（Project → Settings → Environment Variables）に **Application env のみ** 設定:
+
+- **接続先**（いずれか）: `TRINO_URL`（推奨・1 行）または `TRINO_HOST` + `TRINO_PORT` (443) + `TRINO_SCHEME` (https)
+- `TRINO_VERIFY_SSL` (default `true`)
+- `TRINO_CATALOG` (default `iceberg`)
+- `TRINO_SCHEMA` (default `demo`)
+- 製造デモ: `SOLOMON_SILVER_SCHEMA=inspection_silver`
+- **認証**: 既定は UI ログインユーザーの **Knox JWT**。Basic の場合は
+  `TRINO_USER` + `TRINO_PASSWORD`（`TRINO_AUTH=auto` なら password ありで Basic）
 
 旧名 `SOLOMON_TRINO_*` も後方互換で読み取る。
 
 ### 2. S3 への接続
 
-- Site Administration → Data Connections で S3 connection を登録済みなら、
-  `SOLOMON_S3_CONNECTION_NAME` を設定 (省略時は S3 タイプの最初の connection を自動採用)。
-- Data Connections を使わない環境では `SOLOMON_AWS_REGION` (default `us-east-1`)。
-- 認証情報は IDBroker STS 経由でユーザー単位に払い出されるため、AMP には
-  AWS access key / secret は一切保持しない。
+詳細: [docs/s3_connectivity.md](docs/s3_connectivity.md)
+
+- **推奨 (CDP on AWS)**: `SOLOMON_IDBROKER_URL` + ログインユーザーの Knox JWT → STS。
+  **S3 が Data Connections に無くても動く**（新環境で S3 タイプが出ない場合はこちら）。
+- **Storage タブ**: `SOLOMON_S3_BUCKETS` に実バケット名（カンマ区切り）。未設定は `demo-bucket`。
+- **IDBroker 未設定時のみ**: S3 Data Connection（`SOLOMON_S3_CONNECTION_NAME` または自動検出）。
+- `SOLOMON_AWS_REGION` (default `us-east-1`)。AMP に AWS access key は置かない。
+
+トラブルシュート: ログイン後 `GET /api/files/diagnostics`。
 
 ### 3. Neo4j への接続
 
@@ -286,7 +290,7 @@ CDV 未設定でも取り込み・サマリー・RAG はそのまま動作する
 | `GET /api/graph/relationships?type=` | Relationship Type 指定でグラフ取得 |
 | `GET /api/graph/properties?key=` | Property Key 指定でグラフ取得 |
 | `GET /api/graph/neighborhood/{id}` | ノード起点の N-hop 探索 (depth 1–3) |
-| `GET /api/search/documents` | OpenSearch インデックス済みドキュメント |
+| `GET /api/search/documents` | OpenSearch（既定 `scope=inspection` → CDE `inspection-*`） |
 | `POST /api/query` | Table Preview 用 SELECT |
 
 ## ライセンス

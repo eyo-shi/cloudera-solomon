@@ -1,14 +1,35 @@
 /**
- * Search (Semantic Search) ビュー — OpenSearch インデックス済みドキュメント一覧。
+ * Search (Semantic Search) ビュー — CDE Bronze ``inspection-*`` ドキュメント一覧。
  */
 import { isSetupGuideError } from "../../api/client";
 import { refreshSearchExplorer } from "../../api/explorerRefresh";
 import { useSearchDocuments } from "../../api/search";
 import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
+import type { SearchDocumentEntry } from "../../types";
 import { ExplorerRefreshButton } from "./ExplorerRefreshButton";
 
 interface SearchViewProps {
   filter: string;
+}
+
+function displayTitle(doc: SearchDocumentEntry, index: number): string {
+  if (doc.title) return doc.title;
+  if (doc.fq_name) return doc.fq_name;
+  if (doc.object_key) {
+    const parts = doc.object_key.split("/");
+    return parts[parts.length - 1] || doc.object_key;
+  }
+  return `doc-${index}`;
+}
+
+function displaySubtitle(doc: SearchDocumentEntry): string | null {
+  if (doc.subtitle) return doc.subtitle;
+  const bits: string[] = [];
+  if (doc.format) bits.push(doc.format);
+  if (doc.trace_id) bits.push(`KIBAN ${doc.trace_id}`);
+  if (doc.vb_machine_no) bits.push(`VB ${doc.vb_machine_no}`);
+  if (doc.fq_name && doc.fq_name !== doc.title) bits.push(doc.fq_name);
+  return bits.length ? bits.join(" · ") : null;
 }
 
 export function SearchView({ filter }: SearchViewProps) {
@@ -16,11 +37,15 @@ export function SearchView({ filter }: SearchViewProps) {
   useReportSetupGuideError(error);
 
   const documents = data?.documents ?? [];
+  const indexHint = data?.index ?? "inspection-*";
 
   const sectionHead = (
     <div className="explorer-section-head">
       <span className="explorer-section-title">Search</span>
       <span className="explorer-section-count">({documents.length})</span>
+      <span className="explorer-section-meta" title={indexHint}>
+        {indexHint}
+      </span>
       <div className="explorer-section-actions">
         <ExplorerRefreshButton
           isFetching={isFetching}
@@ -62,22 +87,30 @@ export function SearchView({ filter }: SearchViewProps) {
       {sectionHead}
       <ul className="explorer-list">
         {documents.map((doc, i) => {
-          const fq = doc.fq_name ?? `doc-${i}`;
-          const name =
-            (doc.dataset?.name as string | undefined) ??
-            (doc.dataset?.description as string | undefined) ??
-            fq;
+          const title = displayTitle(doc, i);
+          const subtitle = displaySubtitle(doc);
+          const key =
+            doc.object_key ??
+            doc.fq_name ??
+            `${doc.index ?? "doc"}-${i}`;
           return (
-            <li key={`${fq}-${i}`} className="explorer-search-doc">
-              <span className="explorer-search-doc__name">{name}</span>
-              {doc.fq_name && doc.fq_name !== name && (
-                <span className="explorer-search-doc__fq">{doc.fq_name}</span>
+            <li key={`${key}-${i}`} className="explorer-search-doc">
+              <span className="explorer-search-doc__name">{title}</span>
+              {subtitle && (
+                <span className="explorer-search-doc__fq">{subtitle}</span>
+              )}
+              {doc.object_key && (
+                <span className="explorer-search-doc__path">{doc.object_key}</span>
               )}
             </li>
           );
         })}
         {documents.length === 0 && (
-          <li className="explorer-placeholder">ドキュメントが見つかりません</li>
+          <li className="explorer-placeholder">
+            {filter.trim()
+              ? "一致する Bronze ファイルがありません"
+              : "inspection-* にドキュメントがありません（CDE 取込を Run してください）"}
+          </li>
         )}
       </ul>
     </div>

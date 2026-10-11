@@ -812,8 +812,7 @@ def run_warehouse_supervisor() -> None:
         _supervisor_state["phase"] = "disabled"
         print(
             "Warehouse launcher disabled (TRINO_MODE=external). "
-            "Configure CDW / Trino via Site Administration → Data Connections "
-            "and TRINO_CONNECTION_NAME on Solomon."
+            "Configure CDW / Trino via TRINO_URL (or TRINO_HOST) on Solomon Application."
         )
         return
 

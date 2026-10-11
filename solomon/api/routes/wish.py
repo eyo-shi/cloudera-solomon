@@ -192,10 +192,29 @@ async def post_wish(
 
             # 3) 子 Crew ディスパッチ
             if plan.child_crew == "ingestion":
-                yield sse_narrative(
-                    "ファイル取り込みと判断しました。"
-                    "Storage → Iceberg → ナレッジグラフ → セマンティック検索の順で処理します。"
-                )
+                ptn = plan.inputs.get("proposed_table_name")
+                tschema = str(plan.inputs.get("target_schema") or "demo")
+                if ptn:
+                    yield sse_narrative(
+                        f"テーブル `{tschema}.{ptn}` を指定いただきました。"
+                        "同じファイルで取り込みパイプラインを実行します"
+                        "（S3 確認から再実行します）。"
+                    )
+                else:
+                    from solomon.trino.mode import is_internal_trino_mode
+
+                    if is_internal_trino_mode():
+                        yield sse_narrative(
+                            "ファイル取り込みと判断しました。"
+                            "Storage → Trino (DuckDB デモ warehouse) → "
+                            "ナレッジグラフ → セマンティック検索の順で処理します。"
+                        )
+                    else:
+                        yield sse_narrative(
+                            "ファイル取り込みと判断しました。"
+                            "Storage → Iceberg → ナレッジグラフ → "
+                            "セマンティック検索の順で処理します。"
+                        )
                 async for chunk in _handle_ingest(
                     request=request,
                     user_ctx=user_ctx,
@@ -581,6 +600,8 @@ async def _handle_ingest(
             or "TRINO_DDL_FAILED" in msg
             or "Table does not exist in Trino" in msg
             or "作成を確認できません" in msg
+            or "propose_schema" in msg.lower()
+            or "resolved_table" in msg.lower()
         )
         if recoverable:
             attempted = extract_attempted_fq_from_message(msg)
@@ -598,6 +619,16 @@ async def _handle_ingest(
                         "target_schema": target_schema,
                         "failure_message": msg,
                         "attempted_fq": attempted,
+                        **(
+                            {"proposed_table_name": proposed_table_name}
+                            if proposed_table_name
+                            else {}
+                        ),
+                        **(
+                            {"create_new_table": create_new_table}
+                            if create_new_table is not None
+                            else {}
+                        ),
                         **(
                             {"graph_ingest": True}
                             if graph_ingest

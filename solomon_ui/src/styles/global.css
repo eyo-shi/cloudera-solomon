@@ -389,6 +389,14 @@ body,
   font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
+.explorer-section-meta {
+  max-width: 8rem;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .explorer-section-actions {
   margin-left: auto;
   display: flex;
@@ -1358,6 +1366,17 @@ body,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.explorer-search-doc__path {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono, ui-monospace, monospace);
 }
 
 .explorer-placeholder {

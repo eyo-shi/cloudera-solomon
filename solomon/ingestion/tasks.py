@@ -448,6 +448,30 @@ def conflict_permissions_guardrail(
     from solomon.transport.guardrail import guardrail_pass_model, parse_guardrail_model
 
     result, err_msg = parse_guardrail_model(output, ConflictAndPermissionsResult)
+    if result is None or not str(getattr(result, "resolved_table", "") or "").strip():
+        from solomon.ingestion.pipeline_context import get_last_propose
+        from solomon.transport.trino_catalog import resolve_trino_catalog
+
+        propose = get_last_propose()
+        if propose is not None:
+            catalog = resolve_trino_catalog(propose.catalog)
+            fq = f"{catalog}.{propose.target_schema}.{propose.proposed_table_name}"
+            verified = verify_create_gate_from_fq(fq)
+            if verified is not None:
+                result = verified
+            else:
+                return False, (
+                    err_msg
+                    or f"Could not verify CREATE gate for proposed table {fq!r}."
+                )
+        elif result is None:
+            return False, err_msg
+        else:
+            return False, (
+                err_msg
+                or "CREATE permission denied: conflict check returned no target table."
+            )
+
     if result is None:
         return False, err_msg
 

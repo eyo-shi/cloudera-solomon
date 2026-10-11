@@ -10,8 +10,8 @@ Solomon は Cloudera AI Workbench の AMP として配信される。以下の 3
    ``TRINO_MODE``、``NEO4J_MODE`` / ``OPENSEARCH_MODE``、
    ``NEO4J_USERNAME`` / ``NEO4J_PASSWORD``。
 2. **Cloudera AI Workbench の Data Connections** (Site Administration →
-   Data Connections で設定済み): Trino / S3 の接続情報は Deploy 時に二重入力
-   させず、``cml.data_v1`` 経由で取得する。
+   Data Connections で設定済み): S3 等は ``cml.data_v1`` 経由で取得する。
+   **Trino (external)** は Application env のみ（``TRINO_URL`` 等）。
 3. **Post-deploy env** (Project → Settings → Advanced → Environment Variables):
    LLM プロバイダ、``TRINO_*`` / CDV base URL などは AMP を Deploy
    した後に Application を再起動する形で反映する。
@@ -81,10 +81,16 @@ class TrinoConfig:
     verify_ssl: Any = True  # bool | str (CA bundle path)
     catalog: str = "iceberg"
     schema: str = "demo"
-    #: Data Connection 由来ならその name。env fallback なら None。
+    #: 後方互換フィールド（external は env のみのため常に None）。
     connection_name: Optional[str] = None
     #: ``TRINO_MODE=internal`` — co-located Trino + DuckDB (demo warehouse)。
     internal: bool = False
+    #: ``jwt`` | ``basic`` | ``auto``（password ありなら basic、なければ jwt）
+    auth_mode: str = "auto"
+    #: Basic 認証の Trino ユーザー（未設定時は JWT 時と同様に end-user 名）
+    service_user: Optional[str] = None
+    #: Basic 認証パスワード（env / Connection 由来。JWT モードでは未使用）
+    password: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -182,6 +188,39 @@ def _normalize_trino_host(host: str, port: int) -> tuple[str, int]:
             )
             return host_part, int(port_part)
     return text, port
+
+
+def _parse_trino_host_port_scheme(
+    endpoint: str,
+    *,
+    default_port: int = 443,
+    default_scheme: str = "https",
+    port_env: Optional[str] = None,
+    scheme_env: Optional[str] = None,
+) -> tuple[str, int, str]:
+    """``host`` / ``https://host:443`` / ``host:443`` を Trino client 向けに分解する。"""
+    text = endpoint.strip()
+    if not text:
+        return "", default_port, default_scheme
+    if "://" in text:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(text)
+        host = (parsed.hostname or "").strip()
+        port = parsed.port if parsed.port is not None else default_port
+        scheme = (parsed.scheme or default_scheme).strip().lower()
+    else:
+        port = default_port
+        scheme = default_scheme
+        host, port = _normalize_trino_host(text, port)
+    if port_env:
+        try:
+            port = int(port_env)
+        except (TypeError, ValueError):
+            pass
+    if scheme_env:
+        scheme = scheme_env.strip().lower()
+    return host, port, scheme
 
 
 def _parse_verify_ssl(raw: Optional[str]) -> Any:
@@ -357,81 +396,47 @@ def _get_internal_trino_config(
     )
 
 
+def _trino_auth_from_env() -> tuple[str, Optional[str], Optional[str]]:
+    from solomon.trino.env import trino_env
+
+    auth_raw = (trino_env("AUTH") or "auto").strip().lower()
+    if auth_raw not in ("jwt", "basic", "auto"):
+        auth_raw = "auto"
+    service_user = trino_env("USER")
+    if service_user is not None:
+        service_user = service_user.strip() or None
+    password = trino_env("PASSWORD")
+    if password is not None:
+        password = password.strip() or None
+    return auth_raw, service_user, password
+
+
 def _get_external_trino_config(
     *,
     catalog_env: Optional[str],
     schema_env: Optional[str],
 ) -> Optional[TrinoConfig]:
-    """Production CDW / Trino via Data Connection or env fallback."""
-    from solomon.trino.env import trino_env
+    """Production CDW / Trino — Application env のみ（``TRINO_URL`` / ``TRINO_HOST`` 等）。"""
+    from solomon.trino.env import trino_endpoint_url, trino_env
 
-    # 1) 明示名指定
-    name = trino_env("CONNECTION_NAME")
-    conn: Optional[Any] = None
-    if name:
-        conn = _cml_get_connection(name)
-        if conn is None:
-            _logger.warning(
-                "trino_config.named_connection_missing", name=name
-            )
-
-    # 2) auto-detect
-    if conn is None:
-        for c in _cml_list_connections():
-            t = _conn_type(c)
-            if t in ("cdw", "trino", "impala", "hive"):
-                conn = c
-                name = getattr(c, "name", None) or name
-                _logger.info(
-                    "trino_config.auto_detected",
-                    connection_name=name,
-                    type=t,
-                )
-                break
-
-    if conn is not None:
-        p = _conn_params(conn)
-        host = str(p.get("host") or p.get("hostname") or "").strip()
-        if not host:
-            _logger.warning(
-                "trino_config.connection_missing_host",
-                connection_name=name,
-            )
-        else:
-            port_raw = p.get("port") or p.get("http_port") or 443
-            try:
-                port = int(port_raw)
-            except (TypeError, ValueError):
-                port = 443
-            scheme = str(p.get("http_scheme") or p.get("scheme") or "https")
-            verify = _parse_verify_ssl(
-                str(p.get("verify_ssl")) if p.get("verify_ssl") is not None else None
-            )
-            catalog = catalog_env or str(p.get("catalog") or "iceberg")
-            schema = schema_env or str(p.get("schema") or p.get("database") or "demo")
-            host, port = _normalize_trino_host(host, port)
-            return TrinoConfig(
-                host=host,
-                port=port,
-                scheme=scheme,
-                verify_ssl=verify,
-                catalog=catalog,
-                schema=schema,
-                connection_name=name,
-                internal=False,
-            )
-
-    # 3) env fallback
-    host = trino_env("HOST")
-    if not host:
+    endpoint = trino_endpoint_url()
+    if not endpoint:
         _logger.debug("trino_config.not_configured")
         return None
-    port = int(trino_env("PORT") or "443")
-    host, port = _normalize_trino_host(host, port)
-    scheme = trino_env("SCHEME") or "https"
+    host, port, scheme = _parse_trino_host_port_scheme(
+        endpoint,
+        default_port=int(trino_env("PORT") or "443"),
+        default_scheme=trino_env("SCHEME") or "https",
+        port_env=trino_env("PORT"),
+        scheme_env=trino_env("SCHEME"),
+    )
+    if not host:
+        _logger.debug("trino_config.invalid_host")
+        return None
     verify = _parse_verify_ssl(trino_env("VERIFY_SSL"))
     catalog = catalog_env or "iceberg"
     schema = schema_env or "demo"
+    auth_mode, service_user, password = _trino_auth_from_env()
     return TrinoConfig(
         host=host,
         port=port,
@@ -441,6 +446,9 @@ def _get_external_trino_config(
         schema=schema,
         connection_name=None,
         internal=False,
+        auth_mode=auth_mode,
+        service_user=service_user,
+        password=password,
     )
 
 
@@ -448,7 +456,7 @@ def get_trino_config() -> Optional[TrinoConfig]:
     """Trino 接続設定を解決する。
 
     * ``TRINO_MODE=internal`` (default): warehouse-launcher の Trino + DuckDB
-    * ``TRINO_MODE=external``: CDW / Trino — Data Connection または env (4 段)
+    * ``TRINO_MODE=external``: CDW / Trino — Application env (``TRINO_URL`` 等)
     """
     from solomon.trino.mode import is_internal_trino_mode
 
@@ -719,7 +727,7 @@ def _opensearch_config_from_endpoint(
     host, port, scheme = _parse_opensearch_endpoint(endpoint)
     if not host:
         return None
-    from solomon.opensearch.env import opensearch_env
+    from solomon.opensearch.env import opensearch_env, opensearch_username
 
     port = int(opensearch_env("PORT") or str(port))
     scheme = opensearch_env("SCHEME") or scheme or default_scheme
@@ -739,7 +747,7 @@ def _opensearch_config_from_endpoint(
         verify_ssl=verify,
         namespace=namespace,
         index_name=index_name,
-        username=opensearch_env("USERNAME"),
+        username=opensearch_username(),
         password=opensearch_env("PASSWORD"),
         embedding_dim=embedding_dim,
         connection_name=connection_name,
@@ -793,7 +801,9 @@ def _get_external_opensearch_config(
             connection_name=name,
         )
 
-    endpoint = opensearch_env("ENDPOINT") or opensearch_env("HOST")
+    from solomon.opensearch.env import opensearch_endpoint_url
+
+    endpoint = opensearch_endpoint_url()
     if not endpoint:
         return None
     return _opensearch_config_from_endpoint(
@@ -813,7 +823,9 @@ def _get_internal_opensearch_config(
     """Internal: co-located opensearch-launcher (Neo4j launcher と同型)."""
     from solomon.opensearch.env import opensearch_env
 
-    endpoint = opensearch_env("ENDPOINT") or opensearch_env("HOST")
+    from solomon.opensearch.env import opensearch_endpoint_url
+
+    endpoint = opensearch_endpoint_url()
     if not endpoint:
         from solomon.opensearch.endpoints_file import load_http_hosts
 

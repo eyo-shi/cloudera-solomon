@@ -84,14 +84,27 @@ export interface GraphTabRef {
 }
 
 // ---------------- Search ---------------- //
+export type SearchDocumentScope = "inspection" | "datasets" | "both";
+
 export interface SearchDocumentEntry {
-  fq_name?: string | null;
+  document_type?: "inspection" | "dataset";
+  index?: string | null;
   score?: number;
+  /** Primary line (file name or fq_name) */
+  title?: string | null;
+  /** Secondary line (trace_id, format, payload meta) */
+  subtitle?: string | null;
+  object_key?: string | null;
+  format?: string | null;
+  trace_id?: string | null;
+  vb_machine_no?: string | null;
+  fq_name?: string | null;
   dataset?: Record<string, unknown>;
 }
 export interface SearchDocumentsResponse {
   index: string;
   namespace: string;
+  scope?: SearchDocumentScope;
   query: string;
   documents: SearchDocumentEntry[];
 }

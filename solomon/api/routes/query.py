@@ -52,11 +52,10 @@ def run_query(
                 "error_code": "TRINO_NOT_CONFIGURED",
                 "message": "Trino / CDW への接続情報が設定されていません。",
                 "instruction": (
-                    "Cloudera AI Workbench の Site Administration → Data "
-                    "Connections で CDW / Trino connection を登録し、Project "
-                    "→ Settings → Advanced → Environment Variables に "
-                    "TRINO_CONNECTION_NAME を設定して Application を"
-                    "再起動してください。"
+                    "Project → Settings → Advanced → Environment Variables に "
+                    "TRINO_MODE=external と TRINO_URL (または TRINO_HOST)、"
+                    "必要なら TRINO_USER / TRINO_PASSWORD を設定して "
+                    "Application を再起動してください。"
                 ),
             },
         )

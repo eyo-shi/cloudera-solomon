@@ -233,6 +233,7 @@ class ManufacturingGraphLoader:
                 d.kiban = $kiban,
                 d.trace_id = $trace_id,
                 d.date = $date,
+                d.row_count = $row_count,
                 d.field_count = $field_count,
                 d.updated_at = $ingested_at
             WITH d
@@ -246,6 +247,7 @@ class ManufacturingGraphLoader:
             kiban=payload.kiban,
             trace_id=payload.trace_id,
             date=payload.date,
+            row_count=payload.row_count,
             field_count=len(payload.dump_fields),
             board_id=board_id,
             source_id=payload.source_id,
@@ -493,6 +495,7 @@ class ManufacturingGraphLoader:
                 d.customer_part_no = $customer_part_no,
                 d.kiban = $kiban,
                 d.date = $date,
+                d.row_count = $row_count,
                 d.field_count = $field_count,
                 d.updated_at = $ingested_at
             WITH d
@@ -507,6 +510,7 @@ class ManufacturingGraphLoader:
             customer_part_no=payload.customer_part_no,
             kiban=payload.kiban,
             date=payload.date,
+            row_count=payload.row_count,
             field_count=len(payload.dump_fields),
             unit_id=unit_id,
             source_id=payload.source_id,

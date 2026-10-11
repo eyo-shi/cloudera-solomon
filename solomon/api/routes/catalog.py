@@ -41,11 +41,10 @@ def _require_trino_or_503() -> None:
             )
         else:
             instruction = (
-                "Cloudera AI Workbench の Site Administration → Data "
-                "Connections で CDW / Trino connection を登録し、Project "
-                "→ Settings → Advanced → Environment Variables に "
-                "TRINO_CONNECTION_NAME を設定して Application を"
-                "再起動してください。"
+                "Project → Settings → Advanced → Environment Variables に "
+                "TRINO_MODE=external と TRINO_URL (または TRINO_HOST)、"
+                "必要なら TRINO_USER / TRINO_PASSWORD を設定して "
+                "Application を再起動してください。"
             )
         raise HTTPException(
             status_code=503,
@@ -129,8 +128,7 @@ async def _run_query_async(
                 "message": (
                     f"Trino query timed out after {_TRINO_QUERY_TIMEOUT_S:.0f}s. "
                     "The cluster may still be waking from auto-suspend — wait a "
-                    "few minutes and reload, or verify TRINO_HOST / "
-                    "TRINO_CONNECTION_NAME."
+                    "few minutes and reload, or verify TRINO_URL / TRINO_HOST."
                 ),
             },
         ) from exc

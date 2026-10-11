@@ -335,6 +335,58 @@ def test_guardrail_rejects_bad_output() -> None:
     assert msg is not None
 
 
+def test_guardrail_falls_back_to_last_propose(monkeypatch) -> None:
+    from unittest import mock
+
+    from solomon.ingestion.models import ProposeSchemaAndNameResult
+    from solomon.ingestion.pipeline_context import (
+        record_ingestion_task_output,
+        reset_ingestion_pipeline_context,
+    )
+
+    reset_ingestion_pipeline_context()
+    propose = ProposeSchemaAndNameResult(
+        catalog="iceberg",
+        target_schema="demo",
+        proposed_table_name="quality_kanken",
+        columns=[
+            {"name": "id", "trino_type": "BIGINT", "nullable": True, "role": "dimension"},
+        ],
+    )
+    record_ingestion_task_output(3, propose)
+
+    conn = mock.MagicMock()
+    cur = conn.cursor.return_value
+    cur.fetchone.return_value = None
+    monkeypatch.setattr(
+        "solomon.ingestion.permissions.TableExistsTool",
+        lambda: mock.Mock(
+            _run=lambda **_kw: {
+                "status": "ok",
+                "exists": False,
+                "catalog": "iceberg",
+                "schema": "demo",
+                "table": "quality_kanken",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "solomon.tools.iceberg.trino_connection_for_user",
+        lambda *_a, **_kw: conn,
+    )
+
+    bad = ConflictAndPermissionsResult(
+        has_conflict=False,
+        has_create_priv=False,
+        resolved_table="",
+        message="propose_schema missing from context",
+    )
+    ok_, msg = conflict_permissions_guardrail(bad)
+    assert ok_ is True
+    assert msg and "has_create_priv" in msg
+    reset_ingestion_pipeline_context()
+
+
 def test_guardrail_accepts_task_output_wrapper() -> None:
     class _TaskOutput:
         pydantic = None

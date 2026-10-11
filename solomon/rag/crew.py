@@ -34,6 +34,19 @@ def kickoff_knowledge_rag(
     """
     token = set_user_context(user_ctx)
     try:
+        from solomon.graph.manufacturing.trace_qa import (
+            try_answer_manufacturing_trace_prompt,
+        )
+
+        trace_answer = try_answer_manufacturing_trace_prompt(prompt, user_ctx=user_ctx)
+        if trace_answer is not None:
+            _logger.info(
+                "knowledge_rag.manufacturing_trace",
+                user=user_ctx.user_name,
+                trace_id=trace_answer.plan.entity_hint,
+            )
+            return ok_result(trace_answer)
+
         plan = classify_retrieval(prompt)
         _logger.info(
             "knowledge_rag.start",

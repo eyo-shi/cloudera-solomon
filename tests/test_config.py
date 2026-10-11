@@ -4,7 +4,7 @@ env / Cloudera AI Workbench の cml.data_v1 (Data Connections) の解決順を�
 実際に cml が入っていない local dev でも通るように monkeypatch でテストする。
 
 対象:
-* :func:`get_trino_config` — 4 段解決 (named → auto-detect → env → None)
+* :func:`get_trino_config` — external は env のみ / internal は launcher
 * :func:`get_s3_config`    — 3 段解決 + region default
 * :func:`get_llm_config`   — 4 provider の必須 env 判定
 * :func:`get_cdv_config`   — env only
@@ -29,9 +29,8 @@ _ALL_ENV_KEYS = [
     "TRINO_ENDPOINT",
     "TRINO_ENDPOINTS_FILE",
     "SOLOMON_TRINO_ENDPOINTS_FILE",
-    "TRINO_CONNECTION_NAME",
-    "SOLOMON_TRINO_CONNECTION_NAME",
     "TRINO_HOST",
+    "TRINO_URL",
     "SOLOMON_TRINO_HOST",
     "TRINO_PORT",
     "SOLOMON_TRINO_PORT",
@@ -152,97 +151,26 @@ class TestGetTrinoConfig:
         assert c is not None
         assert c.verify_ssl == "/etc/ssl/certs/ca.pem"
 
-    def test_named_connection_resolved_from_cml(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("TRINO_CONNECTION_NAME", "prod-cdw")
-        conn = _fake_conn(
-            _type="cdw",
-            _name="prod-cdw",
-            host="cdw.company.example",
-            port=443,
-            catalog="iceberg",
-            schema="finance",
-        )
-
-        def fake_get(name: str) -> Any:
-            assert name == "prod-cdw"
-            return conn
-
-        monkeypatch.setattr(cfg_mod, "_cml_get_connection", fake_get)
-        c = cfg_mod.get_trino_config()
-        assert c is not None
-        assert c.host == "cdw.company.example"
-        assert c.connection_name == "prod-cdw"
-        assert c.schema == "finance"
-
-    def test_env_catalog_overrides_data_connection(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """env の TRINO_CATALOG は Data Connection より優先される。"""
-        monkeypatch.setenv("TRINO_CONNECTION_NAME", "prod-cdw")
-        monkeypatch.setenv("TRINO_CATALOG", "override_catalog")
-        conn = _fake_conn(
-            _type="cdw",
-            _name="prod-cdw",
-            host="cdw.example.com",
-            catalog="original_catalog",
-        )
-        monkeypatch.setattr(
-            cfg_mod, "_cml_get_connection", lambda name: conn
+    def test_trino_url_parsed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "TRINO_URL",
+            "https://default-trino-aws.example.cloudera.site:443",
         )
         c = cfg_mod.get_trino_config()
         assert c is not None
-        assert c.catalog == "override_catalog"
+        assert c.host == "default-trino-aws.example.cloudera.site"
+        assert c.port == 443
+        assert c.scheme == "https"
 
-    def test_auto_detect_first_matching_connection(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """名前指定が無くても Trino/CDW タイプがあれば自動採用。"""
-        s3_conn = _fake_conn(_type="s3", _name="my-s3", region="us-east-1")
-        trino_conn = _fake_conn(
-            _type="trino",
-            _name="auto-trino",
-            host="auto.trino.example",
-            port=443,
-        )
-        monkeypatch.setattr(
-            cfg_mod, "_cml_list_connections", lambda: [s3_conn, trino_conn]
-        )
+    def test_trino_basic_auth_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRINO_HOST", "trino.example.com")
+        monkeypatch.setenv("TRINO_USER", "svc")
+        monkeypatch.setenv("TRINO_PASSWORD", "secret")
         c = cfg_mod.get_trino_config()
         assert c is not None
-        assert c.host == "auto.trino.example"
-        assert c.connection_name == "auto-trino"
-
-    def test_named_missing_falls_through_to_env(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """明示名指定が cml から取れなくても env host があれば動く。"""
-        monkeypatch.setenv("TRINO_CONNECTION_NAME", "does-not-exist")
-        monkeypatch.setenv("TRINO_HOST", "fallback.trino.example")
-        monkeypatch.setattr(
-            cfg_mod, "_cml_get_connection", lambda name: None
-        )
-        monkeypatch.setattr(cfg_mod, "_cml_list_connections", lambda: [])
-        c = cfg_mod.get_trino_config()
-        assert c is not None
-        assert c.host == "fallback.trino.example"
-        assert c.connection_name is None
-
-    def test_connection_without_host_falls_through_to_env(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Data Connection に host が無ければ env fallback に落ちる。"""
-        monkeypatch.setenv("TRINO_CONNECTION_NAME", "broken")
-        monkeypatch.setenv("TRINO_HOST", "fallback.example")
-        broken = _fake_conn(_type="trino", _name="broken")  # no host
-        monkeypatch.setattr(
-            cfg_mod, "_cml_get_connection", lambda name: broken
-        )
-        monkeypatch.setattr(cfg_mod, "_cml_list_connections", lambda: [])
-        c = cfg_mod.get_trino_config()
-        assert c is not None
-        assert c.host == "fallback.example"
+        assert c.service_user == "svc"
+        assert c.password == "secret"
+        assert c.auth_mode == "auto"
 
 
 # ================================================================== #

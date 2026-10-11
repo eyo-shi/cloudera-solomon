@@ -34,7 +34,7 @@ runtimes:
 #   OPENSEARCH_NAMESPACE, OPENSEARCH_USERNAME / OPENSEARCH_PASSWORD
 #
 # [external Trino] TRINO_MODE=external のとき:
-#   TRINO_CONNECTION_NAME または TRINO_HOST 等 (README 参照)
+#   TRINO_URL または TRINO_HOST 等 (README 参照)
 #
 # [internal モード optional] launcher 既定値で動作。変更する場合のみ post-deploy:
 #   NEO4J_MEMORY (4Gi), NEO4J_USE_PVC (false), NEO4J_SERVICE_TYPE (LoadBalancer),

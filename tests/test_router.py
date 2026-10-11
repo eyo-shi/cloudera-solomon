@@ -532,3 +532,47 @@ def test_resolve_pending_table_ingest() -> None:
     assert resolved is not None
     assert resolved["proposed_table_name"] == "t"
     assert resolved["create_new_table"] is True
+
+
+def test_kickoff_router_pending_table_ingest_before_llm() -> None:
+    """短いテーブル名回答が LLM UNKNOWN にならず INGEST へ。"""
+    ctx = UserContext(user_name="alice", groups=[], knox_jwt=None)
+
+    class _FakeLLM:
+        """llm_light が非 None なら LLM 経路に入るダミー。"""
+
+    result = kickoff_router(
+        user_ctx=ctx,
+        prompt="demo.quality_kanken という名前で新規作成",
+        session_id="s1",
+        entity_memory={
+            "pending_table_ingest": {
+                "bucket": "b",
+                "key": "260707235042.rlt.品質.txt",
+                "target_schema": "demo",
+            }
+        },
+        llm_light=_FakeLLM(),
+        mode="llm",
+    )
+    assert result.classification.intent == "INGEST"
+    assert result.plan.skip_child is False
+    assert result.plan.child_crew == "ingestion"
+    assert result.plan.inputs["proposed_table_name"] == "quality_kanken"
+    assert result.plan.inputs["create_new_table"] is True
+
+
+def test_resolve_pending_table_ingest_keeps_pending_proposed_name() -> None:
+    entity_memory = {
+        "pending_table_ingest": {
+            "bucket": "b",
+            "key": "k.txt",
+            "target_schema": "demo",
+            "proposed_table_name": "t_260707235042_rlt",
+            "create_new_table": True,
+        }
+    }
+    resolved = resolve_pending_table_ingest("demo.kanken という名前で新規作成", entity_memory)
+    assert resolved is not None
+    assert resolved["proposed_table_name"] == "kanken"
+    assert resolved["create_new_table"] is True

@@ -5,8 +5,7 @@ Trino 側は Knox が提示した JWT の ``sub`` クレームでユーザーを
 Ranger の ACL 判定に使う (= エンドユーザー権限)。
 
 接続先ホスト / port / SSL 検証は :mod:`solomon.transport.config` の
-:func:`get_trino_config` から取得する。解決順は
-「Data Connection (Site Administration 由来) → env fallback」の 2 段。
+:func:`get_trino_config`（external 時は ``TRINO_URL`` / ``TRINO_HOST`` 等の env）から取得する。
 """
 from __future__ import annotations
 
@@ -18,7 +17,7 @@ from solomon.transport.user_context import UserContext
 
 try:  # trino は本番依存
     import trino  # type: ignore
-    from trino.auth import JWTAuthentication  # type: ignore
+    from trino.auth import BasicAuthentication, JWTAuthentication  # type: ignore
     from trino.exceptions import TrinoQueryError, TrinoUserError  # type: ignore
 except ImportError:  # pragma: no cover
     trino = None  # type: ignore[assignment]
@@ -28,6 +27,15 @@ except ImportError:  # pragma: no cover
 
     class TrinoUserError(TrinoQueryError):  # type: ignore[no-redef]
         pass
+
+
+def _use_trino_basic_auth(cfg: Any) -> bool:
+    mode = (cfg.auth_mode or "auto").strip().lower()
+    if mode == "basic":
+        return True
+    if mode == "jwt":
+        return False
+    return bool(cfg.password)
 
 
 def trino_connection_for_user(
@@ -55,13 +63,22 @@ def trino_connection_for_user(
             )
         return err(
             ErrorCode.TRINO_NOT_CONFIGURED,
-            "Trino connection is not configured. Register a CDW/Trino "
-            "Data Connection in Site Administration, or set "
-            "TRINO_CONNECTION_NAME / TRINO_HOST after deploy.",
+            "Trino connection is not configured. Set TRINO_MODE=external and "
+            "TRINO_URL (or TRINO_HOST) plus auth env after deploy.",
         )
+
+    basic_auth = not cfg.internal and _use_trino_basic_auth(cfg)
 
     if cfg.internal:
         user_name = user_ctx.user_name or "solomon"
+    elif basic_auth:
+        user_name = cfg.service_user or user_ctx.user_name or "solomon"
+        if not cfg.password:
+            return err(
+                ErrorCode.TRINO_NOT_CONFIGURED,
+                "Trino Basic auth is enabled but TRINO_PASSWORD (or Connection "
+                "password) is not set.",
+            )
     elif not user_ctx.knox_jwt:
         return err(ErrorCode.AUTH_MISSING, "Knox JWT is required for Trino access")
     else:
@@ -81,7 +98,10 @@ def trino_connection_for_user(
         },
     }
     if not cfg.internal:
-        connect_kwargs["auth"] = JWTAuthentication(user_ctx.knox_jwt)
+        if basic_auth:
+            connect_kwargs["auth"] = BasicAuthentication(user_name, cfg.password)
+        else:
+            connect_kwargs["auth"] = JWTAuthentication(user_ctx.knox_jwt)
 
     conn = trino.dbapi.connect(**connect_kwargs)
     return conn

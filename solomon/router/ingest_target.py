@@ -155,6 +155,10 @@ def resolve_pending_table_ingest(
         args["proposed_table_name"] = parsed["proposed_table_name"]
     if parsed.get("create_new_table") is not None:
         args["create_new_table"] = bool(parsed["create_new_table"])
+    elif pending.get("create_new_table") is not None:
+        args["create_new_table"] = bool(pending["create_new_table"])
+    if not args.get("proposed_table_name") and pending.get("proposed_table_name"):
+        args["proposed_table_name"] = str(pending["proposed_table_name"])
     return args
 
 

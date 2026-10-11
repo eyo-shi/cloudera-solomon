@@ -1,21 +1,28 @@
 """Semantic Search browser API (`/api/search/*`).
 
-TreePane の Search タブ用。外部 OpenSearch (Cloudera Semantic Search) を参照する。
+TreePane の Search タブ用。既定は CDE Bronze 取込の ``inspection-*`` インデックス。
 """
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from solomon.api.auth import require_user_context
 from solomon.opensearch.client import build_client, ping
 from solomon.opensearch.indexer import ensure_index
+from solomon.opensearch.inspection_indices import (
+    inspection_index_pattern,
+    search_inspection_documents,
+    search_tab_scope,
+)
 from solomon.opensearch.search import keyword_search
 from solomon.transport.config import get_opensearch_config
 from solomon.transport.user_context import UserContext
 
 router = APIRouter(prefix="/api/search", tags=["search"])
+
+ScopeParam = Literal["inspection", "datasets", "both"]
 
 
 def _require_opensearch_or_503() -> None:
@@ -47,13 +54,52 @@ def _require_opensearch_or_503() -> None:
         )
 
 
+def _list_dataset_documents(config: Any, q: str, limit: int) -> list[dict[str, Any]]:
+    client = build_client(config)
+    ensure_index(client, config)
+    if q.strip():
+        return keyword_search(config, q.strip(), top_k=limit)
+
+    body = {
+        "size": limit,
+        "query": {"match_all": {}},
+        "sort": [{"fq_name": {"order": "asc"}}],
+    }
+    response = client.search(index=config.index_name, body=body)
+    hits: list[dict[str, Any]] = []
+    for hit in response.get("hits", {}).get("hits", []):
+        source = hit.get("_source", {})
+        hits.append(
+            {
+                "document_type": "dataset",
+                "index": config.index_name,
+                "fq_name": source.get("fq_name"),
+                "score": round(float(hit.get("_score", 0.0)), 4),
+                "title": source.get("fq_name") or hit.get("_id"),
+                "subtitle": (source.get("dataset") or {}).get("description"),
+                "dataset": source.get("dataset", {}),
+            }
+        )
+    return hits
+
+
+def _resolve_scope(scope: ScopeParam | None) -> ScopeParam:
+    if scope is not None:
+        return scope
+    return search_tab_scope()
+
+
 @router.get("/documents")
 def list_documents(
     user_ctx: Annotated[UserContext, Depends(require_user_context)],
     q: Annotated[str, Query(max_length=512)] = "",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    scope: Annotated[
+        ScopeParam | None,
+        Query(description="inspection=Bronze CDE indices (default), datasets=solomon-datasets"),
+    ] = None,
 ) -> dict[str, Any]:
-    """インデックス済みドキュメントをキーワード検索 (空なら match_all)。"""
+    """OpenSearch ドキュメント一覧。既定は ``inspection-*`` (Bronze 1 ファイル = 1 doc)。"""
     _ = user_ctx
     config = get_opensearch_config()
     _require_opensearch_or_503()
@@ -68,29 +114,31 @@ def list_documents(
             },
         )
 
+    resolved = _resolve_scope(scope)
+    query = q.strip()
+
     try:
-        client = build_client(config)
-        ensure_index(client, config)
-        if q.strip():
-            hits = keyword_search(config, q.strip(), top_k=limit)
-        else:
-            body = {
-                "size": limit,
-                "query": {"match_all": {}},
-                "sort": [{"fq_name": {"order": "asc"}}],
-            }
-            response = client.search(index=config.index_name, body=body)
-            raw_hits = response.get("hits", {}).get("hits", [])
-            hits = []
-            for hit in raw_hits:
-                source = hit.get("_source", {})
-                hits.append(
-                    {
-                        "fq_name": source.get("fq_name"),
-                        "score": round(float(hit.get("_score", 0.0)), 4),
-                        "dataset": source.get("dataset", {}),
-                    }
-                )
+        documents: list[dict[str, Any]] = []
+        if resolved in ("inspection", "both"):
+            documents.extend(
+                search_inspection_documents(config, query, limit=limit)
+            )
+        if resolved in ("datasets", "both"):
+            dataset_limit = limit if resolved == "datasets" else max(1, limit // 2)
+            documents.extend(_list_dataset_documents(config, query, dataset_limit))
+        if resolved == "both":
+            documents.sort(
+                key=lambda d: (-float(d.get("score") or 0.0), str(d.get("title") or "")),
+            )
+            documents = documents[:limit]
+
+        index_label = (
+            config.index_name
+            if resolved == "datasets"
+            else inspection_index_pattern()
+            if resolved == "inspection"
+            else f"{inspection_index_pattern()}, {config.index_name}"
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502,
@@ -101,8 +149,9 @@ def list_documents(
         ) from exc
 
     return {
-        "index": config.index_name,
+        "index": index_label,
         "namespace": config.namespace,
+        "scope": resolved,
         "query": q,
-        "documents": hits,
+        "documents": documents,
     }
