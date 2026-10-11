@@ -26,9 +26,9 @@ def _clean_trino_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(key, raising=False)
 
 
-def test_default_mode_is_internal() -> None:
-    assert trino_mode() == "internal"
-    assert is_internal_trino_mode()
+def test_default_mode_is_external() -> None:
+    assert trino_mode() == "external"
+    assert not is_internal_trino_mode()
 
 
 def test_legacy_mode_env(monkeypatch: pytest.MonkeyPatch) -> None:

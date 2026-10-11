@@ -455,7 +455,7 @@ def _get_external_trino_config(
 def get_trino_config() -> Optional[TrinoConfig]:
     """Trino 接続設定を解決する。
 
-    * ``TRINO_MODE=internal`` (default): warehouse-launcher の Trino + DuckDB
+    * ``TRINO_MODE=internal``: warehouse-launcher の Trino + DuckDB
     * ``TRINO_MODE=external``: CDW / Trino — Application env (``TRINO_URL`` 等)
     """
     from solomon.trino.mode import is_internal_trino_mode
@@ -848,7 +848,7 @@ def _get_internal_opensearch_config(
 def get_opensearch_config() -> Optional[OpenSearchConfig]:
     """OpenSearch 接続設定。``OPENSEARCH_MODE`` で解決経路を切り替える。
 
-    * ``internal`` (default): opensearch-launcher が書く
+    * ``internal``: opensearch-launcher が書く
       ``.solomon/opensearch_endpoints.json`` / ``OPENSEARCH_ENDPOINT``
     * ``external``: Data Hub Semantic Search — Data Connection または env
     """

@@ -73,16 +73,16 @@ environment_variables:
       Neo4j 認証パスワード。neo4j-launcher と Solomon が共有。本番運用時は必ず変更すること。
     required: false
   OPENSEARCH_MODE:
-    default: "internal"
+    default: "external"
     description: >-
-      OpenSearch 接続方式。internal = opensearch-launcher が CML 内で起動 (推奨・デフォルト)。
-      external = 外部クラスタ — Deploy 後に Project Settings で接続情報を設定。
+      OpenSearch 接続方式。external (デフォルト) = Semantic Search 等 — Deploy 後に接続 env を設定。
+      internal = opensearch-launcher が CML 内で起動。
     required: false
   TRINO_MODE:
-    default: "internal"
+    default: "external"
     description: >-
-      Trino / Tables 接続方式。internal = warehouse-launcher が Trino + DuckDB を
-      CML 内で起動 (デモ用・デフォルト)。external = CDW Trino — Deploy 後に
+      Trino / Tables 接続方式。external (デフォルト) = CDW Trino — Deploy 後に
+      TRINO_URL 等を設定。internal = warehouse-launcher (Trino + DuckDB デモ) —
       Data Connection または TRINO_HOST を設定。
     required: false
 

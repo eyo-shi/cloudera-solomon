@@ -42,9 +42,9 @@ def _clean_opensearch_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cfg_mod, "_cmldata_import_attempted", True)
 
 
-def test_default_mode_is_internal() -> None:
-    assert opensearch_mode() == "internal"
-    assert is_internal_opensearch_mode()
+def test_default_mode_is_external() -> None:
+    assert opensearch_mode() == "external"
+    assert not is_internal_opensearch_mode()
 
 
 def test_legacy_mode_aliases(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -14,11 +14,11 @@ _LEGACY_MODE_ENV = "SOLOMON_TRINO_MODE"
 def trino_mode() -> str:
     raw = env_first(_MODE_ENV, _LEGACY_MODE_ENV)
     if raw is None:
-        return "internal"
+        return "external"
     previous = os.environ.get(_MODE_ENV)
     os.environ[_MODE_ENV] = raw
     try:
-        return deployment_mode(_MODE_ENV, default="internal")
+        return deployment_mode(_MODE_ENV, default="external")
     finally:
         if previous is None:
             os.environ.pop(_MODE_ENV, None)

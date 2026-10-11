@@ -58,7 +58,7 @@ function guideFor(errorCode: string): GuideDetails {
         envList: [
           {
             name: "TRINO_MODE",
-            hint: "internal (デフォルト) = warehouse-launcher / external = CDW Trino",
+            hint: "external (デフォルト) = CDW Trino / internal = warehouse-launcher",
           },
           {
             name: "TRINO_URL / TRINO_HOST",
@@ -159,7 +159,7 @@ function guideFor(errorCode: string): GuideDetails {
         envList: [
           {
             name: "OPENSEARCH_MODE",
-            hint: "internal = opensearch-launcher (CML 内部) / external = Data Hub Semantic Search 等",
+            hint: "external (デフォルト) = Semantic Search / internal = opensearch-launcher",
           },
           {
             name: "OPENSEARCH_CONNECTION_NAME",

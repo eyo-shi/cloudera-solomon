@@ -133,11 +133,11 @@ Deploy 時に Configuration 画面へ表示される Environment Variables (す�
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `SOLOMON_LOG_LEVEL` | `INFO` | ログレベル |
-| `TRINO_MODE` | `internal` | Trino / Tables: warehouse-launcher (DuckDB) / CDW |
+| `TRINO_MODE` | `external` | Trino / Tables: CDW Trino / `internal` = warehouse-launcher |
 | `NEO4J_MODE` | `internal` | Neo4j: CML 内 launcher / 外部クラスタ |
 | `NEO4J_USERNAME` | `neo4j` | Neo4j 認証ユーザー (launcher と Solomon が共有) |
 | `NEO4J_PASSWORD` | `Neo4jPass1234` | Neo4j 認証パスワード (本番では必ず変更) |
-| `OPENSEARCH_MODE` | `internal` | OpenSearch: CML 内 launcher / 外部クラスタ |
+| `OPENSEARCH_MODE` | `external` | OpenSearch: Semantic Search / `internal` = launcher |
 
 launcher のメモリ・PVC 等のチューニングは Deploy フォームには出さない。
 必要な場合のみ Deploy 後に **Project → Settings → Advanced → Environment Variables**
@@ -155,7 +155,7 @@ instruction}`) を返し、UI の **SetupGuide カード** が手順を表示す
 
 ### 1. Trino / Tables への接続
 
-Deploy 時に `TRINO_MODE` で接続方式を切り替える (デフォルト `internal`)。
+Deploy 時に `TRINO_MODE` で接続方式を切り替える (デフォルト `external`)。
 
 | モード | 用途 | 設定 |
 |---|---|---|
@@ -221,7 +221,7 @@ Deploy 時に `NEO4J_MODE` で接続方式を切り替える (デフォルト `i
 
 ### 4. OpenSearch / Semantic Search への接続
 
-Deploy 時に `OPENSEARCH_MODE` で接続方式を切り替える (デフォルト `internal`)。
+Deploy 時に `OPENSEARCH_MODE` で接続方式を切り替える (デフォルト `external`)。
 Solomon プロセス内では OpenSearch サーバーは起動しない。
 
 | モード | 用途 | 設定 |
