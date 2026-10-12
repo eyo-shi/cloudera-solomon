@@ -424,6 +424,12 @@ RETURN v.id AS vb_machine_no, p.trace_id AS product_trace_id,
        collect(DISTINCT {key: f.key, format: f.format}) AS source_files
 """.strip()
 
+_VB_MACHINE_CYPHER_VIZ = """
+MATCH (v:VbMachine {id: $vb_id})-[:VB_TEST]->(p:Product)
+OPTIONAL MATCH (f:SourceFile)-[:INGESTED_INTO]->(p)
+RETURN v, p, collect(f) AS source_files
+""".strip()
+
 
 def parse_vb_machine_from_prompt(prompt: str) -> str | None:
     text = prompt.strip()
@@ -483,6 +489,7 @@ def format_vb_machine_markdown(vb_id: str, ctx: dict[str, Any]) -> str:
         graph_cypher_markdown_link(
             _VB_MACHINE_CYPHER,
             {"vb_id": str(ctx.get("vb_machine_no") or vb_id)},
+            run_cypher=_VB_MACHINE_CYPHER_VIZ,
         ),
         "",
     ]
@@ -559,6 +566,11 @@ RETURN f.key AS key, f.format AS format, p.trace_id AS product_trace_id
 ORDER BY f.format, f.key
 """.strip()
 
+_GRAPH_CYPHER_VIZ = """
+MATCH (k:Kiban {id: $trace_id})<-[:HAS_KIBAN]-(p:Product)<-[:INGESTED_INTO]-(f:SourceFile)
+RETURN k, p, collect(f) AS source_files
+""".strip()
+
 
 def is_manufacturing_trace_graph_prompt(prompt: str) -> bool:
     """製品トレースと SourceFile / Kiban のグラフ関係説明（デモ Q4）。"""
@@ -630,7 +642,11 @@ def format_trace_graph_markdown(trace_id: str, ctx: dict[str, Any]) -> str:
         "",
         "参照 Cypher（Neo4j Bronze モデル・クリックで Graph タブで実行）:",
         "",
-        graph_cypher_markdown_link(_GRAPH_CYPHER, {"trace_id": trace_id}),
+        graph_cypher_markdown_link(
+            _GRAPH_CYPHER,
+            {"trace_id": trace_id},
+            run_cypher=_GRAPH_CYPHER_VIZ,
+        ),
         "",
         f"（データソース: **{model}** / {ctx.get('source', '—')}）",
         "",

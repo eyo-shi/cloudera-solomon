@@ -17,3 +17,4 @@ def test_graph_cypher_markdown_link_encodes_params() -> None:
     parsed = parse_qs(query)
     assert unquote_plus(parsed["cypher"][0]) == cypher
     assert '"vb_id":"166890"' in unquote_plus(parsed["params"][0])
+    assert parsed.get("vb_id", [""])[0] == "166890"

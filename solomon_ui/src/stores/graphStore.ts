@@ -21,6 +21,8 @@ export type GraphPanelView = "graph" | "table" | "raw";
 export interface GraphResultPanel {
   id: string;
   cypher: string;
+  /** パネル表示用 Cypher と異なる実行文（Graph 可視化向け RETURN 等） */
+  runCypher?: string;
   cypherParams?: Record<string, string | number | boolean>;
   queryType: GraphQueryType | "cypher";
   status: "loading" | "ready" | "error";
@@ -43,6 +45,8 @@ export interface GraphSidebarQuery {
 
 interface GraphState {
   queryInput: string;
+  /** クエリバー実行時に POST へ渡す Cypher パラメータ（$trace_id 等） */
+  queryParams: Record<string, string | number | boolean>;
   panels: GraphResultPanel[];
   maximizedPanelId: string | null;
   setQueryInput: (value: string) => void;
@@ -55,6 +59,7 @@ interface GraphState {
   appendCypherQuery: (
     cypher: string,
     params?: Record<string, string | number | boolean>,
+    runCypher?: string,
   ) => void;
   removePanel: (panelId: string) => void;
   rerunPanel: (panelId: string) => void;
@@ -95,7 +100,8 @@ function panelLoader(panel: GraphResultPanel): () => Promise<GraphQueryResponse>
     return () =>
       fetchGraphQuery("entity", { entity_hint: panel.entityHint });
   }
-  return () => executeGraphCypher(panel.cypher, panel.cypherParams ?? {});
+  const statement = (panel.runCypher ?? panel.cypher).trim();
+  return () => executeGraphCypher(statement, panel.cypherParams ?? {});
 }
 
 function mergeGraphVisualizations(
@@ -153,6 +159,7 @@ async function loadPanel(
 
 export const useGraphStore = create<GraphState>((set, get) => ({
   queryInput: "",
+  queryParams: {},
   panels: [],
   maximizedPanelId: null,
 
@@ -184,6 +191,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     }
     set((s) => ({
       queryInput: cypher,
+      queryParams: {},
       panels: [
         {
           id: panelId,
@@ -205,6 +213,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const cypher = get().queryInput.trim();
     if (!cypher) return;
     ensureGraphTab();
+    const queryParams = get().queryParams;
 
     const panelId = nextPanelId();
     set((s) => ({
@@ -212,6 +221,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         {
           id: panelId,
           cypher,
+          cypherParams:
+            Object.keys(queryParams).length > 0 ? queryParams : undefined,
           queryType: "cypher",
           status: "loading",
           defaultView: "graph",
@@ -220,21 +231,26 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       ],
     }));
 
-    void loadPanel(panelId, () => executeGraphCypher(cypher));
+    void loadPanel(panelId, () => executeGraphCypher(cypher, queryParams));
   },
 
-  appendCypherQuery: (cypher, params) => {
+  appendCypherQuery: (cypher, params, runCypher) => {
     const text = cypher.trim();
     if (!text) return;
     ensureGraphTab();
     const panelId = nextPanelId();
     const cypherParams = params && Object.keys(params).length > 0 ? params : undefined;
+    const runText = runCypher?.trim();
+    const run = runText && runText !== text ? runText : undefined;
+    const executeStatement = run ?? text;
     set((s) => ({
       queryInput: text,
+      queryParams: cypherParams ?? {},
       panels: [
         {
           id: panelId,
           cypher: text,
+          runCypher: run,
           cypherParams,
           queryType: "cypher",
           status: "loading",
@@ -244,7 +260,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       ],
     }));
     void loadPanel(panelId, () =>
-      executeGraphCypher(text, cypherParams ?? {}),
+      executeGraphCypher(executeStatement, cypherParams ?? {}),
     );
   },
 
@@ -301,6 +317,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const panelId = nextPanelId();
     set((s) => ({
       queryInput: cypher,
+      queryParams: {},
       panels: [
         {
           id: panelId,
@@ -336,7 +353,10 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   rerunPanel: (panelId) => {
     const panel = get().panels.find((p) => p.id === panelId);
     if (!panel) return;
-    set({ queryInput: panel.cypher });
+    set({
+      queryInput: panel.cypher,
+      queryParams: panel.cypherParams ?? {},
+    });
     void loadPanel(panelId, panelLoader(panel));
   },
 }));
