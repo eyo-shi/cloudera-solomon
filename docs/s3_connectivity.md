@@ -64,10 +64,27 @@ Storage タブで一覧が空 / 403 のとき:
 
 Application Log で **`idbroker.access_denied` / HTTP 401** のとき:
 
-- **IDBroker URL は到達できている**（401 = トークン拒否）。Console → Environment → **Manage Access → ID Broker Mappings** でユーザー / グループを Data Access ロールにマップし **Sync** する。
-- Workbench Application の **Cookie JWT** は aws-cab で拒否されやすい。Solomon は **`/tmp/jwt`**（CML データレイクアクセス用）を優先する。Session で `test -f /tmp/jwt && wc -c /tmp/jwt` を確認。
+- **IDBroker URL は到達できている**（401 = トークン拒否）。Console → Environment → **Manage Access → ID Broker Mappings** でユーザー / グループを Data Access ロールにマップし **Sync** する（**IAM ロールの割当**。トークン種別の問題とは別）。
 - ホスト名は `...-idbroker0...`（`idbroker` の綴りに注意）。
-- Log の body に **`missing required token audience`** がある場合: Workbench Application の JWT / `/tmp/jwt` が **aws-cab 用 audience ではない**。Console で **ID Broker Mappings を Sync** し、それでも 400 のときは **S3 Data Connection** 経路か、環境管理者に **Knox token / CAB audience** の設定を確認する（Solomon 単体では長期 AK/SK は使わない）。
+
+Log の body に **`missing required token audience`** がある場合:
+
+- **Mappings を Sync 済みでも起こり得る**。CAB が欲しいのは Workbench Cookie や ``/tmp/jwt`` ではなく、多くの場合 **Knox delegation token**（`…/gateway/dt/knoxtoken/api/v1/token` の `access_token`）です。
+- Solomon は CAB 呼び出し前に **knoxtoken API** へセッション / workload JWT（および Session では Kerberos SPNEGO が使えるとき）で交換を試みます（`SOLOMON_KNOXTOKEN_URL` で URL を上書き可）。
+- **Session での切り分け**（Kerberos ログイン済み notebook）:
+
+```bash
+IDB=go01-aw-dl-md-idbroker0.go01-dem.ylcu-atmi.cloudera.site
+TOKEN="$(curl -s --negotiate -u: "https://${IDB}:8444/gateway/dt/knoxtoken/api/v1/token" \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
+curl -s -H "Authorization: Bearer ${TOKEN}" \
+  "https://${IDB}:8444/gateway/aws-cab/cab/api/v1/credentials" | head -c 200
+```
+
+  ここが 200 なら Mappings + CAB は正常。**Application だけ 400** のときは、Application ランタイムから knoxtoken 交換ができていない（Kerberos / JWT 経路の差）可能性が高い。
+
+- **回避**: Project に S3 Data Connection があるなら、一時的に **`SOLOMON_IDBROKER_URL` を外して** Restart すると Data Connection 経路に切り替わる（IDBroker 設定がある間は Connection は使われない）。
+- それでもダメな場合は環境管理者に **Knox aws-cab topology / CAB audience** と Workbench Application からの token 取得方法を確認する（Solomon は長期 AK/SK を env に置かない）。
 
 ---
 

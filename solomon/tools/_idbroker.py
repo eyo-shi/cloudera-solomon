@@ -7,6 +7,7 @@ SessionToken, Expiration) を返す。この短期資格情報を UserContext �
 
 環境変数:
   SOLOMON_IDBROKER_URL - IDBroker のベース URL (例: https://knox.example.com:8443/gateway)
+  SOLOMON_KNOXTOKEN_URL - (任意) Knox delegation token API (未設定時は IDBroker + /dt/knoxtoken/api/v1/token)
 
 セキュリティ:
   * fetched credentials は module-level dict にキャッシュされるが、キーは
@@ -32,6 +33,7 @@ _logger = get_logger(__name__)
 
 _IDBROKER_TIMEOUT_S = 15.0
 _CAB_PATH = "/aws-cab/cab/api/v1/credentials"
+_KNOXTOKEN_PATH = "/dt/knoxtoken/api/v1/token"
 _REFRESH_MARGIN_S = 60  # 期限まで 60 秒未満なら再取得
 
 # request_id -> AwsCredentials のキャッシュ (module-level)
@@ -64,14 +66,105 @@ def _parse_expiration(exp: Any) -> int:
     return int(time.time()) + 1800
 
 
+def knoxtoken_url() -> str | None:
+    """Knox delegation token を発行する URL (CAB が要求する audience 用)。"""
+    custom = (os.environ.get("SOLOMON_KNOXTOKEN_URL") or "").strip()
+    if custom:
+        return custom.rstrip("/")
+    idb = (os.environ.get("SOLOMON_IDBROKER_URL") or "").strip()
+    if not idb:
+        return None
+    return f"{idb.rstrip('/')}{_KNOXTOKEN_PATH}"
+
+
+def _knoxtoken_access_token(body: Any) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    for key in ("access_token", "token", "accessToken"):
+        val = body.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return None
+
+
+def _knoxtoken_via_spnego(url: str) -> str | None:
+    """Session / notebook 向け: Kerberos SPNEGO で Knox token を取得 (任意依存)。"""
+    try:
+        import requests
+        from requests_kerberos import HTTPKerberosAuth, OPTIONAL
+    except ImportError:
+        return None
+    try:
+        resp = requests.get(
+            url,
+            auth=HTTPKerberosAuth(mutual_authentication=OPTIONAL),
+            timeout=_IDBROKER_TIMEOUT_S,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if resp.status_code >= 400:
+        return None
+    try:
+        return _knoxtoken_access_token(resp.json())
+    except ValueError:
+        return None
+
+
+def fetch_knox_delegation_token(user_ctx: UserContext) -> Optional[str]:
+    """CML セッション JWT を Knox CAB 向け delegation token に交換する (可能な場合)。"""
+    url = knoxtoken_url()
+    if not url:
+        return None
+    try:
+        with httpx.Client(timeout=_IDBROKER_TIMEOUT_S) as client:
+            for label, raw in (
+                ("session", user_ctx.knox_jwt),
+                ("workload", load_workload_jwt_token()),
+            ):
+                if not raw or not raw.strip():
+                    continue
+                resp = client.get(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {raw.strip()}",
+                        "Accept": "application/json",
+                    },
+                )
+                if resp.status_code >= 400:
+                    _logger.debug(
+                        "knoxtoken.failed",
+                        method=label,
+                        status=resp.status_code,
+                    )
+                    continue
+                try:
+                    tok = _knoxtoken_access_token(resp.json())
+                except ValueError:
+                    continue
+                if tok:
+                    _logger.debug("knoxtoken.ok", method=label)
+                    return tok
+    except httpx.HTTPError as exc:
+        _logger.debug("knoxtoken.error", error=str(exc))
+
+    tok = _knoxtoken_via_spnego(url)
+    if tok:
+        _logger.debug("knoxtoken.ok", method="spnego")
+    return tok
+
+
 def _cab_bearer_candidates(user_ctx: UserContext) -> list[str]:
     """CAB 用 Bearer の試行順（重複除去）。
 
-    ``/tmp/jwt`` は aws-cab の token audience を満たさず 400 になることがあるため、
-    ブラウザセッション JWT を先に試す。
+    aws-cab は **Knox delegation token** (knoxtoken API) を期待することが多く、
+    Workbench Cookie JWT や ``/tmp/jwt`` だけでは ``missing required token audience`` になる。
     """
     seen: set[str] = set()
     out: list[str] = []
+    delegation = fetch_knox_delegation_token(user_ctx)
+    if delegation:
+        seen.add(delegation)
+        out.append(delegation)
     for raw in (user_ctx.knox_jwt, load_workload_jwt_token()):
         if not raw:
             continue
