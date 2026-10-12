@@ -1,12 +1,10 @@
 """Chat 回答 Markdown から Search ドキュメントタブを開くリンク。"""
 from __future__ import annotations
 
+import hashlib
 from typing import Any
-from urllib.parse import urlencode
 
-
-def _escape_md_label(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+from solomon.markdown.solomon_links import _escape_md_label, solomon_markdown_link
 
 
 def search_document_markdown_link(label: str, doc: dict[str, Any]) -> str:
@@ -19,8 +17,13 @@ def search_document_markdown_link(label: str, doc: dict[str, Any]) -> str:
         val = doc.get(field)
         if val not in (None, ""):
             params[field] = str(val)
-    query = urlencode(params)
-    return f"[{_escape_md_label(label)}](solomon://search-document?{query})"
+    ref_suffix = hashlib.sha256(key.encode()).hexdigest()[:10]
+    return solomon_markdown_link(
+        label,
+        "search-document",
+        params,
+        ref_key=f"solomon-search-doc-{ref_suffix}",
+    )
 
 
 __all__ = ["search_document_markdown_link"]

@@ -2579,6 +2579,7 @@ body,
   flex-shrink: 0;
 }
 .thinking-block__title {
+  font-size: var(--workspace-font-size);
   font-weight: 600;
   color: var(--chat-text-muted);
   letter-spacing: 0.02em;
@@ -2604,7 +2605,7 @@ body,
   flex-direction: column;
   gap: 0.35rem;
   color: var(--chat-text);
-  font-size: var(--font-size-sm);
+  font-size: var(--workspace-font-size);
   line-height: 1.45;
 }
 .thinking-block__narratives li {
@@ -2623,7 +2624,7 @@ body,
 }
 .thinking-block__hint {
   margin: 0.5rem 0 0.25rem;
-  font-size: var(--font-size-sm);
+  font-size: var(--workspace-font-size);
   color: var(--chat-text-muted);
   line-height: 1.45;
 }
@@ -2662,7 +2663,7 @@ body,
   display: flex;
   gap: 0.5rem;
   align-items: flex-start;
-  font-size: var(--font-size-sm);
+  font-size: var(--workspace-font-size);
   line-height: 1.35;
 }
 .thinking-block__activity--running {
@@ -2679,7 +2680,8 @@ body,
   min-width: 0;
 }
 .thinking-block__activity-name {
-  font-weight: 600;
+  font-size: inherit;
+  font-weight: 500;
   color: var(--chat-text);
 }
 .thinking-block__activity--done .thinking-block__activity-name {
@@ -2687,12 +2689,12 @@ body,
   color: var(--chat-text-muted);
 }
 .thinking-block__activity-agent {
-  font-size: var(--font-size-xs);
+  font-size: inherit;
   color: var(--chat-text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .thinking-block__activity-detail {
-  font-size: var(--font-size-xs);
+  font-size: inherit;
   color: var(--chat-text-muted);
   word-break: break-word;
 }

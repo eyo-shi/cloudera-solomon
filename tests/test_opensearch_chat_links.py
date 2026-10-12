@@ -14,7 +14,8 @@ def test_search_document_markdown_link() -> None:
             "trace_id": "26G3V05354",
         },
     )
-    assert md.startswith("[foo.txt](solomon://search-document?")
+    assert md.startswith("[foo.txt][solomon-search-doc-")
+    assert "solomon://search-document?" in md
     assert "object_key=j5_main_id%2Ffoo.txt" in md or "object_key=j5_main_id/foo.txt" in md
 
 

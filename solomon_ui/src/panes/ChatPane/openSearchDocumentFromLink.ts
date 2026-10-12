@@ -3,10 +3,12 @@ import { openSearchDocumentTab } from "../ResultPane/tabs/SearchDocumentTab";
 import type { SearchDocumentEntry } from "../../types";
 import type { useTabStore } from "../../stores/tabStore";
 
+import { normalizeSolomonHref } from "./solomonAppLinks";
+
 const SCHEME = "solomon://search-document";
 
 export function isSearchDocumentLink(href: string | undefined): boolean {
-  return Boolean(href?.startsWith(SCHEME));
+  return Boolean(normalizeSolomonHref(href)?.startsWith(SCHEME));
 }
 
 export function parseSearchDocumentLink(href: string): URLSearchParams | null {
@@ -35,7 +37,8 @@ export async function openSearchDocumentFromLink(
   href: string,
   openTab: ReturnType<typeof useTabStore.getState>["openTab"],
 ): Promise<void> {
-  const params = parseSearchDocumentLink(href);
+  const normalized = normalizeSolomonHref(href) ?? href;
+  const params = parseSearchDocumentLink(normalized);
   if (!params) return;
 
   const objectKey = params.get("object_key") ?? "";
@@ -48,18 +51,24 @@ export async function openSearchDocumentFromLink(
     title: objectKey.split("/").filter(Boolean).pop() ?? objectKey,
   };
 
-  let doc = stub;
-  try {
-    doc = await fetchSearchDocument(params);
-  } catch {
-    /* 404 等 — stub でタブを開く */
-  }
-
-  const title =
-    doc.title ??
-    (doc.object_key
-      ? doc.object_key.split("/").filter(Boolean).pop()
-      : null) ??
+  const titleFromKey =
+    stub.title ??
+    (objectKey ? objectKey.split("/").filter(Boolean).pop() : null) ??
     "document";
-  openSearchDocumentTab(openTab, doc, title);
+  openSearchDocumentTab(openTab, stub, titleFromKey);
+
+  try {
+    const doc = await fetchSearchDocument(params);
+    openSearchDocumentTab(
+      openTab,
+      doc,
+      doc.title ??
+        (doc.object_key
+          ? doc.object_key.split("/").filter(Boolean).pop()
+          : null) ??
+        titleFromKey,
+    );
+  } catch {
+    /* 404 等 — stub タブのまま */
+  }
 }

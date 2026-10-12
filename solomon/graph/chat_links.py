@@ -1,9 +1,11 @@
 """Chat 回答 Markdown から Graph タブで Cypher を実行するリンク。"""
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
-from urllib.parse import urlencode
+
+from solomon.markdown.solomon_links import solomon_markdown_link
 
 
 def graph_cypher_markdown_link(
@@ -19,9 +21,14 @@ def graph_cypher_markdown_link(
     payload: dict[str, str] = {"cypher": text}
     if params:
         payload["params"] = json.dumps(params, ensure_ascii=False, separators=(",", ":"))
-    query = urlencode(payload)
-    safe_label = label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
-    return f"[{safe_label}](solomon://graph-cypher?{query})"
+    url_seed = json.dumps(payload, sort_keys=True)
+    ref_suffix = hashlib.sha256(url_seed.encode()).hexdigest()[:10]
+    return solomon_markdown_link(
+        label,
+        "graph-cypher",
+        payload,
+        ref_key=f"solomon-graph-cypher-{ref_suffix}",
+    )
 
 
 __all__ = ["graph_cypher_markdown_link"]

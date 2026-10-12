@@ -11,6 +11,11 @@ import {
   openGraphCypherFromLink,
   parseGraphCypherLink,
 } from "./openGraphCypherFromLink";
+import {
+  isSolomonAppLink,
+  normalizeSolomonHref,
+  preserveSolomonUrlTransform,
+} from "./solomonAppLinks";
 
 interface Props {
   children: string;
@@ -21,22 +26,24 @@ export function ChatMarkdown({ children }: Props) {
 
   const components: Components = {
     a: ({ href, children: linkChildren, ...rest }) => {
-      if (isSearchDocumentLink(href)) {
+      const solomonHref = normalizeSolomonHref(href);
+      if (isSearchDocumentLink(solomonHref)) {
         return (
           <button
             type="button"
             className="chat-search-doc-link"
             onClick={(e) => {
               e.preventDefault();
-              void openSearchDocumentFromLink(href!, openTab);
+              e.stopPropagation();
+              void openSearchDocumentFromLink(solomonHref!, openTab);
             }}
           >
             {linkChildren}
           </button>
         );
       }
-      if (isGraphCypherLink(href)) {
-        const payload = parseGraphCypherLink(href!);
+      if (isGraphCypherLink(solomonHref)) {
+        const payload = parseGraphCypherLink(solomonHref!);
         const cypherText = payload?.cypher ?? String(linkChildren);
         return (
           <button
@@ -45,7 +52,8 @@ export function ChatMarkdown({ children }: Props) {
             title="Graph タブで実行"
             onClick={(e) => {
               e.preventDefault();
-              openGraphCypherFromLink(href!);
+              e.stopPropagation();
+              openGraphCypherFromLink(solomonHref!);
             }}
           >
             <pre className="chat-graph-cypher-panel__pre">
@@ -54,8 +62,20 @@ export function ChatMarkdown({ children }: Props) {
           </button>
         );
       }
+      const safeHref = solomonHref?.trim() ?? href?.trim() ?? "";
+      if (!safeHref || isSolomonAppLink(safeHref)) {
+        return <span>{linkChildren}</span>;
+      }
+      const external =
+        safeHref.startsWith("http://") || safeHref.startsWith("https://");
       return (
-        <a href={href} {...rest} target="_blank" rel="noreferrer">
+        <a
+          href={safeHref}
+          {...rest}
+          {...(external
+            ? { target: "_blank", rel: "noreferrer" }
+            : { target: undefined, rel: undefined })}
+        >
           {linkChildren}
         </a>
       );
@@ -63,7 +83,11 @@ export function ChatMarkdown({ children }: Props) {
   };
 
   return (
-    <Markdown remarkPlugins={[remarkGfm]} components={components}>
+    <Markdown
+      remarkPlugins={[remarkGfm]}
+      urlTransform={preserveSolomonUrlTransform}
+      components={components}
+    >
       {children}
     </Markdown>
   );
