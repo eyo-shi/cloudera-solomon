@@ -13,6 +13,7 @@ const KIND_ICON: Record<string, string> = {
   dashboard: "📊",
   summary: "📝",
   sql: "≡",
+  search_document: "⌕",
 };
 
 function filePreviewFilename(ref: Record<string, unknown>, title: string): string {

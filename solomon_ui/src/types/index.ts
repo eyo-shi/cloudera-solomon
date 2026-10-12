@@ -100,6 +100,8 @@ export interface SearchDocumentEntry {
   vb_machine_no?: string | null;
   fq_name?: string | null;
   dataset?: Record<string, unknown>;
+  /** Bronze ファイルの解析 JSON（inspection-*） */
+  payload?: Record<string, unknown> | null;
 }
 export interface SearchDocumentsResponse {
   index: string;
@@ -189,6 +191,7 @@ export type ArtifactType =
   | "summary"
   | "sql"
   | "file_preview"
+  | "search_document"
   | "graph";
 
 export interface Artifact {

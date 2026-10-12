@@ -49,6 +49,8 @@ export function explorerModeForTabKind(
       return "tables";
     case "file_preview":
       return "storage";
+    case "search_document":
+      return "search";
     default:
       return null;
   }

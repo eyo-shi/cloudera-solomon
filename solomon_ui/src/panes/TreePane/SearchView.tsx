@@ -6,6 +6,11 @@ import { refreshSearchExplorer } from "../../api/explorerRefresh";
 import { useSearchDocuments } from "../../api/search";
 import { useReportSetupGuideError } from "../../hooks/useReportSetupGuideError";
 import type { SearchDocumentEntry } from "../../types";
+import {
+  openSearchDocumentTab,
+  searchDocumentDedupeKey,
+} from "../ResultPane/tabs/SearchDocumentTab";
+import { useTabStore } from "../../stores/tabStore";
 import { ExplorerRefreshButton } from "./ExplorerRefreshButton";
 
 interface SearchViewProps {
@@ -35,6 +40,12 @@ function displaySubtitle(doc: SearchDocumentEntry): string | null {
 export function SearchView({ filter }: SearchViewProps) {
   const { data, isLoading, error, isFetching } = useSearchDocuments(filter);
   useReportSetupGuideError(error);
+  const openTab = useTabStore((s) => s.openTab);
+  const activeTab = useTabStore((s) => {
+    const id = s.activeId;
+    if (!id) return null;
+    return s.tabs.find((t) => t.id === id) ?? null;
+  });
 
   const documents = data?.documents ?? [];
   const indexHint = data?.index ?? "inspection-*";
@@ -93,15 +104,28 @@ export function SearchView({ filter }: SearchViewProps) {
             doc.object_key ??
             doc.fq_name ??
             `${doc.index ?? "doc"}-${i}`;
+          const dedupeKey = searchDocumentDedupeKey(doc);
+          const isSelected =
+            activeTab?.kind === "search_document" &&
+            (activeTab.dedupeKey ?? "") === dedupeKey;
           return (
-            <li key={`${key}-${i}`} className="explorer-search-doc">
-              <span className="explorer-search-doc__name">{title}</span>
-              {subtitle && (
-                <span className="explorer-search-doc__fq">{subtitle}</span>
-              )}
-              {doc.object_key && (
-                <span className="explorer-search-doc__path">{doc.object_key}</span>
-              )}
+            <li key={`${key}-${i}`}>
+              <button
+                type="button"
+                className={
+                  "explorer-search-doc" +
+                  (isSelected ? " explorer-search-doc--selected" : "")
+                }
+                onClick={() => openSearchDocumentTab(openTab, doc, title)}
+              >
+                <span className="explorer-search-doc__name">{title}</span>
+                {subtitle && (
+                  <span className="explorer-search-doc__fq">{subtitle}</span>
+                )}
+                {doc.object_key && (
+                  <span className="explorer-search-doc__path">{doc.object_key}</span>
+                )}
+              </button>
             </li>
           );
         })}

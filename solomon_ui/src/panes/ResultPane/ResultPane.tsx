@@ -11,6 +11,7 @@ import { SummaryTab } from "./tabs/SummaryTab";
 import { GraphTab } from "./tabs/GraphTab";
 import { TablePreviewTab } from "./tabs/TablePreviewTab";
 import { TablesTab } from "./tabs/TablesTab";
+import { SearchDocumentTab } from "./tabs/SearchDocumentTab";
 import { WelcomeTab } from "./tabs/WelcomeTab";
 
 export function ResultPane() {
@@ -46,6 +47,8 @@ function TabRenderer({ tabId }: { tabId: string }) {
       return <SQLTab tab={tab} />;
     case "file_preview":
       return <FilePreviewTab tab={tab} />;
+    case "search_document":
+      return <SearchDocumentTab tab={tab} />;
     case "graph":
       return <GraphTab />;
     case "tables":
