@@ -206,6 +206,140 @@ def is_vb_path_lookup_prompt(prompt: str) -> bool:
     )
 
 
+_VB_MACHINE_ID_RE = re.compile(
+    r"(?:V/?B|VB)\s*机番\s*[：:]?\s*(\d{5,12})",
+    re.IGNORECASE,
+)
+_VB_MACHINE_MARKERS = (
+    "Neo4j",
+    "判定",
+    "試験",
+    "結び",
+    "VB_TEST",
+    "V/B",
+    "VbMachine",
+    "机番",
+)
+
+_VB_MACHINE_CYPHER = """
+MATCH (v:VbMachine {id: $vb_id})-[:VB_TEST]->(p:Product)
+OPTIONAL MATCH (f:SourceFile)-[:INGESTED_INTO]->(p)
+RETURN v.id AS vb_machine_no, p.trace_id AS product_trace_id,
+       collect(DISTINCT {key: f.key, format: f.format}) AS source_files
+""".strip()
+
+
+def parse_vb_machine_from_prompt(prompt: str) -> str | None:
+    text = prompt.strip()
+    m = _VB_MACHINE_ID_RE.search(text)
+    if m:
+        return m.group(1)
+    m2 = re.search(r"机番\s*[：:]?\s*(\d{5,12})", text)
+    return m2.group(1) if m2 else None
+
+
+def is_vb_machine_lookup_prompt(prompt: str) -> bool:
+    if parse_vb_machine_from_prompt(prompt) is None:
+        return False
+    text = prompt.strip()
+    return any(m in text for m in _VB_MACHINE_MARKERS)
+
+
+def fetch_vb_machine_context(
+    vb_machine_no: str,
+    *,
+    user_ctx: UserContext | None = None,
+) -> dict[str, Any]:
+    from solomon.graph.manufacturing.neo4j_bronze import fetch_vb_machine_tests
+    from solomon.graph.manufacturing.silver_trino import fetch_silver_vb_by_machine
+
+    ctx = fetch_vb_machine_tests(vb_machine_no)
+    silver_rows = fetch_silver_vb_by_machine(
+        ctx.get("vb_machine_no") or vb_machine_no,
+        user_ctx,
+    )
+    if silver_rows:
+        ctx["silver_vb"] = silver_rows
+        note = (
+            f"Iceberg silver_vb: judge 等 {len(silver_rows)} 行"
+            if ctx.get("vb_tests")
+            else f"Iceberg silver_vb のみ {len(silver_rows)} 行（Neo4j 未ヒット）"
+        )
+        ctx["notes"] = f"{ctx.get('notes') or ''} {note}".strip()
+    return ctx
+
+
+def format_vb_machine_markdown(vb_id: str, ctx: dict[str, Any]) -> str:
+    lines = [
+        f"V/B 机番 **{ctx.get('vb_machine_no') or vb_id}** に結びつく試験（Neo4j + Iceberg）",
+        "",
+        "```mermaid",
+        "graph LR",
+        "  V[VbMachine]",
+        "  P[Product]",
+        "  F[SourceFile]",
+        "  V -->|VB_TEST| P",
+        "  F -->|INGESTED_INTO| P",
+        "```",
+        "",
+        "参照 Cypher:",
+        "",
+        f"```cypher\n{_VB_MACHINE_CYPHER}\n```",
+        "",
+    ]
+    if ctx.get("notes"):
+        lines.append(f"_{ctx['notes']}_")
+        lines.append("")
+
+    tests = ctx.get("vb_tests")
+    if isinstance(tests, list) and tests:
+        lines.extend(
+            [
+                "**Neo4j — VB_TEST → Product / SourceFile**",
+                "",
+                "| product_trace_id | SourceFile (format / key) |",
+                "|------------------|---------------------------|",
+            ]
+        )
+        for row in tests:
+            if not isinstance(row, dict):
+                continue
+            trace = row.get("product_trace_id") or "—"
+            files = row.get("source_files") or []
+            file_bits: list[str] = []
+            if isinstance(files, list):
+                for item in files:
+                    if isinstance(item, dict) and item.get("key"):
+                        fmt = item.get("format") or "?"
+                        file_bits.append(f"`{fmt}` {item['key']}")
+            file_col = "; ".join(file_bits) if file_bits else "—"
+            lines.append(f"| {trace} | {file_col} |")
+        lines.append("")
+
+    silver = ctx.get("silver_vb")
+    if isinstance(silver, list) and silver:
+        lines.extend(
+            [
+                "**Iceberg — `silver_vb`（payload.judge）**",
+                "",
+                "| object_key | vb_machine_no | judge |",
+                "|------------|---------------|-------|",
+            ]
+        )
+        for row in silver:
+            if not isinstance(row, dict):
+                continue
+            judge = row.get("judge") or row.get("judge_upper") or "—"
+            lines.append(
+                f"| `{row.get('object_key') or '—'}` | "
+                f"{row.get('vb_machine_no') or '—'} | **{judge}** |"
+            )
+
+    if not tests and not silver:
+        lines.append("該当する VB 試験が見つかりませんでした。")
+    return "\n".join(lines)
+
+
 _TRACE_GRAPH_MARKERS = (
     "グラフ",
     "ソースファイル",
@@ -713,6 +847,62 @@ def try_answer_manufacturing_trace_documents_prompt(
     )
 
 
+def try_answer_vb_machine_prompt(
+    prompt: str,
+    *,
+    user_ctx: UserContext | None = None,
+) -> Optional[KnowledgeRagResult]:
+    """Q5: VbMachine 机番 → VB_TEST / silver_vb judge。"""
+    if not is_vb_machine_lookup_prompt(prompt):
+        return None
+    vb_id = parse_vb_machine_from_prompt(prompt)
+    if not vb_id:
+        return None
+
+    plan = RetrievalPlan(
+        strategy="GRAPH_QUERY",
+        query=prompt.strip(),
+        confidence=0.93,
+        reasoning="VB machine lookup (VbMachine/VB_TEST + silver_vb)",
+        entity_hint=vb_id,
+    )
+
+    ctx = fetch_vb_machine_context(vb_id, user_ctx=user_ctx)
+    has_neo = bool(ctx.get("vb_tests"))
+    has_silver = bool(ctx.get("silver_vb"))
+
+    if ctx.get("error") == "NEO4J_NOT_CONFIGURED" and not has_silver:
+        md = "Neo4j が未設定で、Trino silver_vb も取得できませんでした。"
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(plan=plan, hits=[], errors=[{"source": "neo4j", "message": md}]),
+            answer_markdown=md,
+        )
+
+    if ctx.get("error") == "NOT_FOUND" and not has_silver:
+        md = (
+            f"机番 **{vb_id}** の VB_TEST が Neo4j / silver_vb に見つかりません。"
+            " Graph タブで VbMachine ノードを確認してください。"
+        )
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(plan=plan, hits=[], errors=[{"source": "neo4j", "message": md}]),
+            answer_markdown=md,
+        )
+
+    hit = SourceHit(
+        source="neo4j" if has_neo else "lakehouse",
+        kind="vb_machine_lookup",
+        payload=ctx,
+    )
+    md = format_vb_machine_markdown(vb_id, ctx)
+    return KnowledgeRagResult(
+        plan=plan,
+        bundle=RetrievalBundle(plan=plan, hits=[hit], errors=[]),
+        answer_markdown=md,
+    )
+
+
 def try_answer_manufacturing_trace_graph_prompt(
     prompt: str,
     *,
@@ -997,6 +1187,10 @@ __all__ = [
     "is_manufacturing_trace_graph_prompt",
     "fetch_trace_graph_context",
     "format_trace_graph_markdown",
+    "parse_vb_machine_from_prompt",
+    "is_vb_machine_lookup_prompt",
+    "format_vb_machine_markdown",
+    "try_answer_vb_machine_prompt",
     "try_answer_manufacturing_trace_graph_prompt",
     "try_answer_vb_path_prompt",
     "try_answer_manufacturing_part_prompt",

@@ -12,8 +12,11 @@ from solomon.graph.manufacturing.trace_qa import (
     is_vb_path_lookup_prompt,
     parse_part_number_from_prompt,
     parse_trace_id_from_prompt,
+    parse_vb_machine_from_prompt,
     parse_vb_path_terms,
+    is_vb_machine_lookup_prompt,
     try_answer_manufacturing_part_prompt,
+    try_answer_vb_machine_prompt,
     try_answer_manufacturing_trace_documents_prompt,
     try_answer_manufacturing_trace_graph_prompt,
     try_answer_vb_path_prompt,
@@ -37,6 +40,9 @@ _Q3_VB_PATH = (
 _Q4_TRACE_GRAPH = (
     "26G3V05390 という製品トレースについて、取り込んだ ソースファイル と "
     "KIBAN の関係をグラフで説明して。"
+)
+_Q5_VB_MACHINE = (
+    "Neo4j 上で V/B 机番 166890 に結びついている試験は？判定は？"
 )
 
 
@@ -84,6 +90,38 @@ def test_try_answer_trace_documents_prompt(monkeypatch) -> None:
     assert result is not None
     assert "26G3V05354" in result.answer_markdown
     assert "j5_main_id" in result.answer_markdown
+
+
+def test_q5_vb_machine_prompt() -> None:
+    assert parse_vb_machine_from_prompt(_Q5_VB_MACHINE) == "166890"
+    assert is_vb_machine_lookup_prompt(_Q5_VB_MACHINE) is True
+    assert heuristic_classify(_Q5_VB_MACHINE).intent == "KNOWLEDGE_RAG"
+
+
+def test_try_answer_vb_machine_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.manufacturing.trace_qa.fetch_vb_machine_context",
+        lambda _vb, **kw: {
+            "vb_machine_no": "166890",
+            "vb_tests": [
+                {
+                    "product_trace_id": "unknown",
+                    "source_files": [{"key": "vb_test/x.TXT", "format": "vb"}],
+                },
+            ],
+            "silver_vb": [
+                {
+                    "object_key": "vb_test/蘇州/x.TXT",
+                    "vb_machine_no": "166890",
+                    "judge": "NG",
+                },
+            ],
+        },
+    )
+    result = try_answer_vb_machine_prompt(_Q5_VB_MACHINE)
+    assert result is not None
+    assert "VB_TEST" in result.answer_markdown
+    assert "NG" in result.answer_markdown
 
 
 def test_q4_trace_graph_prompt() -> None:

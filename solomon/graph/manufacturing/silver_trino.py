@@ -180,6 +180,57 @@ WHERE object_key = '{ok}' AND etag = '{eg}'
             pass
 
 
+def fetch_silver_vb_by_machine(
+    vb_machine_no: str,
+    user_ctx: Optional[UserContext] = None,
+) -> list[dict[str, Any]]:
+    """``silver_vb`` から机番一致の judge 等（Graph + SQL 二段デモ）。"""
+    from solomon.tools._trino_client import trino_connection_for_user
+
+    cfg = get_trino_config()
+    if cfg is None:
+        return []
+
+    raw = vb_machine_no.strip().replace("'", "''")
+    stripped = raw.lstrip("0") or "0"
+    table = _fq("silver_vb")
+    sql = f"""
+SELECT object_key,
+       vb_machine_no,
+       trace_id,
+       json_extract_scalar(payload, '$.judge') AS judge,
+       json_extract_scalar(payload, '$.JUDGE') AS judge_upper,
+       ingested_at
+FROM {table}
+WHERE vb_machine_no = '{raw}'
+   OR vb_machine_no = '{stripped}'
+   OR vb_machine_no LIKE '%{stripped}'
+ORDER BY ingested_at DESC
+LIMIT 20
+"""
+    conn_or_err = trino_connection_for_user(
+        user_ctx,
+        catalog=silver_catalog_name(),
+        schema=silver_schema_name(),
+    )
+    if isinstance(conn_or_err, dict):
+        return []
+    try:
+        cur = conn_or_err.cursor()
+        cur.execute(sql)
+        if not cur.description:
+            return []
+        names = [d[0] for d in cur.description]
+        return [dict(zip(names, row, strict=False)) for row in cur.fetchall()]
+    except Exception:  # noqa: BLE001
+        return []
+    finally:
+        try:
+            conn_or_err.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def fetch_ingest_files_for_trace(
     trace_id: str,
     user_ctx: Optional[UserContext] = None,
@@ -227,5 +278,6 @@ __all__ = [
     "silver_schema_name",
     "silver_catalog_name",
     "fetch_trace_summary_from_silver",
+    "fetch_silver_vb_by_machine",
     "fetch_ingest_files_for_trace",
 ]

@@ -39,6 +39,7 @@ def kickoff_knowledge_rag(
             try_answer_manufacturing_trace_documents_prompt,
             try_answer_manufacturing_trace_graph_prompt,
             try_answer_manufacturing_trace_prompt,
+            try_answer_vb_machine_prompt,
             try_answer_vb_path_prompt,
         )
 
@@ -90,6 +91,15 @@ def kickoff_knowledge_rag(
                 terms=vb_path_answer.plan.entity_hint,
             )
             return ok_result(vb_path_answer)
+
+        vb_machine_answer = try_answer_vb_machine_prompt(prompt, user_ctx=user_ctx)
+        if vb_machine_answer is not None:
+            _logger.info(
+                "knowledge_rag.vb_machine",
+                user=user_ctx.user_name,
+                vb_id=vb_machine_answer.plan.entity_hint,
+            )
+            return ok_result(vb_machine_answer)
 
         plan = classify_retrieval(prompt)
         _logger.info(

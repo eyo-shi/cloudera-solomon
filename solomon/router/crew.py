@@ -255,7 +255,19 @@ def heuristic_classify(
         )
 
     # 0c) 製品トレース・グラフ説明（「取り込んだ」が INGEST に誤爆しない）
-    from solomon.graph.manufacturing.trace_qa import is_manufacturing_trace_graph_prompt
+    from solomon.graph.manufacturing.trace_qa import (
+        is_manufacturing_trace_graph_prompt,
+        is_vb_machine_lookup_prompt,
+    )
+
+    if is_vb_machine_lookup_prompt(prompt):
+        return IntentClassification(
+            intent="KNOWLEDGE_RAG",
+            confidence=0.93,
+            extracted_args={"question": prompt},
+            needs_clarification=False,
+            reasoning="VB machine graph lookup",
+        )
 
     if is_manufacturing_trace_graph_prompt(prompt):
         return IntentClassification(
@@ -370,6 +382,7 @@ def heuristic_classify(
         is_manufacturing_trace_detail_prompt,
         is_manufacturing_trace_documents_prompt,
         is_manufacturing_trace_graph_prompt,
+        is_vb_machine_lookup_prompt,
         is_vb_path_lookup_prompt,
     )
 
@@ -378,6 +391,7 @@ def heuristic_classify(
         or is_manufacturing_trace_documents_prompt(prompt)
         or is_manufacturing_trace_detail_prompt(prompt)
         or is_manufacturing_trace_graph_prompt(prompt)
+        or is_vb_machine_lookup_prompt(prompt)
         or is_vb_path_lookup_prompt(prompt)
     ):
         return IntentClassification(
