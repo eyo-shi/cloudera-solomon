@@ -6,6 +6,7 @@ import re
 from typing import Any, Optional
 
 from solomon.graph.config import get_neo4j_config
+from solomon.opensearch.chat_links import search_document_markdown_link
 from solomon.graph.manufacturing.silver_trino import fetch_trace_summary_from_silver
 from solomon.graph.neo4j_connect import iter_neo4j_connection_uris
 from solomon.transport.user_context import UserContext
@@ -141,11 +142,14 @@ def format_trace_documents_markdown(trace_id: str, docs: list[dict[str, Any]]) -
                 part_bits.append(f"{field}={val}")
         part_col = " · ".join(part_bits) if part_bits else "—"
         obj = key or "—"
-        lines.append(f"| {fmt} | {title} | {part_col} | `{obj}` |")
+        title_cell = search_document_markdown_link(title, doc)
+        lines.append(f"| {fmt} | {title_cell} | {part_col} | `{obj}` |")
     if not seen_keys:
         lines.append("| — | 該当なし | — | — |")
     lines.extend(
         [
+            "",
+            "_ファイル名をクリックすると中央ペインで Bronze payload を開けます。_",
             "",
             "_Semantic Search タブと同じ `inspection-*` インデックス。"
             " ファイル名を覚えていなくても trace_id / 平坦化メタで入口を作れます。_",
@@ -706,11 +710,14 @@ def format_vb_path_lookup_markdown(terms: list[str], docs: list[dict[str, Any]])
         payload = doc.get("payload") if isinstance(doc.get("payload"), dict) else {}
         vb_no = payload.get("vb_machine_no") or "—"
         judge = payload.get("judge") or "—"
-        lines.append(f"| {title} | `{key}` | {vb_no} | {judge} |")
+        title_cell = search_document_markdown_link(title, doc)
+        lines.append(f"| {title_cell} | `{key}` | {vb_no} | {judge} |")
     if not seen:
         lines.append("| — | — | — | — |")
     lines.extend(
         [
+            "",
+            "_ファイル名をクリックすると中央ペインで Bronze payload を開けます。_",
             "",
             "_Bronze の階層パスが OpenSearch の object_key に載っているため、"
             "フォルダ名だけ覚えていなくても Semantic Search + メタで入口を作れます。_",
@@ -738,11 +745,14 @@ def format_part_lookup_markdown(part_number: str, docs: list[dict[str, Any]]) ->
         raw_fmt = doc.get("format")
         fmt = _format_label(str(raw_fmt) if raw_fmt else None)
         obj = key or "—"
-        lines.append(f"| {fmt} | {title} | {trace} | `{obj}` |")
+        title_cell = search_document_markdown_link(title, doc)
+        lines.append(f"| {fmt} | {title_cell} | {trace} | `{obj}` |")
     if len(seen_keys) == 0:
         lines.append("| — | 該当なし | — | — |")
     lines.extend(
         [
+            "",
+            "_ファイル名をクリックすると中央ペインで Bronze payload を開けます。_",
             "",
             "_根拠: CDE Bronze 取込インデックス（メインID の HINBAN / 出検の customer_hinban 等）。_",
         ]

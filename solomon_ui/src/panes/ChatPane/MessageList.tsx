@@ -2,9 +2,8 @@
  * ChatPane のメッセージ履歴。user/solomon バブル、artifact ジャンプ、error 色分け。
  */
 import { useEffect, useRef } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useChatStore } from "../../stores/chatStore";
+import { ChatMarkdown } from "./ChatMarkdown";
 import { useTabStore } from "../../stores/tabStore";
 import { ActivityTimeline } from "./ActivityTimeline";
 
@@ -83,12 +82,12 @@ export function MessageList() {
                 )}
                 {text && !m.errorCode && (
                   <div className="markdown-body chat-md">
-                    <Markdown remarkPlugins={[remarkGfm]}>{m.text}</Markdown>
+                    <ChatMarkdown>{m.text}</ChatMarkdown>
                   </div>
                 )}
                 {text && m.errorCode && m.errorMessage && text !== m.errorMessage && (
                   <div className="markdown-body chat-md chat-md--after-error">
-                    <Markdown remarkPlugins={[remarkGfm]}>{m.text}</Markdown>
+                    <ChatMarkdown>{m.text}</ChatMarkdown>
                   </div>
                 )}
                 {m.artifactIds && m.artifactIds.length > 0 && (

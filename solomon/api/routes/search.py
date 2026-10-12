@@ -14,6 +14,7 @@ from solomon.opensearch.env import opensearch_env, opensearch_username
 from solomon.opensearch.indexer import ensure_index
 from solomon.opensearch.inspection_indices import (
     inspection_index_pattern,
+    search_document_by_object_key,
     search_inspection_documents,
     search_tab_scope,
 )
@@ -116,6 +117,36 @@ def search_diagnostics(
         "inspection_index_pattern": inspection_index_pattern(),
         "inspection_ping_ok": ping_inspection(config),
     }
+
+
+@router.get("/document")
+def get_document(
+    _user_ctx: Annotated[UserContext, Depends(require_user_context)],
+    object_key: Annotated[str, Query(min_length=1, max_length=2048)],
+    format: Annotated[str | None, Query(max_length=64)] = None,
+) -> dict[str, Any]:
+    """Chat リンク用: ``object_key`` で inspection doc を 1 件（payload 含む）。"""
+    config = get_opensearch_config()
+    _require_opensearch_or_503()
+    assert config is not None
+    if not ping_inspection(config):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error_code": "OPENSEARCH_CONNECT_FAILED",
+                "message": "OpenSearch（inspection）へ接続できません。",
+            },
+        )
+    doc = search_document_by_object_key(object_key, config=config, format_hint=format)
+    if doc is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "SEARCH_DOCUMENT_NOT_FOUND",
+                "message": f"object_key not found: {object_key}",
+            },
+        )
+    return {"document": doc}
 
 
 @router.get("/documents")

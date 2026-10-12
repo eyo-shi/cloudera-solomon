@@ -268,6 +268,55 @@ def search_documents_by_part_number(
     return []
 
 
+def search_document_by_object_key(
+    object_key: str,
+    *,
+    config: OpenSearchConfig | None = None,
+    format_hint: str | None = None,
+) -> dict[str, Any] | None:
+    """``object_key`` に一致する Bronze doc を 1 件返す（Chat リンク用）。"""
+    key = object_key.strip()
+    if not key:
+        return None
+    cfg = config or get_opensearch_config()
+    if cfg is None:
+        return None
+
+    should: list[dict[str, Any]] = [
+        {"term": {"object_key.keyword": key}},
+        {"term": {"object_key": key}},
+        {"match_phrase": {"object_key": key}},
+    ]
+    body: dict[str, Any] = {
+        "size": 1,
+        "query": {"bool": {"should": should, "minimum_should_match": 1}},
+    }
+    if format_hint:
+        index = inspection_index_name(format_hint.strip())
+        indices = (index, inspection_index_pattern(), inspection_index_list_csv())
+    else:
+        indices = (inspection_index_pattern(), inspection_index_list_csv())
+
+    client = build_client(cfg)
+    seen: set[str] = set()
+    for index in indices:
+        if index in seen:
+            continue
+        seen.add(index)
+        try:
+            response = client.search(
+                index=index,
+                body=body,
+                params=_OS_SEARCH_PARAMS,
+            )
+            hits = response.get("hits", {}).get("hits", [])
+            if hits:
+                return normalize_inspection_hit(hits[0])
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
 def search_vb_documents_by_path_terms(
     terms: list[str],
     *,
@@ -334,6 +383,7 @@ __all__ = [
     "search_tab_scope",
     "search_documents_by_trace_id",
     "search_documents_by_part_number",
+    "search_document_by_object_key",
     "search_vb_documents_by_path_terms",
     "summarize_trace_documents",
 ]

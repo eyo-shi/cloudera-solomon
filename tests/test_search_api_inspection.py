@@ -89,3 +89,28 @@ def test_list_documents_inspection_scope(monkeypatch: pytest.MonkeyPatch) -> Non
     assert out["scope"] == "inspection"
     assert out["documents"] == fake_docs
     assert out["index"] == "inspection-*"
+
+
+def test_get_document_by_object_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENSEARCH_MODE", "external")
+    monkeypatch.setenv("OPENSEARCH_ENDPOINT", "https://css.example.com:9200")
+    config = cfg_mod.get_opensearch_config()
+    assert config is not None
+
+    fake_doc = {"title": "a.txt", "object_key": "j5_main_id/a.txt", "payload": {"k": 1}}
+
+    with (
+        patch("solomon.api.routes.search.get_opensearch_config", return_value=config),
+        patch("solomon.api.routes.search.ping_inspection", return_value=True),
+        patch(
+            "solomon.api.routes.search.search_document_by_object_key",
+            return_value=fake_doc,
+        ) as lookup,
+    ):
+        from solomon.api.routes.search import get_document
+
+        ctx = SimpleNamespace(user_id="u", tenant_id="t")
+        out = get_document(user_ctx=ctx, object_key="j5_main_id/a.txt", format="j5_main_id")
+
+    lookup.assert_called_once()
+    assert out["document"] == fake_doc
