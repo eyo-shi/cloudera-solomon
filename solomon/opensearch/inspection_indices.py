@@ -95,13 +95,10 @@ def normalize_inspection_hit(hit: dict[str, Any]) -> dict[str, Any]:
 def _inspection_search_body(query: str, *, size: int) -> dict[str, Any]:
     q = query.strip()
     if not q:
+        # 複数 index 横断では sort フィールド差分で 400 になりやすいため match_all は sort なし
         return {
             "size": size,
             "query": {"match_all": {}},
-            "sort": [
-                {"object_key.keyword": {"order": "asc", "unmapped_type": "keyword"}},
-                {"object_key": {"order": "asc", "unmapped_type": "keyword"}},
-            ],
         }
     return {
         "size": size,
@@ -142,6 +139,9 @@ def _inspection_search_body(query: str, *, size: int) -> dict[str, Any]:
     }
 
 
+_OS_SEARCH_PARAMS = {"ignore_unavailable": "true", "allow_no_indices": "true"}
+
+
 def search_inspection_documents(
     config: OpenSearchConfig,
     query: str = "",
@@ -152,9 +152,9 @@ def search_inspection_documents(
     client = build_client(config)
     body = _inspection_search_body(query, size=limit)
     response = client.search(
-        index=inspection_index_list_csv(),
+        index=inspection_index_pattern(),
         body=body,
-        ignore_unavailable=True,
+        params=_OS_SEARCH_PARAMS,
     )
     hits = response.get("hits", {}).get("hits", [])
     return [normalize_inspection_hit(h) for h in hits]
@@ -187,9 +187,9 @@ def search_documents_by_trace_id(
     }
     try:
         response = client.search(
-            index=inspection_index_list_csv(),
+            index=inspection_index_pattern(),
             body=body,
-            ignore_unavailable=True,
+            params=_OS_SEARCH_PARAMS,
         )
     except Exception:  # noqa: BLE001
         return []

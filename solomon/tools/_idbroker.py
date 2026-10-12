@@ -64,13 +64,22 @@ def _parse_expiration(exp: Any) -> int:
     return int(time.time()) + 1800
 
 
-def _cab_bearer_token(user_ctx: UserContext) -> Optional[str]:
-    """IDBroker CAB が受け付ける Bearer。
+def _cab_bearer_candidates(user_ctx: UserContext) -> list[str]:
+    """CAB 用 Bearer の試行順（重複除去）。
 
-    Workbench Application の Cookie JWT は aws-cab で 401 になりやすい。
-    CML がマウントする ``/tmp/jwt`` を優先する。
+    ``/tmp/jwt`` は aws-cab の token audience を満たさず 400 になることがあるため、
+    ブラウザセッション JWT を先に試す。
     """
-    return load_workload_jwt_token() or user_ctx.knox_jwt
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in (user_ctx.knox_jwt, load_workload_jwt_token()):
+        if not raw:
+            continue
+        tok = raw.strip()
+        if tok and tok not in seen:
+            seen.add(tok)
+            out.append(tok)
+    return out
 
 
 def _credential_fields(data: dict[str, Any]) -> dict[str, Any]:
@@ -91,18 +100,14 @@ def fetch_aws_credentials(user_ctx: UserContext) -> Union[AwsCredentials, dict[s
             ErrorCode.S3_ASSUMEROLE_FAILED,
             "SOLOMON_IDBROKER_URL is not configured; cannot obtain S3 credentials.",
         )
-    bearer = _cab_bearer_token(user_ctx)
-    if not bearer:
+    bearers = _cab_bearer_candidates(user_ctx)
+    if not bearers:
         return err(
             ErrorCode.AUTH_MISSING,
             "Knox JWT is required to exchange for AWS credentials.",
         )
 
     base = idb_url.rstrip("/")
-    headers = {
-        "Authorization": f"Bearer {bearer}",
-        "Accept": "application/json",
-    }
     endpoints = [f"{base}{_CAB_PATH}"]
     if user_ctx.groups:
         for group in user_ctx.groups:
@@ -113,11 +118,18 @@ def fetch_aws_credentials(user_ctx: UserContext) -> Union[AwsCredentials, dict[s
     resp: httpx.Response | None = None
     try:
         with httpx.Client(timeout=_IDBROKER_TIMEOUT_S) as client:
-            for endpoint in endpoints:
-                resp = client.get(endpoint, headers=headers)
-                if resp.status_code < 400:
-                    break
-                if resp.status_code not in (400, 401, 403):
+            for bearer in bearers:
+                headers = {
+                    "Authorization": f"Bearer {bearer}",
+                    "Accept": "application/json",
+                }
+                for endpoint in endpoints:
+                    resp = client.get(endpoint, headers=headers)
+                    if resp.status_code < 400:
+                        break
+                    if resp.status_code not in (400, 401, 403):
+                        break
+                if resp is not None and resp.status_code < 400:
                     break
     except httpx.TimeoutException:
         _logger.warning("idbroker.timeout", user=user_ctx.user_name)

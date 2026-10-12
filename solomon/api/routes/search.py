@@ -19,7 +19,10 @@ from solomon.opensearch.inspection_indices import (
 )
 from solomon.opensearch.search import keyword_search
 from solomon.transport.config import get_opensearch_config
+from solomon.transport.logging import get_logger
 from solomon.transport.user_context import UserContext
+
+_logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -169,6 +172,7 @@ def list_documents(
             else f"{inspection_index_pattern()}, {config.index_name}"
         )
     except Exception as exc:  # noqa: BLE001
+        _logger.warning("search.documents_failed", error=str(exc), scope=resolved)
         raise HTTPException(
             status_code=502,
             detail={

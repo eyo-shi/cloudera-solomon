@@ -19,7 +19,7 @@ def test_credential_fields_nested() -> None:
     assert fields["AccessKeyId"] == "AKIA"
 
 
-def test_cab_bearer_prefers_workload_jwt(monkeypatch) -> None:
+def test_cab_bearer_candidates_order(monkeypatch) -> None:
     monkeypatch.setattr(idb, "load_workload_jwt_token", lambda: "workload-token")
     ctx = UserContext(user_name="u", groups=(), knox_jwt="cookie-jwt")
-    assert idb._cab_bearer_token(ctx) == "workload-token"
+    assert idb._cab_bearer_candidates(ctx) == ["cookie-jwt", "workload-token"]

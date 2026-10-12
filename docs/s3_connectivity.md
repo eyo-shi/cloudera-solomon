@@ -67,6 +67,7 @@ Application Log で **`idbroker.access_denied` / HTTP 401** のとき:
 - **IDBroker URL は到達できている**（401 = トークン拒否）。Console → Environment → **Manage Access → ID Broker Mappings** でユーザー / グループを Data Access ロールにマップし **Sync** する。
 - Workbench Application の **Cookie JWT** は aws-cab で拒否されやすい。Solomon は **`/tmp/jwt`**（CML データレイクアクセス用）を優先する。Session で `test -f /tmp/jwt && wc -c /tmp/jwt` を確認。
 - ホスト名は `...-idbroker0...`（`idbroker` の綴りに注意）。
+- Log の body に **`missing required token audience`** がある場合: Workbench Application の JWT / `/tmp/jwt` が **aws-cab 用 audience ではない**。Console で **ID Broker Mappings を Sync** し、それでも 400 のときは **S3 Data Connection** 経路か、環境管理者に **Knox token / CAB audience** の設定を確認する（Solomon 単体では長期 AK/SK は使わない）。
 
 ---
 
