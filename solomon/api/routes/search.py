@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from solomon.api.auth import require_user_context
-from solomon.opensearch.client import build_client, ping
+from solomon.opensearch.client import build_client, ping_inspection
 from solomon.opensearch.indexer import ensure_index
 from solomon.opensearch.inspection_indices import (
     inspection_index_pattern,
@@ -105,12 +105,15 @@ def list_documents(
     _require_opensearch_or_503()
     assert config is not None
 
-    if not ping(config):
+    if not ping_inspection(config):
         raise HTTPException(
             status_code=502,
             detail={
                 "error_code": "OPENSEARCH_CONNECT_FAILED",
-                "message": "Semantic Search クラスタへ接続できません。",
+                "message": (
+                    "OpenSearch（inspection インデックス）へ接続できません。"
+                    " OPENSEARCH_USER/PASSWORD と Ranger（inspection-*）を確認してください。"
+                ),
             },
         )
 

@@ -98,14 +98,27 @@ def fetch_aws_credentials(user_ctx: UserContext) -> Union[AwsCredentials, dict[s
             "Knox JWT is required to exchange for AWS credentials.",
         )
 
-    endpoint = f"{idb_url.rstrip('/')}{_CAB_PATH}"
+    base = idb_url.rstrip("/")
     headers = {
         "Authorization": f"Bearer {bearer}",
         "Accept": "application/json",
     }
+    endpoints = [f"{base}{_CAB_PATH}"]
+    if user_ctx.groups:
+        for group in user_ctx.groups:
+            g = group.strip()
+            if g:
+                endpoints.append(f"{base}{_CAB_PATH}/group/{g}")
+
+    resp: httpx.Response | None = None
     try:
         with httpx.Client(timeout=_IDBROKER_TIMEOUT_S) as client:
-            resp = client.get(endpoint, headers=headers)
+            for endpoint in endpoints:
+                resp = client.get(endpoint, headers=headers)
+                if resp.status_code < 400:
+                    break
+                if resp.status_code not in (400, 401, 403):
+                    break
     except httpx.TimeoutException:
         _logger.warning("idbroker.timeout", user=user_ctx.user_name)
         return err(ErrorCode.S3_ASSUMEROLE_FAILED, "IDBroker request timed out.")
@@ -113,11 +126,16 @@ def fetch_aws_credentials(user_ctx: UserContext) -> Union[AwsCredentials, dict[s
         _logger.warning("idbroker.error", error=str(e), user=user_ctx.user_name)
         return err(ErrorCode.S3_ASSUMEROLE_FAILED, f"IDBroker call failed: {e}")
 
+    if resp is None:
+        return err(ErrorCode.S3_ASSUMEROLE_FAILED, "IDBroker call failed: no response.")
+
+    body_preview = (resp.text or "")[:240]
     if resp.status_code in (401, 403):
         _logger.warning(
             "idbroker.access_denied",
             status=resp.status_code,
             user=user_ctx.user_name,
+            body=body_preview,
         )
         return err(
             ErrorCode.S3_ACCESS_DENIED,
@@ -129,6 +147,7 @@ def fetch_aws_credentials(user_ctx: UserContext) -> Union[AwsCredentials, dict[s
             "idbroker.status",
             status=resp.status_code,
             user=user_ctx.user_name,
+            body=body_preview,
         )
         return err(
             ErrorCode.S3_ASSUMEROLE_FAILED,

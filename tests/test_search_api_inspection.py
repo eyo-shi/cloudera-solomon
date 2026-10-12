@@ -74,7 +74,7 @@ def test_list_documents_inspection_scope(monkeypatch: pytest.MonkeyPatch) -> Non
 
     with (
         patch("solomon.api.routes.search.get_opensearch_config", return_value=config),
-        patch("solomon.api.routes.search.ping", return_value=True),
+        patch("solomon.api.routes.search.ping_inspection", return_value=True),
         patch(
             "solomon.api.routes.search.search_inspection_documents",
             return_value=fake_docs,
