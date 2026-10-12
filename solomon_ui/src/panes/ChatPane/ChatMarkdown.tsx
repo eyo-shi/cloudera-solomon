@@ -6,6 +6,11 @@ import {
   isSearchDocumentLink,
   openSearchDocumentFromLink,
 } from "./openSearchDocumentFromLink";
+import {
+  isGraphCypherLink,
+  openGraphCypherFromLink,
+  parseGraphCypherLink,
+} from "./openGraphCypherFromLink";
 
 interface Props {
   children: string;
@@ -27,6 +32,25 @@ export function ChatMarkdown({ children }: Props) {
             }}
           >
             {linkChildren}
+          </button>
+        );
+      }
+      if (isGraphCypherLink(href)) {
+        const payload = parseGraphCypherLink(href!);
+        const cypherText = payload?.cypher ?? String(linkChildren);
+        return (
+          <button
+            type="button"
+            className="chat-graph-cypher-panel"
+            title="Graph タブで実行"
+            onClick={(e) => {
+              e.preventDefault();
+              openGraphCypherFromLink(href!);
+            }}
+          >
+            <pre className="chat-graph-cypher-panel__pre">
+              <code className="language-cypher">{cypherText}</code>
+            </pre>
           </button>
         );
       }

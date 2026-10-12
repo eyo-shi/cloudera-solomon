@@ -163,7 +163,9 @@ def graph_execute_cypher(
     _ = user_ctx
     _require_neo4j_or_503()
     try:
-        return browse.execute_read_cypher(body.cypher, limit=body.limit)
+        return browse.execute_read_cypher(
+            body.cypher, limit=body.limit, params=body.params
+        )
     except Exception as exc:  # noqa: BLE001
         _handle_browse_error(exc)
 

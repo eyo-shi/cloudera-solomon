@@ -44,26 +44,6 @@ def kickoff_knowledge_rag(
             try_answer_vb_path_prompt,
         )
 
-        trace_answer = try_answer_manufacturing_trace_prompt(prompt, user_ctx=user_ctx)
-        if trace_answer is not None:
-            _logger.info(
-                "knowledge_rag.manufacturing_trace",
-                user=user_ctx.user_name,
-                trace_id=trace_answer.plan.entity_hint,
-            )
-            return ok_result(trace_answer)
-
-        trace_docs_answer = try_answer_manufacturing_trace_documents_prompt(
-            prompt, user_ctx=user_ctx
-        )
-        if trace_docs_answer is not None:
-            _logger.info(
-                "knowledge_rag.manufacturing_trace_docs",
-                user=user_ctx.user_name,
-                trace_id=trace_docs_answer.plan.entity_hint,
-            )
-            return ok_result(trace_docs_answer)
-
         ingest_ledger_answer = try_answer_manufacturing_ingest_ledger_prompt(
             prompt, user_ctx=user_ctx
         )
@@ -85,6 +65,26 @@ def kickoff_knowledge_rag(
                 trace_id=trace_graph_answer.plan.entity_hint,
             )
             return ok_result(trace_graph_answer)
+
+        trace_docs_answer = try_answer_manufacturing_trace_documents_prompt(
+            prompt, user_ctx=user_ctx
+        )
+        if trace_docs_answer is not None:
+            _logger.info(
+                "knowledge_rag.manufacturing_trace_docs",
+                user=user_ctx.user_name,
+                trace_id=trace_docs_answer.plan.entity_hint,
+            )
+            return ok_result(trace_docs_answer)
+
+        trace_answer = try_answer_manufacturing_trace_prompt(prompt, user_ctx=user_ctx)
+        if trace_answer is not None:
+            _logger.info(
+                "knowledge_rag.manufacturing_trace",
+                user=user_ctx.user_name,
+                trace_id=trace_answer.plan.entity_hint,
+            )
+            return ok_result(trace_answer)
 
         part_answer = try_answer_manufacturing_part_prompt(prompt, user_ctx=user_ctx)
         if part_answer is not None:

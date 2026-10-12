@@ -101,6 +101,7 @@ def test_try_answer_trace_documents_prompt(monkeypatch) -> None:
 def test_q6_ingest_ledger_prompt() -> None:
     assert parse_trace_id_from_prompt(_Q6_INGEST_LEDGER) == "26G3V05319"
     assert is_manufacturing_ingest_ledger_prompt(_Q6_INGEST_LEDGER) is True
+    assert is_manufacturing_trace_detail_prompt(_Q6_INGEST_LEDGER) is False
     assert heuristic_classify(_Q6_INGEST_LEDGER).intent == "KNOWLEDGE_RAG"
     assert heuristic_classify(_Q6_INGEST_LEDGER).needs_clarification is False
 
@@ -154,11 +155,14 @@ def test_try_answer_vb_machine_prompt(monkeypatch) -> None:
     assert result is not None
     assert "VB_TEST" in result.answer_markdown
     assert "NG" in result.answer_markdown
+    assert "solomon://graph-cypher?" in result.answer_markdown
+    assert "vb_id" in result.answer_markdown
 
 
 def test_q4_trace_graph_prompt() -> None:
     assert parse_trace_id_from_prompt(_Q4_TRACE_GRAPH) == "26G3V05390"
     assert is_manufacturing_trace_graph_prompt(_Q4_TRACE_GRAPH) is True
+    assert is_manufacturing_trace_documents_prompt(_Q4_TRACE_GRAPH) is False
     assert heuristic_classify(_Q4_TRACE_GRAPH).intent == "KNOWLEDGE_RAG"
     assert heuristic_classify(_Q4_TRACE_GRAPH).needs_clarification is False
 

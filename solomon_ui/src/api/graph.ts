@@ -64,11 +64,12 @@ export async function fetchGraphQuery(
 
 export async function executeGraphCypher(
   cypher: string,
+  params: Record<string, string | number | boolean> = {},
 ): Promise<GraphQueryResponse> {
   return apiFetch<GraphQueryResponse>("/api/graph/cypher", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cypher, limit: 25 }),
+    body: JSON.stringify({ cypher, limit: 25, params }),
   });
 }
 

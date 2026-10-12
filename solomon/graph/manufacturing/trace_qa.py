@@ -6,6 +6,7 @@ import re
 from typing import Any, Optional
 
 from solomon.graph.config import get_neo4j_config
+from solomon.graph.chat_links import graph_cypher_markdown_link
 from solomon.opensearch.chat_links import search_document_markdown_link
 from solomon.graph.manufacturing.silver_trino import fetch_trace_summary_from_silver
 from solomon.graph.neo4j_connect import iter_neo4j_connection_uris
@@ -49,6 +50,30 @@ _FORMAT_LABELS: dict[str, str] = {
     "kanken": "J5-完検 (inspection-kanken)",
     "j5_shukken_id": "J5-出検ID (inspection-j5_shukken_id)",
 }
+_FORMAT_LEDGER_LABELS: dict[str, str] = {
+    "j5_main_id": "メインID (j5_main_id)",
+    "j5_shukken_id": "出検 (j5_shukken_id)",
+    "kanken": "完検 (kanken)",
+    "j5_kanken": "完検 (j5_kanken)",
+    "vb": "VB試験 (vb)",
+}
+_INGEST_LEDGER_MARKERS = (
+    "取り込み済",
+    "取込済",
+    "フォーマット",
+    "件数",
+    "ファイルパス",
+    "ingest_file_state",
+)
+_INGEST_LEDGER_FORMAT_MARKERS = (
+    "完検",
+    "出検",
+    "メインID",
+    "メイン ID",
+    "j5_main",
+    "j5_shukken",
+    "kanken",
+)
 
 
 def parse_trace_id_from_prompt(prompt: str) -> str | None:
@@ -56,9 +81,22 @@ def parse_trace_id_from_prompt(prompt: str) -> str | None:
     return m.group(1).upper() if m else None
 
 
+def _is_ingest_ledger_intent(text: str) -> bool:
+    """Q6 台帳意図（trace 明細の完検/出検マーカーと競合しないよう共通化）。"""
+    if parse_trace_id_from_prompt(text) is None:
+        return False
+    if "s3://" in text.lower():
+        return False
+    if not any(m in text for m in _INGEST_LEDGER_MARKERS):
+        return False
+    return any(m in text for m in _INGEST_LEDGER_FORMAT_MARKERS)
+
+
 def is_manufacturing_trace_detail_prompt(prompt: str) -> bool:
     text = prompt.strip()
     if parse_trace_id_from_prompt(text) is None:
+        return False
+    if _is_ingest_ledger_intent(text):
         return False
     lower = text.lower()
     return any(m in text or m.lower() in lower for m in _TRACE_PROMPT_MARKERS)
@@ -107,11 +145,15 @@ _TRACE_DOC_MARKERS = (
 
 
 def is_manufacturing_trace_documents_prompt(prompt: str) -> bool:
-    """KIBAN に紐づく Bronze ファイル一覧（inspection-* 横断）。"""
+    """KIBAN に紐づく Bronze ファイル一覧（inspection-* 横断）。Q4 グラフ説明は除外。"""
     text = prompt.strip()
     if parse_trace_id_from_prompt(text) is None:
         return False
     if is_manufacturing_trace_detail_prompt(text):
+        return False
+    if "グラフ" in text or ("製品トレース" in text and "説明" in text):
+        return False
+    if not any(m in text for m in ("ドキュメント", "見つけ", "全部")):
         return False
     lower = text.lower()
     return any(m in text or m in lower for m in _TRACE_DOC_MARKERS)
@@ -225,42 +267,9 @@ _VB_MACHINE_MARKERS = (
     "机番",
 )
 
-_FORMAT_LEDGER_LABELS: dict[str, str] = {
-    "j5_main_id": "メインID (j5_main_id)",
-    "j5_shukken_id": "出検 (j5_shukken_id)",
-    "kanken": "完検 (kanken)",
-    "j5_kanken": "完検 (j5_kanken)",
-    "vb": "VB試験 (vb)",
-}
-_INGEST_LEDGER_MARKERS = (
-    "取り込み済",
-    "取込済",
-    "フォーマット",
-    "件数",
-    "ファイルパス",
-    "ingest_file_state",
-)
-_INGEST_LEDGER_FORMAT_MARKERS = (
-    "完検",
-    "出検",
-    "メインID",
-    "メイン ID",
-    "j5_main",
-    "j5_shukken",
-    "kanken",
-)
-
-
 def is_manufacturing_ingest_ledger_prompt(prompt: str) -> bool:
     """KIBAN ごとの取込済みフォーマット台帳（ingest_file_state）。"""
-    text = prompt.strip()
-    if parse_trace_id_from_prompt(text) is None:
-        return False
-    if "s3://" in text.lower():
-        return False
-    if not any(m in text for m in _INGEST_LEDGER_MARKERS):
-        return False
-    return any(m in text for m in _INGEST_LEDGER_FORMAT_MARKERS)
+    return _is_ingest_ledger_intent(prompt.strip())
 
 
 def _group_ingest_rows_by_format(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
@@ -469,9 +478,12 @@ def format_vb_machine_markdown(vb_id: str, ctx: dict[str, Any]) -> str:
         "  F -->|INGESTED_INTO| P",
         "```",
         "",
-        "参照 Cypher:",
+        "参照 Cypher（クリックで Graph タブで実行）:",
         "",
-        f"```cypher\n{_VB_MACHINE_CYPHER}\n```",
+        graph_cypher_markdown_link(
+            _VB_MACHINE_CYPHER,
+            {"vb_id": str(ctx.get("vb_machine_no") or vb_id)},
+        ),
         "",
     ]
     if ctx.get("notes"):
@@ -616,9 +628,9 @@ def format_trace_graph_markdown(trace_id: str, ctx: dict[str, Any]) -> str:
         "  P -->|HAS_KIBAN| K",
         "```",
         "",
-        "参照 Cypher（Neo4j Bronze モデル）:",
+        "参照 Cypher（Neo4j Bronze モデル・クリックで Graph タブで実行）:",
         "",
-        f"```cypher\n{_GRAPH_CYPHER}\n```",
+        graph_cypher_markdown_link(_GRAPH_CYPHER, {"trace_id": trace_id}),
         "",
         f"（データソース: **{model}** / {ctx.get('source', '—')}）",
         "",

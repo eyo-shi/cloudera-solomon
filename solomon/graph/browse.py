@@ -218,17 +218,24 @@ _READ_FORBIDDEN = re.compile(
 )
 
 
-def execute_read_cypher(cypher: str, *, limit: int = 100) -> GraphQueryResponse:
+def execute_read_cypher(
+    cypher: str,
+    *,
+    limit: int = 100,
+    params: dict[str, Any] | None = None,
+) -> GraphQueryResponse:
     """Read-only Cypher を実行して Graph 可視化を返す。"""
     text = cypher.strip().rstrip(";")
     if not text:
         raise ValueError("Cypher query is empty")
     if _READ_FORBIDDEN.search(text):
         raise ValueError("Only read-only Cypher queries are allowed")
+    run_params: dict[str, Any] = dict(params or {})
     if re.search(r"\bLIMIT\b", text, re.IGNORECASE):
-        graph = _run_collect(text, {}, limit=limit)
+        graph = _run_collect(text, run_params, limit=limit)
     else:
-        graph = _run_collect(f"{text} LIMIT $limit", {"limit": limit}, limit=limit)
+        run_params["limit"] = limit
+        graph = _run_collect(f"{text} LIMIT $limit", run_params, limit=limit)
     return _response("entity", text, graph)
 
 

@@ -50,6 +50,7 @@ class GraphSchemaResponse(BaseModel):
 class CypherRequest(BaseModel):
     cypher: str = Field(..., min_length=1, max_length=4096)
     limit: int = Field(100, ge=1, le=500)
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class GraphQueryResponse(BaseModel):

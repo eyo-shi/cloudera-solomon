@@ -21,6 +21,7 @@ export type GraphPanelView = "graph" | "table" | "raw";
 export interface GraphResultPanel {
   id: string;
   cypher: string;
+  cypherParams?: Record<string, string | number | boolean>;
   queryType: GraphQueryType | "cypher";
   status: "loading" | "ready" | "error";
   error?: string;
@@ -50,6 +51,11 @@ interface GraphState {
   /** 指定パネルのグラフに、ノード近傍（1ホップ）をマージする */
   expandNeighborhoodInPanel: (panelId: string, nodeId: string) => void;
   appendEntityQuery: (entityHint: string) => void;
+  /** Chat の solomon://graph-cypher リンクからパネルを追加して実行 */
+  appendCypherQuery: (
+    cypher: string,
+    params?: Record<string, string | number | boolean>,
+  ) => void;
   removePanel: (panelId: string) => void;
   rerunPanel: (panelId: string) => void;
   toggleMaximizePanel: (panelId: string) => void;
@@ -89,7 +95,7 @@ function panelLoader(panel: GraphResultPanel): () => Promise<GraphQueryResponse>
     return () =>
       fetchGraphQuery("entity", { entity_hint: panel.entityHint });
   }
-  return () => executeGraphCypher(panel.cypher);
+  return () => executeGraphCypher(panel.cypher, panel.cypherParams ?? {});
 }
 
 function mergeGraphVisualizations(
@@ -215,6 +221,31 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     }));
 
     void loadPanel(panelId, () => executeGraphCypher(cypher));
+  },
+
+  appendCypherQuery: (cypher, params) => {
+    const text = cypher.trim();
+    if (!text) return;
+    ensureGraphTab();
+    const panelId = nextPanelId();
+    const cypherParams = params && Object.keys(params).length > 0 ? params : undefined;
+    set((s) => ({
+      queryInput: text,
+      panels: [
+        {
+          id: panelId,
+          cypher: text,
+          cypherParams,
+          queryType: "cypher",
+          status: "loading",
+          defaultView: "graph",
+        },
+        ...s.panels,
+      ],
+    }));
+    void loadPanel(panelId, () =>
+      executeGraphCypher(text, cypherParams ?? {}),
+    );
   },
 
   expandNeighborhoodInPanel: (panelId, nodeId) => {
