@@ -256,10 +256,43 @@ def heuristic_classify(
 
     # 0c) 製品トレース・グラフ説明（「取り込んだ」が INGEST に誤爆しない）
     from solomon.graph.manufacturing.trace_qa import (
+        is_manufacturing_trace_bundle_report_prompt,
         is_manufacturing_ingest_ledger_prompt,
+        is_manufacturing_kanken_measurements_prompt,
+        is_manufacturing_id_field_judge_prompt,
+        is_manufacturing_id_dump_alt_kiban_prompt,
+        is_manufacturing_dual_timing_kiban_prompt,
+        is_manufacturing_vb_ng_list_prompt,
         is_manufacturing_trace_graph_prompt,
         is_vb_machine_lookup_prompt,
     )
+
+    if is_manufacturing_vb_ng_list_prompt(prompt):
+        return IntentClassification(
+            intent="KNOWLEDGE_RAG",
+            confidence=0.94,
+            extracted_args={"question": prompt},
+            needs_clarification=False,
+            reasoning="silver_vb NG listing with steps and S3 paths",
+        )
+
+    if is_manufacturing_trace_bundle_report_prompt(prompt):
+        return IntentClassification(
+            intent="KNOWLEDGE_RAG",
+            confidence=0.95,
+            extracted_args={"question": prompt},
+            needs_clarification=False,
+            reasoning="composite trace report OS+Trino+Neo4j",
+        )
+
+    if is_manufacturing_dual_timing_kiban_prompt(prompt):
+        return IntentClassification(
+            intent="KNOWLEDGE_RAG",
+            confidence=0.94,
+            extracted_args={"question": prompt},
+            needs_clarification=False,
+            reasoning="ingest_file_state shukken+kanken cross-trace listing",
+        )
 
     if is_manufacturing_ingest_ledger_prompt(prompt):
         return IntentClassification(
@@ -286,6 +319,33 @@ def heuristic_classify(
             extracted_args={"question": prompt},
             needs_clarification=False,
             reasoning="manufacturing trace graph explanation",
+        )
+
+    if is_manufacturing_kanken_measurements_prompt(prompt):
+        return IntentClassification(
+            intent="KNOWLEDGE_RAG",
+            confidence=0.93,
+            extracted_args={"question": prompt},
+            needs_clarification=False,
+            reasoning="kanken measurement fields lookup",
+        )
+
+    if is_manufacturing_id_field_judge_prompt(prompt):
+        return IntentClassification(
+            intent="KNOWLEDGE_RAG",
+            confidence=0.93,
+            extracted_args={"question": prompt},
+            needs_clarification=False,
+            reasoning="silver_id_fields T447 judge lookup",
+        )
+
+    if is_manufacturing_id_dump_alt_kiban_prompt(prompt):
+        return IntentClassification(
+            intent="KNOWLEDGE_RAG",
+            confidence=0.93,
+            extracted_args={"question": prompt},
+            needs_clarification=False,
+            reasoning="silver_trace_links id_dump_alt_kiban with confidence",
         )
 
     # 1) INGEST が最優先 (s3 URI があれば確定)
@@ -396,7 +456,13 @@ def heuristic_classify(
         is_manufacturing_part_lookup_prompt,
         is_manufacturing_trace_detail_prompt,
         is_manufacturing_trace_documents_prompt,
+        is_manufacturing_trace_bundle_report_prompt,
         is_manufacturing_ingest_ledger_prompt,
+        is_manufacturing_kanken_measurements_prompt,
+        is_manufacturing_id_field_judge_prompt,
+        is_manufacturing_id_dump_alt_kiban_prompt,
+        is_manufacturing_dual_timing_kiban_prompt,
+        is_manufacturing_vb_ng_list_prompt,
         is_manufacturing_trace_graph_prompt,
         is_vb_machine_lookup_prompt,
         is_vb_path_lookup_prompt,
@@ -408,6 +474,12 @@ def heuristic_classify(
         or is_manufacturing_trace_detail_prompt(prompt)
         or is_manufacturing_trace_graph_prompt(prompt)
         or is_manufacturing_ingest_ledger_prompt(prompt)
+        or is_manufacturing_kanken_measurements_prompt(prompt)
+        or is_manufacturing_id_field_judge_prompt(prompt)
+        or is_manufacturing_id_dump_alt_kiban_prompt(prompt)
+        or is_manufacturing_dual_timing_kiban_prompt(prompt)
+        or is_manufacturing_vb_ng_list_prompt(prompt)
+        or is_manufacturing_trace_bundle_report_prompt(prompt)
         or is_vb_machine_lookup_prompt(prompt)
         or is_vb_path_lookup_prompt(prompt)
     ):

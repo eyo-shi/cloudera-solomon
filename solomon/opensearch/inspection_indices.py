@@ -317,6 +317,46 @@ def search_document_by_object_key(
     return None
 
 
+def search_vb_documents_by_overall_judge(
+    judge: str = "NG",
+    *,
+    config: OpenSearchConfig | None = None,
+    size: int = 50,
+) -> list[dict[str, Any]]:
+    """``inspection-vb`` で payload.judge が一致する doc を列挙する。"""
+    j = (judge or "NG").strip()
+    if not j:
+        return []
+    cfg = config or get_opensearch_config()
+    if cfg is None:
+        return []
+
+    should: list[dict[str, Any]] = [
+        {"term": {"payload.judge.keyword": j}},
+        {"term": {"payload.judge": j}},
+        {"match": {"payload.judge": j}},
+    ]
+    client = build_client(cfg)
+    body = {
+        "size": size,
+        "query": {"bool": {"should": should, "minimum_should_match": 1}},
+        "sort": [{"object_key.keyword": "asc"}],
+    }
+    index = inspection_index_name("vb")
+    try:
+        response = client.search(
+            index=index,
+            body=body,
+            params=_OS_SEARCH_PARAMS,
+        )
+        return [
+            normalize_inspection_hit(h)
+            for h in response.get("hits", {}).get("hits", [])
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def search_vb_documents_by_path_terms(
     terms: list[str],
     *,
@@ -384,6 +424,7 @@ __all__ = [
     "search_documents_by_trace_id",
     "search_documents_by_part_number",
     "search_document_by_object_key",
+    "search_vb_documents_by_overall_judge",
     "search_vb_documents_by_path_terms",
     "summarize_trace_documents",
 ]

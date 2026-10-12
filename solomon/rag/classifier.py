@@ -135,7 +135,13 @@ def is_knowledge_query(prompt: str) -> bool:
         is_manufacturing_part_lookup_prompt,
         is_manufacturing_trace_detail_prompt,
         is_manufacturing_trace_documents_prompt,
+        is_manufacturing_trace_bundle_report_prompt,
         is_manufacturing_ingest_ledger_prompt,
+        is_manufacturing_kanken_measurements_prompt,
+        is_manufacturing_id_field_judge_prompt,
+        is_manufacturing_id_dump_alt_kiban_prompt,
+        is_manufacturing_dual_timing_kiban_prompt,
+        is_manufacturing_vb_ng_list_prompt,
         is_manufacturing_trace_graph_prompt,
         is_vb_machine_lookup_prompt,
         is_vb_path_lookup_prompt,
@@ -147,7 +153,13 @@ def is_knowledge_query(prompt: str) -> bool:
         or is_manufacturing_trace_documents_prompt(text)
         or is_manufacturing_trace_detail_prompt(text)
         or is_manufacturing_trace_graph_prompt(text)
+        or is_manufacturing_trace_bundle_report_prompt(text)
         or is_manufacturing_ingest_ledger_prompt(text)
+        or is_manufacturing_kanken_measurements_prompt(text)
+        or is_manufacturing_id_field_judge_prompt(text)
+        or is_manufacturing_id_dump_alt_kiban_prompt(text)
+        or is_manufacturing_dual_timing_kiban_prompt(text)
+        or is_manufacturing_vb_ng_list_prompt(text)
         or is_vb_machine_lookup_prompt(text)
         or is_vb_path_lookup_prompt(text)
     ):

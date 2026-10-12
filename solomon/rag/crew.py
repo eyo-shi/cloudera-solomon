@@ -37,12 +37,29 @@ def kickoff_knowledge_rag(
         from solomon.graph.manufacturing.trace_qa import (
             try_answer_manufacturing_part_prompt,
             try_answer_manufacturing_trace_documents_prompt,
+            try_answer_manufacturing_trace_bundle_report_prompt,
             try_answer_manufacturing_ingest_ledger_prompt,
+            try_answer_manufacturing_kanken_measurements_prompt,
+            try_answer_manufacturing_id_field_judge_prompt,
+            try_answer_manufacturing_id_dump_alt_kiban_prompt,
+            try_answer_manufacturing_dual_timing_kiban_prompt,
+            try_answer_manufacturing_vb_ng_list_prompt,
             try_answer_manufacturing_trace_graph_prompt,
             try_answer_manufacturing_trace_prompt,
             try_answer_vb_machine_prompt,
             try_answer_vb_path_prompt,
         )
+
+        trace_bundle_answer = try_answer_manufacturing_trace_bundle_report_prompt(
+            prompt, user_ctx=user_ctx
+        )
+        if trace_bundle_answer is not None:
+            _logger.info(
+                "knowledge_rag.trace_bundle_report",
+                user=user_ctx.user_name,
+                trace_id=trace_bundle_answer.plan.entity_hint,
+            )
+            return ok_result(trace_bundle_answer)
 
         ingest_ledger_answer = try_answer_manufacturing_ingest_ledger_prompt(
             prompt, user_ctx=user_ctx
@@ -54,6 +71,61 @@ def kickoff_knowledge_rag(
                 trace_id=ingest_ledger_answer.plan.entity_hint,
             )
             return ok_result(ingest_ledger_answer)
+
+        kanken_meas_answer = try_answer_manufacturing_kanken_measurements_prompt(
+            prompt, user_ctx=user_ctx
+        )
+        if kanken_meas_answer is not None:
+            _logger.info(
+                "knowledge_rag.kanken_measurements",
+                user=user_ctx.user_name,
+                trace_id=kanken_meas_answer.plan.entity_hint,
+            )
+            return ok_result(kanken_meas_answer)
+
+        id_field_judge_answer = try_answer_manufacturing_id_field_judge_prompt(
+            prompt, user_ctx=user_ctx
+        )
+        if id_field_judge_answer is not None:
+            _logger.info(
+                "knowledge_rag.id_field_judge",
+                user=user_ctx.user_name,
+                trace_id=id_field_judge_answer.plan.entity_hint,
+            )
+            return ok_result(id_field_judge_answer)
+
+        id_dump_alt_answer = try_answer_manufacturing_id_dump_alt_kiban_prompt(
+            prompt, user_ctx=user_ctx
+        )
+        if id_dump_alt_answer is not None:
+            _logger.info(
+                "knowledge_rag.id_dump_alt_kiban",
+                user=user_ctx.user_name,
+                trace_id=id_dump_alt_answer.plan.entity_hint,
+            )
+            return ok_result(id_dump_alt_answer)
+
+        dual_timing_answer = try_answer_manufacturing_dual_timing_kiban_prompt(
+            prompt, user_ctx=user_ctx
+        )
+        if dual_timing_answer is not None:
+            _logger.info(
+                "knowledge_rag.dual_timing_kiban",
+                user=user_ctx.user_name,
+                trace_id=dual_timing_answer.plan.entity_hint,
+            )
+            return ok_result(dual_timing_answer)
+
+        vb_ng_answer = try_answer_manufacturing_vb_ng_list_prompt(
+            prompt, user_ctx=user_ctx
+        )
+        if vb_ng_answer is not None:
+            _logger.info(
+                "knowledge_rag.vb_ng_list",
+                user=user_ctx.user_name,
+                entity=vb_ng_answer.plan.entity_hint,
+            )
+            return ok_result(vb_ng_answer)
 
         trace_graph_answer = try_answer_manufacturing_trace_graph_prompt(
             prompt, user_ctx=user_ctx

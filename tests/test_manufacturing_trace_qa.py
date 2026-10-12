@@ -15,7 +15,20 @@ from solomon.graph.manufacturing.trace_qa import (
     parse_vb_machine_from_prompt,
     parse_vb_path_terms,
     is_manufacturing_ingest_ledger_prompt,
+    is_manufacturing_kanken_measurements_prompt,
+    is_manufacturing_id_field_judge_prompt,
+    is_manufacturing_id_dump_alt_kiban_prompt,
+    is_manufacturing_dual_timing_kiban_prompt,
+    is_manufacturing_vb_ng_list_prompt,
     is_vb_machine_lookup_prompt,
+    parse_list_limit_from_prompt,
+    try_answer_manufacturing_kanken_measurements_prompt,
+    try_answer_manufacturing_id_field_judge_prompt,
+    try_answer_manufacturing_id_dump_alt_kiban_prompt,
+    try_answer_manufacturing_dual_timing_kiban_prompt,
+    try_answer_manufacturing_vb_ng_list_prompt,
+    is_manufacturing_trace_bundle_report_prompt,
+    try_answer_manufacturing_trace_bundle_report_prompt,
     try_answer_manufacturing_ingest_ledger_prompt,
     try_answer_manufacturing_part_prompt,
     try_answer_vb_machine_prompt,
@@ -49,6 +62,29 @@ _Q5_VB_MACHINE = (
 _Q6_INGEST_LEDGER = (
     "26G3V05319 について、完検・出検・メインID のどれが取り込み済みか、"
     "フォーマット別に件数とファイルパスを出して。"
+)
+_Q7_KANKEN_MEASUREMENTS = (
+    "26G3V05319 の完検で、モータトルク や EOP 電流 に関する"
+    "測定項目と初検値を一覧して。"
+)
+_Q8_ID_FIELD_JUDGE = (
+    "メインID の 26G3V05390 で、T447 マップ上 判定が『未検』 の項目名を教えて。"
+)
+_Q9_DUAL_TIMING = (
+    "同じ trace_id で 出検と完検の両方がある KIBAN を 5 件挙げ、"
+    "それぞれ何ファイルあるか。"
+)
+_Q10_VB_NG_LIST = (
+    "VB 試験で総合判定 NG の机番を洗い出し、それぞれ ステップ数 と "
+    "試験日時、S3 上のパス までまとめて。"
+)
+_Q11_ID_DUMP_ALT_KIBAN = (
+    "26G3V05390 のメインIDダンプで、別 KIBAN らしき文字列が hex 内に"
+    "埋まっていないか調べ、信頼度付きで説明して。"
+)
+_Q12_TRACE_BUNDLE = (
+    "KIBAN 26G3V05319 を起点に、取込済み試験の種類、完検の代表測定 3 項目、"
+    "出検の通過日時、Neo4j 上の Product–File 関係を、根拠テーブル名付きでレポートして。"
 )
 
 
@@ -96,6 +132,238 @@ def test_try_answer_trace_documents_prompt(monkeypatch) -> None:
     assert result is not None
     assert "26G3V05354" in result.answer_markdown
     assert "j5_main_id" in result.answer_markdown
+
+
+def test_q12_trace_bundle_report_prompt() -> None:
+    assert parse_trace_id_from_prompt(_Q12_TRACE_BUNDLE) == "26G3V05319"
+    assert is_manufacturing_trace_bundle_report_prompt(_Q12_TRACE_BUNDLE) is True
+    assert is_manufacturing_ingest_ledger_prompt(_Q12_TRACE_BUNDLE) is False
+    assert heuristic_classify(_Q12_TRACE_BUNDLE).intent == "KNOWLEDGE_RAG"
+
+
+def test_try_answer_trace_bundle_report_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.manufacturing.trace_qa.fetch_trace_bundle_report_context",
+        lambda _tid, **kw: {
+            "trace_id": "26G3V05319",
+            "silver_schema": "inspection_silver",
+            "sources_used": [
+                "Iceberg `inspection_silver.ingest_file_state`",
+                "OpenSearch `inspection-*`",
+                "Iceberg `inspection_silver.silver_kanken_fields`",
+                "Neo4j Bronze (`Product` / `SourceFile` / `Kiban`)",
+            ],
+            "ingest_ledger": {
+                "by_format": {"j5_shukken_id": ["a.DAT"], "kanken": ["b.txt"]},
+            },
+            "opensearch_by_format": {"j5_shukken_id": 1, "kanken": 1},
+            "kanken_sample": {
+                "rows": [
+                    {
+                        "step_name": "S1",
+                        "symbol_name": "TRQ001",
+                        "unit": "Nm",
+                        "first_value": "1.2",
+                    },
+                ],
+            },
+            "trace_summary": {"pass_datetime": "2026/07/08 00:32:48"},
+            "trace_graph": {
+                "neo4j_source_files": [
+                    {"format": "j5_shukken_id", "key": "j5_shukken_id/a.DAT", "product_trace_id": "26G3V05319"},
+                ],
+            },
+        },
+    )
+    result = try_answer_manufacturing_trace_bundle_report_prompt(_Q12_TRACE_BUNDLE)
+    assert result is not None
+    assert result.plan.strategy == "COMPOSITE"
+    assert "代表測定" in result.answer_markdown
+    assert "通過日時" in result.answer_markdown
+    assert "Neo4j" in result.answer_markdown
+    assert "覚えなくても" in result.answer_markdown
+
+
+def test_q11_id_dump_alt_kiban_prompt() -> None:
+    assert parse_trace_id_from_prompt(_Q11_ID_DUMP_ALT_KIBAN) == "26G3V05390"
+    assert is_manufacturing_id_dump_alt_kiban_prompt(_Q11_ID_DUMP_ALT_KIBAN) is True
+    assert is_manufacturing_trace_detail_prompt(_Q11_ID_DUMP_ALT_KIBAN) is False
+    assert is_manufacturing_id_field_judge_prompt(_Q11_ID_DUMP_ALT_KIBAN) is False
+    assert heuristic_classify(_Q11_ID_DUMP_ALT_KIBAN).intent == "KNOWLEDGE_RAG"
+
+
+def test_try_answer_id_dump_alt_kiban_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.manufacturing.silver_trino.fetch_id_dump_alt_kiban_links",
+        lambda _tid, **kw: {
+            "trace_id": "26G3V05390",
+            "silver_schema": "inspection_silver",
+            "link_type": "id_dump_alt_kiban",
+            "rows": [
+                {
+                    "trace_id": "26G3V05390",
+                    "vb_machine_no": "26G0004225726",
+                    "link_type": "id_dump_alt_kiban",
+                    "confidence": "low",
+                    "detail": "hex scan: embedded KIBAN-like token",
+                    "source_object_key": "j5_main_id/20260707235801_26G3V05390.txt",
+                },
+            ],
+        },
+    )
+    result = try_answer_manufacturing_id_dump_alt_kiban_prompt(_Q11_ID_DUMP_ALT_KIBAN)
+    assert result is not None
+    assert "silver_trace_links" in result.answer_markdown
+    assert "26G0004225726" in result.answer_markdown
+    assert "low" in result.answer_markdown.lower()
+
+
+def test_q10_vb_ng_list_prompt() -> None:
+    assert is_manufacturing_vb_ng_list_prompt(_Q10_VB_NG_LIST) is True
+    assert is_vb_machine_lookup_prompt(_Q10_VB_NG_LIST) is False
+    assert heuristic_classify(_Q10_VB_NG_LIST).intent == "KNOWLEDGE_RAG"
+    assert heuristic_classify(_Q10_VB_NG_LIST).needs_clarification is False
+
+
+def test_try_answer_vb_ng_list_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.manufacturing.trace_qa.fetch_vb_ng_list_context",
+        lambda **kw: {
+            "source": "lakehouse+opensearch",
+            "silver_schema": "inspection_silver",
+            "judge_filter": "NG",
+            "rows": [
+                {
+                    "vb_machine_no": "166890",
+                    "step_count": 12,
+                    "test_datetime": "2026/07/08 10:00:00",
+                    "object_key": "vb_test/蘇州/sample/18113000005200001012113.TXT",
+                    "judge": "NG",
+                },
+            ],
+        },
+    )
+    result = try_answer_manufacturing_vb_ng_list_prompt(_Q10_VB_NG_LIST)
+    assert result is not None
+    assert "silver_vb" in result.answer_markdown
+    assert "166890" in result.answer_markdown
+    assert "18113000005200001012113.TXT" in result.answer_markdown
+
+
+def test_q9_dual_timing_kiban_prompt() -> None:
+    assert parse_trace_id_from_prompt(_Q9_DUAL_TIMING) is None
+    assert parse_list_limit_from_prompt(_Q9_DUAL_TIMING) == 5
+    assert is_manufacturing_dual_timing_kiban_prompt(_Q9_DUAL_TIMING) is True
+    assert is_manufacturing_ingest_ledger_prompt(_Q9_DUAL_TIMING) is False
+    assert is_manufacturing_trace_detail_prompt(_Q9_DUAL_TIMING) is False
+    assert heuristic_classify(_Q9_DUAL_TIMING).intent == "KNOWLEDGE_RAG"
+
+
+def test_try_answer_dual_timing_kiban_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.manufacturing.silver_trino.fetch_kiban_with_shukken_and_kanken",
+        lambda limit, **kw: {
+            "source": "lakehouse",
+            "silver_schema": "inspection_silver",
+            "limit": limit,
+            "rows": [
+                {
+                    "trace_id": "26G3V05319",
+                    "shukken_cnt": 1,
+                    "kanken_cnt": 1,
+                    "total_cnt": 2,
+                },
+                {
+                    "trace_id": "26G3V05393",
+                    "shukken_cnt": 1,
+                    "kanken_cnt": 2,
+                    "total_cnt": 3,
+                },
+            ],
+        },
+    )
+    result = try_answer_manufacturing_dual_timing_kiban_prompt(_Q9_DUAL_TIMING)
+    assert result is not None
+    assert "ingest_file_state" in result.answer_markdown
+    assert "26G3V05319" in result.answer_markdown
+    assert "出検" in result.answer_markdown
+    assert "完検" in result.answer_markdown
+    assert "| 0 |" not in result.answer_markdown
+
+
+def test_q8_id_field_judge_prompt() -> None:
+    assert parse_trace_id_from_prompt(_Q8_ID_FIELD_JUDGE) == "26G3V05390"
+    assert is_manufacturing_id_field_judge_prompt(_Q8_ID_FIELD_JUDGE) is True
+    assert is_manufacturing_trace_detail_prompt(_Q8_ID_FIELD_JUDGE) is False
+    assert heuristic_classify(_Q8_ID_FIELD_JUDGE).intent == "KNOWLEDGE_RAG"
+
+
+def test_try_answer_id_field_judge_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.manufacturing.silver_trino.fetch_id_fields_by_judge",
+        lambda _tid, **kw: {
+            "trace_id": "26G3V05390",
+            "silver_schema": "inspection_silver",
+            "data_format": "j5_main_id",
+            "value_judge": "未検",
+            "rows": [
+                {
+                    "field_name": "製造区分コード",
+                    "address_hex": "0120(H)",
+                    "value_judge": "未検",
+                    "value": "00",
+                    "process_name": "生産指示",
+                },
+            ],
+        },
+    )
+    result = try_answer_manufacturing_id_field_judge_prompt(_Q8_ID_FIELD_JUDGE)
+    assert result is not None
+    assert "silver_id_fields" in result.answer_markdown
+    assert "製造区分コード" in result.answer_markdown
+    assert "未検" in result.answer_markdown
+
+
+def test_q7_kanken_measurements_prompt() -> None:
+    assert parse_trace_id_from_prompt(_Q7_KANKEN_MEASUREMENTS) == "26G3V05319"
+    assert is_manufacturing_kanken_measurements_prompt(_Q7_KANKEN_MEASUREMENTS) is True
+    assert is_manufacturing_trace_detail_prompt(_Q7_KANKEN_MEASUREMENTS) is False
+    assert heuristic_classify(_Q7_KANKEN_MEASUREMENTS).intent == "KNOWLEDGE_RAG"
+
+
+def test_try_answer_kanken_measurements_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.manufacturing.silver_trino.fetch_kanken_measurements_for_trace",
+        lambda _tid, terms, user_ctx=None, **kw: {
+            "trace_id": "26G3V05319",
+            "silver_schema": "inspection_silver",
+            "filter_terms": terms,
+            "rows": [
+                {
+                    "step_name": "2回転下降_作動確認",
+                    "symbol_name": "TRQ02モータトルク(STEP02)",
+                    "unit": "Nm",
+                    "spec_lower": "3.0",
+                    "spec_upper": "7.0",
+                    "first_value": "4.41",
+                    "j_reinspect": "0",
+                },
+                {
+                    "step_name": "2回転下降_作動確認",
+                    "symbol_name": "EOP02EOP電流(STEP02)",
+                    "unit": "A",
+                    "first_value": "3.51",
+                    "j_reinspect": "0",
+                },
+            ],
+        },
+    )
+    result = try_answer_manufacturing_kanken_measurements_prompt(_Q7_KANKEN_MEASUREMENTS)
+    assert result is not None
+    assert "silver_kanken_fields" in result.answer_markdown
+    assert "TRQ02" in result.answer_markdown
+    assert "4.41" in result.answer_markdown
+    assert "EOP02" in result.answer_markdown
 
 
 def test_q6_ingest_ledger_prompt() -> None:

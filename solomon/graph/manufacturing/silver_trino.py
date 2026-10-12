@@ -46,6 +46,15 @@ def _scalar_query(conn: Any, sql: str) -> Any:
     return row[0]
 
 
+def _multi_row_query(conn: Any, sql: str) -> list[dict[str, Any]]:
+    cur = conn.cursor()
+    cur.execute(sql)
+    if not cur.description:
+        return []
+    names = [d[0] for d in cur.description]
+    return [dict(zip(names, row, strict=False)) for row in cur.fetchall()]
+
+
 def _row_query(conn: Any, sql: str) -> dict[str, Any] | None:
     cur = conn.cursor()
     cur.execute(sql)
@@ -274,10 +283,571 @@ LIMIT 50
             pass
 
 
+def fetch_kanken_measurements_for_trace(
+    trace_id: str,
+    filter_terms: list[str],
+    user_ctx: Optional[UserContext] = None,
+) -> dict[str, Any]:
+    """``silver_kanken_fields`` から完検測定行（シンボル / 初検）を取得。"""
+    from solomon.tools._trino_client import trino_connection_for_user
+
+    cfg = get_trino_config()
+    if cfg is None:
+        return {"trace_id": trace_id, "error": "TRINO_NOT_CONFIGURED"}
+
+    tid = trace_id.replace("'", "''")
+    table = _fq("silver_kanken_fields")
+    terms = [t.strip() for t in filter_terms if t and t.strip()]
+    if not terms:
+        terms = ["TRQ", "EOP"]
+
+    like_clauses: list[str] = []
+    for term in terms:
+        esc = term.replace("'", "''")
+        like_clauses.append(
+            f"(LOWER(symbol_name) LIKE LOWER('%{esc}%') "
+            f"OR LOWER(step_name) LIKE LOWER('%{esc}%'))"
+        )
+    where_filter = " OR ".join(like_clauses)
+    payload_likes: list[str] = []
+    for term in terms:
+        esc = term.replace("'", "''")
+        payload_likes.append(
+            f"LOWER(json_extract_scalar(payload, '$.symbol_name')) LIKE LOWER('%{esc}%')"
+        )
+    payload_filter = " OR ".join(payload_likes)
+
+    sql_variants = (
+        f"""
+SELECT step_name, symbol_name, unit, spec_lower, spec_upper,
+       first_value, j_reinspect, object_key
+FROM {table}
+WHERE trace_id = '{tid}'
+  AND ({where_filter})
+ORDER BY step_name, symbol_name
+LIMIT 80
+""",
+        f"""
+SELECT
+  json_extract_scalar(payload, '$.step_name') AS step_name,
+  json_extract_scalar(payload, '$.symbol_name') AS symbol_name,
+  json_extract_scalar(payload, '$.unit') AS unit,
+  json_extract_scalar(payload, '$.spec_lower') AS spec_lower,
+  json_extract_scalar(payload, '$.spec_upper') AS spec_upper,
+  json_extract_scalar(payload, '$.first_value') AS first_value,
+  json_extract_scalar(payload, '$.j_reinspect') AS j_reinspect,
+  object_key
+FROM {table}
+WHERE trace_id = '{tid}'
+  AND ({payload_filter})
+ORDER BY 1, 2
+LIMIT 80
+""",
+    )
+
+    conn_or_err = trino_connection_for_user(
+        user_ctx,
+        catalog=silver_catalog_name(),
+        schema=silver_schema_name(),
+    )
+    if isinstance(conn_or_err, dict):
+        return {"trace_id": trace_id, "error": conn_or_err.get("message", "TRINO_FAILED")}
+
+    last_error: str | None = None
+    try:
+        for sql in sql_variants:
+            try:
+                rows = _multi_row_query(conn_or_err, sql)
+                return {
+                    "trace_id": trace_id,
+                    "source": "lakehouse",
+                    "silver_schema": silver_schema_name(),
+                    "filter_terms": terms,
+                    "rows": rows,
+                }
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+        return {"trace_id": trace_id, "error": last_error or "QUERY_FAILED"}
+    finally:
+        try:
+            conn_or_err.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def fetch_kanken_representative_measurements(
+    trace_id: str,
+    limit: int = 3,
+    user_ctx: Optional[UserContext] = None,
+) -> dict[str, Any]:
+    """``silver_kanken_fields`` から代表測定行を先頭 N 件取得（Q12）。"""
+    from solomon.tools._trino_client import trino_connection_for_user
+
+    cfg = get_trino_config()
+    if cfg is None:
+        return {"trace_id": trace_id, "error": "TRINO_NOT_CONFIGURED"}
+
+    lim = max(1, min(int(limit), 20))
+    tid = trace_id.replace("'", "''")
+    table = _fq("silver_kanken_fields")
+    schema = silver_schema_name()
+    sql_variants = (
+        f"""
+SELECT step_name, symbol_name, unit, first_value, object_key
+FROM {table}
+WHERE trace_id = '{tid}'
+ORDER BY step_name, symbol_name
+LIMIT {lim}
+""",
+        f"""
+SELECT
+  json_extract_scalar(payload, '$.step_name') AS step_name,
+  json_extract_scalar(payload, '$.symbol_name') AS symbol_name,
+  json_extract_scalar(payload, '$.unit') AS unit,
+  json_extract_scalar(payload, '$.first_value') AS first_value,
+  object_key
+FROM {table}
+WHERE trace_id = '{tid}'
+ORDER BY 1, 2
+LIMIT {lim}
+""",
+    )
+
+    conn_or_err = trino_connection_for_user(
+        user_ctx,
+        catalog=silver_catalog_name(),
+        schema=schema,
+    )
+    if isinstance(conn_or_err, dict):
+        return {"trace_id": trace_id, "error": conn_or_err.get("message", "TRINO_FAILED")}
+
+    last_error: str | None = None
+    try:
+        for sql in sql_variants:
+            try:
+                rows = _multi_row_query(conn_or_err, sql)
+                return {
+                    "trace_id": trace_id,
+                    "source": "lakehouse",
+                    "silver_schema": schema,
+                    "limit": lim,
+                    "rows": rows,
+                }
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+        return {"trace_id": trace_id, "error": last_error or "QUERY_FAILED"}
+    finally:
+        try:
+            conn_or_err.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def fetch_id_fields_by_judge(
+    trace_id: str,
+    *,
+    data_format: str = "j5_main_id",
+    value_judge: str = "未検",
+    user_ctx: Optional[UserContext] = None,
+) -> dict[str, Any]:
+    """``silver_id_fields`` — T447 解釈済み ID 項目（判定フィルタ）。"""
+    from solomon.tools._trino_client import trino_connection_for_user
+
+    cfg = get_trino_config()
+    if cfg is None:
+        return {"trace_id": trace_id, "error": "TRINO_NOT_CONFIGURED"}
+
+    tid = trace_id.replace("'", "''")
+    fmt = data_format.replace("'", "''")
+    judge = value_judge.replace("'", "''")
+    table = _fq("silver_id_fields")
+
+    sql_variants = (
+        f"""
+SELECT
+  COALESCE(field_name, label, info, info_content) AS field_name,
+  address_hex,
+  value_judge,
+  value,
+  process_name,
+  timing_band,
+  format,
+  object_key
+FROM {table}
+WHERE trace_id = '{tid}'
+  AND format = '{fmt}'
+  AND value_judge = '{judge}'
+ORDER BY field_name, address_hex
+LIMIT 120
+""",
+        f"""
+SELECT
+  COALESCE(field_name, label, info, info_content) AS field_name,
+  address_hex,
+  value_judge,
+  value,
+  process_name,
+  timing_band,
+  format,
+  object_key
+FROM {table}
+WHERE trace_id = '{tid}'
+  AND timing_band = 'main_out'
+  AND value_judge = '{judge}'
+ORDER BY field_name, address_hex
+LIMIT 120
+""",
+        f"""
+SELECT
+  COALESCE(
+    json_extract_scalar(payload, '$.field_name'),
+    json_extract_scalar(payload, '$.label'),
+    json_extract_scalar(payload, '$.info')
+  ) AS field_name,
+  json_extract_scalar(payload, '$.address_hex') AS address_hex,
+  json_extract_scalar(payload, '$.value_judge') AS value_judge,
+  json_extract_scalar(payload, '$.value') AS value,
+  json_extract_scalar(payload, '$.process_name') AS process_name,
+  timing_band,
+  format,
+  object_key
+FROM {table}
+WHERE trace_id = '{tid}'
+  AND (
+    format = '{fmt}'
+    OR timing_band = 'main_out'
+  )
+  AND COALESCE(
+    value_judge,
+    json_extract_scalar(payload, '$.value_judge')
+  ) = '{judge}'
+ORDER BY 1, 2
+LIMIT 120
+""",
+    )
+
+    conn_or_err = trino_connection_for_user(
+        user_ctx,
+        catalog=silver_catalog_name(),
+        schema=silver_schema_name(),
+    )
+    if isinstance(conn_or_err, dict):
+        return {"trace_id": trace_id, "error": conn_or_err.get("message", "TRINO_FAILED")}
+
+    last_error: str | None = None
+    try:
+        for sql in sql_variants:
+            try:
+                rows = _multi_row_query(conn_or_err, sql)
+                return {
+                    "trace_id": trace_id,
+                    "source": "lakehouse",
+                    "silver_schema": silver_schema_name(),
+                    "data_format": data_format,
+                    "value_judge": value_judge,
+                    "rows": rows,
+                }
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+        return {"trace_id": trace_id, "error": last_error or "QUERY_FAILED"}
+    finally:
+        try:
+            conn_or_err.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def fetch_silver_vb_ng_tests(
+    *,
+    judge: str = "NG",
+    limit: int = 80,
+    user_ctx: Optional[UserContext] = None,
+) -> dict[str, Any]:
+    """``silver_vb`` で総合判定 NG（等）の VB 試験行 + ``silver_vb_steps`` 件数。"""
+    from solomon.tools._trino_client import trino_connection_for_user
+
+    cfg = get_trino_config()
+    if cfg is None:
+        return {"error": "TRINO_NOT_CONFIGURED"}
+
+    lim = max(1, min(int(limit), 200))
+    j = judge.strip().replace("'", "''").upper()
+    vb_table = _fq("silver_vb")
+    steps_table = _fq("silver_vb_steps")
+    schema = silver_schema_name()
+    sql_variants = (
+        f"""
+SELECT
+  v.object_key,
+  v.vb_machine_no,
+  v.ingested_at,
+  COALESCE(
+    TRY_CAST(json_extract_scalar(v.payload, '$.static_step_count') AS INTEGER),
+    sc.step_cnt
+  ) AS step_count,
+  COALESCE(
+    json_extract_scalar(v.payload, '$.test_datetime'),
+    json_extract_scalar(v.payload, '$.passed_at'),
+    json_extract_scalar(v.payload, '$.test_date'),
+    CAST(v.ingested_at AS VARCHAR)
+  ) AS test_datetime,
+  COALESCE(
+    json_extract_scalar(v.payload, '$.judge'),
+    json_extract_scalar(v.payload, '$.JUDGE')
+  ) AS judge
+FROM {vb_table} v
+LEFT JOIN (
+  SELECT object_key, etag, COUNT(*) AS step_cnt
+  FROM {steps_table}
+  GROUP BY object_key, etag
+) sc ON v.object_key = sc.object_key AND v.etag = sc.etag
+WHERE UPPER(COALESCE(
+    json_extract_scalar(v.payload, '$.judge'),
+    json_extract_scalar(v.payload, '$.JUDGE'),
+    ''
+  )) = '{j}'
+ORDER BY v.vb_machine_no, v.ingested_at DESC
+LIMIT {lim}
+""",
+        f"""
+SELECT
+  v.object_key,
+  v.vb_machine_no,
+  v.ingested_at,
+  COALESCE(
+    TRY_CAST(json_extract_scalar(v.payload, '$.static_step_count') AS INTEGER),
+    sc.step_cnt
+  ) AS step_count,
+  COALESCE(
+    json_extract_scalar(v.payload, '$.test_datetime'),
+    json_extract_scalar(v.payload, '$.passed_at'),
+    CAST(v.ingested_at AS VARCHAR)
+  ) AS test_datetime,
+  COALESCE(
+    json_extract_scalar(v.payload, '$.judge'),
+    json_extract_scalar(v.payload, '$.JUDGE')
+  ) AS judge
+FROM {vb_table} v
+LEFT JOIN (
+  SELECT object_key, COUNT(*) AS step_cnt
+  FROM {steps_table}
+  GROUP BY object_key
+) sc ON v.object_key = sc.object_key
+WHERE UPPER(COALESCE(
+    json_extract_scalar(v.payload, '$.judge'),
+    json_extract_scalar(v.payload, '$.JUDGE'),
+    ''
+  )) = '{j}'
+ORDER BY v.vb_machine_no, v.ingested_at DESC
+LIMIT {lim}
+""",
+    )
+
+    conn_or_err = trino_connection_for_user(
+        user_ctx,
+        catalog=silver_catalog_name(),
+        schema=schema,
+    )
+    if isinstance(conn_or_err, dict):
+        return {"error": conn_or_err.get("message") or "TRINO_CONNECTION_FAILED"}
+
+    last_error: str | None = None
+    try:
+        for sql in sql_variants:
+            try:
+                rows = _multi_row_query(conn_or_err, sql)
+                normalized: list[dict[str, Any]] = []
+                for row in rows:
+                    key = str(row.get("object_key") or "").strip()
+                    if not key:
+                        continue
+                    step_raw = row.get("step_count")
+                    step_count: int | None
+                    try:
+                        step_count = int(step_raw) if step_raw is not None else None
+                    except (TypeError, ValueError):
+                        step_count = None
+                    normalized.append(
+                        {
+                            "object_key": key,
+                            "vb_machine_no": str(row.get("vb_machine_no") or "—"),
+                            "step_count": step_count,
+                            "test_datetime": str(row.get("test_datetime") or "—"),
+                            "judge": str(row.get("judge") or j),
+                            "ingested_at": row.get("ingested_at"),
+                        }
+                    )
+                return {
+                    "source": "lakehouse",
+                    "silver_schema": schema,
+                    "judge_filter": judge,
+                    "rows": normalized,
+                    "reference_sql": sql.strip(),
+                }
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+        return {"error": last_error or "QUERY_FAILED", "silver_schema": schema}
+    finally:
+        try:
+            conn_or_err.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def fetch_kiban_with_shukken_and_kanken(
+    limit: int = 5,
+    user_ctx: Optional[UserContext] = None,
+) -> dict[str, Any]:
+    """``ingest_file_state`` を trace_id × format で集計し、出検+完検両方ある KIBAN を返す。"""
+    from solomon.tools._trino_client import trino_connection_for_user
+
+    cfg = get_trino_config()
+    if cfg is None:
+        return {"error": "TRINO_NOT_CONFIGURED"}
+
+    lim = max(1, min(int(limit), 50))
+    table = _fq("ingest_file_state")
+    schema = silver_schema_name()
+    sql = f"""
+SELECT trace_id,
+  COUNT(CASE WHEN format = 'j5_shukken_id' THEN 1 END) AS shukken_cnt,
+  COUNT(CASE WHEN format IN ('kanken', 'j5_kanken') THEN 1 END) AS kanken_cnt,
+  COUNT(CASE WHEN format = 'j5_shukken_id' THEN 1 END)
+    + COUNT(CASE WHEN format IN ('kanken', 'j5_kanken') THEN 1 END) AS total_cnt
+FROM {table}
+WHERE trace_id IS NOT NULL AND TRIM(CAST(trace_id AS VARCHAR)) <> ''
+GROUP BY trace_id
+HAVING COUNT(CASE WHEN format = 'j5_shukken_id' THEN 1 END) > 0
+   AND COUNT(CASE WHEN format IN ('kanken', 'j5_kanken') THEN 1 END) > 0
+ORDER BY total_cnt DESC, trace_id
+LIMIT {lim}
+"""
+
+    conn_or_err = trino_connection_for_user(
+        user_ctx,
+        catalog=silver_catalog_name(),
+        schema=schema,
+    )
+    if isinstance(conn_or_err, dict):
+        return {"error": conn_or_err.get("message") or "TRINO_CONNECTION_FAILED"}
+
+    try:
+        rows = _multi_row_query(conn_or_err, sql)
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            tid = str(row.get("trace_id") or "").strip()
+            if not tid:
+                continue
+            shukken = int(row.get("shukken_cnt") or 0)
+            kanken = int(row.get("kanken_cnt") or 0)
+            total = int(row.get("total_cnt") or shukken + kanken)
+            normalized.append(
+                {
+                    "trace_id": tid,
+                    "shukken_cnt": shukken,
+                    "kanken_cnt": kanken,
+                    "total_cnt": total,
+                }
+            )
+        return {
+            "source": "lakehouse",
+            "silver_schema": schema,
+            "limit": lim,
+            "rows": normalized,
+            "reference_sql": sql.strip(),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "silver_schema": schema}
+    finally:
+        try:
+            conn_or_err.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+_ID_DUMP_ALT_KIBAN_LINK = "id_dump_alt_kiban"
+
+
+def fetch_id_dump_alt_kiban_links(
+    trace_id: str,
+    user_ctx: Optional[UserContext] = None,
+) -> dict[str, Any]:
+    """メインID hex 内の別 KIBAN 候補 — ``silver_trace_links``（``id_dump_alt_kiban``）。"""
+    from solomon.tools._trino_client import trino_connection_for_user
+
+    cfg = get_trino_config()
+    if cfg is None:
+        return {"trace_id": trace_id, "error": "TRINO_NOT_CONFIGURED"}
+
+    tid = trace_id.replace("'", "''")
+    table = _fq("silver_trace_links")
+    schema = silver_schema_name()
+    link = _ID_DUMP_ALT_KIBAN_LINK.replace("'", "''")
+    sql_variants = (
+        f"""
+SELECT trace_id, vb_machine_no, link_type, confidence, detail,
+       source_object_key, object_key, ingested_at
+FROM {table}
+WHERE trace_id = '{tid}'
+  AND link_type = '{link}'
+ORDER BY ingested_at DESC
+LIMIT 30
+""",
+        f"""
+SELECT trace_id, vb_machine_no, link_type, confidence, detail,
+       source_object_key, object_key, ingested_at
+FROM {table}
+WHERE trace_id = '{tid}'
+  AND link_type LIKE '%alt%kiban%'
+ORDER BY ingested_at DESC
+LIMIT 30
+""",
+    )
+
+    conn_or_err = trino_connection_for_user(
+        user_ctx,
+        catalog=silver_catalog_name(),
+        schema=schema,
+    )
+    if isinstance(conn_or_err, dict):
+        return {
+            "trace_id": trace_id,
+            "error": conn_or_err.get("message") or "TRINO_CONNECTION_FAILED",
+        }
+
+    last_error: str | None = None
+    try:
+        for sql in sql_variants:
+            try:
+                rows = _multi_row_query(conn_or_err, sql)
+                return {
+                    "trace_id": trace_id,
+                    "source": "lakehouse",
+                    "silver_schema": schema,
+                    "link_type": _ID_DUMP_ALT_KIBAN_LINK,
+                    "rows": rows,
+                    "reference_sql": sql.strip(),
+                }
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+        return {"trace_id": trace_id, "error": last_error or "QUERY_FAILED"}
+    finally:
+        try:
+            conn_or_err.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 __all__ = [
     "silver_schema_name",
     "silver_catalog_name",
     "fetch_trace_summary_from_silver",
     "fetch_silver_vb_by_machine",
     "fetch_ingest_files_for_trace",
+    "fetch_kanken_measurements_for_trace",
+    "fetch_kanken_representative_measurements",
+    "fetch_id_fields_by_judge",
+    "fetch_kiban_with_shukken_and_kanken",
+    "fetch_silver_vb_ng_tests",
+    "fetch_id_dump_alt_kiban_links",
 ]
