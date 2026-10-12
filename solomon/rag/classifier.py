@@ -135,6 +135,7 @@ def is_knowledge_query(prompt: str) -> bool:
         is_manufacturing_part_lookup_prompt,
         is_manufacturing_trace_detail_prompt,
         is_manufacturing_trace_documents_prompt,
+        is_manufacturing_ingest_ledger_prompt,
         is_manufacturing_trace_graph_prompt,
         is_vb_machine_lookup_prompt,
         is_vb_path_lookup_prompt,
@@ -146,6 +147,7 @@ def is_knowledge_query(prompt: str) -> bool:
         or is_manufacturing_trace_documents_prompt(text)
         or is_manufacturing_trace_detail_prompt(text)
         or is_manufacturing_trace_graph_prompt(text)
+        or is_manufacturing_ingest_ledger_prompt(text)
         or is_vb_machine_lookup_prompt(text)
         or is_vb_path_lookup_prompt(text)
     ):

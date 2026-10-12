@@ -37,6 +37,7 @@ def kickoff_knowledge_rag(
         from solomon.graph.manufacturing.trace_qa import (
             try_answer_manufacturing_part_prompt,
             try_answer_manufacturing_trace_documents_prompt,
+            try_answer_manufacturing_ingest_ledger_prompt,
             try_answer_manufacturing_trace_graph_prompt,
             try_answer_manufacturing_trace_prompt,
             try_answer_vb_machine_prompt,
@@ -62,6 +63,17 @@ def kickoff_knowledge_rag(
                 trace_id=trace_docs_answer.plan.entity_hint,
             )
             return ok_result(trace_docs_answer)
+
+        ingest_ledger_answer = try_answer_manufacturing_ingest_ledger_prompt(
+            prompt, user_ctx=user_ctx
+        )
+        if ingest_ledger_answer is not None:
+            _logger.info(
+                "knowledge_rag.ingest_ledger",
+                user=user_ctx.user_name,
+                trace_id=ingest_ledger_answer.plan.entity_hint,
+            )
+            return ok_result(ingest_ledger_answer)
 
         trace_graph_answer = try_answer_manufacturing_trace_graph_prompt(
             prompt, user_ctx=user_ctx

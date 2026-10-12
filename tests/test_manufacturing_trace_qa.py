@@ -14,7 +14,9 @@ from solomon.graph.manufacturing.trace_qa import (
     parse_trace_id_from_prompt,
     parse_vb_machine_from_prompt,
     parse_vb_path_terms,
+    is_manufacturing_ingest_ledger_prompt,
     is_vb_machine_lookup_prompt,
+    try_answer_manufacturing_ingest_ledger_prompt,
     try_answer_manufacturing_part_prompt,
     try_answer_vb_machine_prompt,
     try_answer_manufacturing_trace_documents_prompt,
@@ -43,6 +45,10 @@ _Q4_TRACE_GRAPH = (
 )
 _Q5_VB_MACHINE = (
     "Neo4j 上で V/B 机番 166890 に結びついている試験は？判定は？"
+)
+_Q6_INGEST_LEDGER = (
+    "26G3V05319 について、完検・出検・メインID のどれが取り込み済みか、"
+    "フォーマット別に件数とファイルパスを出して。"
 )
 
 
@@ -90,6 +96,32 @@ def test_try_answer_trace_documents_prompt(monkeypatch) -> None:
     assert result is not None
     assert "26G3V05354" in result.answer_markdown
     assert "j5_main_id" in result.answer_markdown
+
+
+def test_q6_ingest_ledger_prompt() -> None:
+    assert parse_trace_id_from_prompt(_Q6_INGEST_LEDGER) == "26G3V05319"
+    assert is_manufacturing_ingest_ledger_prompt(_Q6_INGEST_LEDGER) is True
+    assert heuristic_classify(_Q6_INGEST_LEDGER).intent == "KNOWLEDGE_RAG"
+    assert heuristic_classify(_Q6_INGEST_LEDGER).needs_clarification is False
+
+
+def test_try_answer_ingest_ledger_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.manufacturing.trace_qa.fetch_ingest_ledger_context",
+        lambda _tid, **kw: {
+            "trace_id": "26G3V05319",
+            "silver_schema": "inspection_silver",
+            "by_format": {
+                "j5_main_id": ["j5_main_id/a.txt"],
+                "kanken": ["j5_kanken/b.txt", "j5_kanken/c.txt"],
+            },
+        },
+    )
+    result = try_answer_manufacturing_ingest_ledger_prompt(_Q6_INGEST_LEDGER)
+    assert result is not None
+    assert "j5_main_id" in result.answer_markdown
+    assert "完検" in result.answer_markdown
+    assert "j5_kanken/b.txt" in result.answer_markdown
 
 
 def test_q5_vb_machine_prompt() -> None:

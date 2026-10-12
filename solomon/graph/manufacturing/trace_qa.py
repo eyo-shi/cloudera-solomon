@@ -221,6 +221,189 @@ _VB_MACHINE_MARKERS = (
     "机番",
 )
 
+_FORMAT_LEDGER_LABELS: dict[str, str] = {
+    "j5_main_id": "メインID (j5_main_id)",
+    "j5_shukken_id": "出検 (j5_shukken_id)",
+    "kanken": "完検 (kanken)",
+    "j5_kanken": "完検 (j5_kanken)",
+    "vb": "VB試験 (vb)",
+}
+_INGEST_LEDGER_MARKERS = (
+    "取り込み済",
+    "取込済",
+    "フォーマット",
+    "件数",
+    "ファイルパス",
+    "ingest_file_state",
+)
+_INGEST_LEDGER_FORMAT_MARKERS = (
+    "完検",
+    "出検",
+    "メインID",
+    "メイン ID",
+    "j5_main",
+    "j5_shukken",
+    "kanken",
+)
+
+
+def is_manufacturing_ingest_ledger_prompt(prompt: str) -> bool:
+    """KIBAN ごとの取込済みフォーマット台帳（ingest_file_state）。"""
+    text = prompt.strip()
+    if parse_trace_id_from_prompt(text) is None:
+        return False
+    if "s3://" in text.lower():
+        return False
+    if not any(m in text for m in _INGEST_LEDGER_MARKERS):
+        return False
+    return any(m in text for m in _INGEST_LEDGER_FORMAT_MARKERS)
+
+
+def _group_ingest_rows_by_format(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for row in rows:
+        fmt = str(row.get("format") or "unknown")
+        key = str(row.get("object_key") or "")
+        if not key:
+            continue
+        grouped.setdefault(fmt, [])
+        if key not in grouped[fmt]:
+            grouped[fmt].append(key)
+    return grouped
+
+
+def format_ingest_ledger_markdown(trace_id: str, ctx: dict[str, Any]) -> str:
+    schema = ctx.get("silver_schema") or "inspection_silver"
+    lines = [
+        f"**{trace_id}** の取込済みファイル（Iceberg `{schema}.ingest_file_state`）",
+        "",
+    ]
+    if ctx.get("opensearch_note"):
+        lines.append(f"_{ctx['opensearch_note']}_")
+        lines.append("")
+
+    grouped = ctx.get("by_format")
+    if not isinstance(grouped, dict) or not grouped:
+        lines.append("該当 trace_id の ingest_file_state 行がありません。")
+        return "\n".join(lines)
+
+    lines.extend(
+        [
+            "| フォーマット | 件数 | 説明 |",
+            "|-------------|------|------|",
+        ]
+    )
+    for fmt in sorted(grouped.keys()):
+        paths = grouped[fmt]
+        label = _FORMAT_LEDGER_LABELS.get(fmt, fmt)
+        lines.append(f"| {label} | {len(paths)} | `{fmt}` |")
+    lines.append("")
+
+    for fmt in sorted(grouped.keys()):
+        paths = grouped[fmt]
+        label = _FORMAT_LEDGER_LABELS.get(fmt, fmt)
+        lines.append(f"### {label}（{len(paths)} 件）")
+        for path in paths:
+            lines.append(f"- `{path}`")
+        lines.append("")
+
+    expected = ("j5_main_id", "j5_shukken_id", "kanken")
+    missing = [f for f in expected if f not in grouped]
+    if missing:
+        labels = ", ".join(_FORMAT_LEDGER_LABELS.get(f, f) for f in missing)
+        lines.append(f"_未取込（台帳に 0 件）: {labels}_")
+    return "\n".join(lines)
+
+
+def fetch_ingest_ledger_context(
+    trace_id: str,
+    *,
+    user_ctx: UserContext | None = None,
+) -> dict[str, Any]:
+    from solomon.graph.manufacturing.silver_trino import (
+        fetch_ingest_files_for_trace,
+        silver_schema_name,
+    )
+    from solomon.opensearch.inspection_indices import search_documents_by_trace_id
+
+    rows = fetch_ingest_files_for_trace(trace_id, user_ctx)
+    ctx: dict[str, Any] = {
+        "trace_id": trace_id,
+        "source": "lakehouse",
+        "silver_schema": silver_schema_name(),
+        "ingest_rows": rows,
+        "by_format": _group_ingest_rows_by_format(rows),
+    }
+    if rows:
+        ctx["notes"] = f"ingest_file_state {len(rows)} 行。"
+        return ctx
+
+    docs = search_documents_by_trace_id(trace_id, size=50)
+    if docs:
+        os_rows = [
+            {
+                "format": d.get("format") or "unknown",
+                "object_key": d.get("object_key") or "",
+            }
+            for d in docs
+            if isinstance(d, dict)
+        ]
+        ctx["source"] = "opensearch"
+        ctx["by_format"] = _group_ingest_rows_by_format(os_rows)
+        ctx["opensearch_note"] = (
+            "Trino ingest_file_state が空のため OpenSearch inspection-* で代替。"
+        )
+        return ctx
+
+    ctx["error"] = "NOT_FOUND"
+    return ctx
+
+
+def try_answer_manufacturing_ingest_ledger_prompt(
+    prompt: str,
+    *,
+    user_ctx: UserContext | None = None,
+) -> Optional[KnowledgeRagResult]:
+    """Q6: 完検 / 出検 / メインID 等の取込済みフォーマット別台帳。"""
+    if not is_manufacturing_ingest_ledger_prompt(prompt):
+        return None
+    trace_id = parse_trace_id_from_prompt(prompt)
+    if not trace_id:
+        return None
+
+    plan = RetrievalPlan(
+        strategy="SQL_ANALYTICS",
+        query=prompt.strip(),
+        confidence=0.94,
+        reasoning="ingest_file_state ledger by format",
+        entity_hint=trace_id,
+    )
+
+    ctx = fetch_ingest_ledger_context(trace_id, user_ctx=user_ctx)
+    if ctx.get("error") == "NOT_FOUND":
+        md = (
+            f"**{trace_id}** の取込台帳が Trino / OpenSearch に見つかりません。"
+            " CDE 取込と `ingest_file_state` を確認してください。"
+        )
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(plan=plan, hits=[], errors=[{"source": "lakehouse", "message": md}]),
+            answer_markdown=md,
+        )
+
+    hit = SourceHit(
+        source="lakehouse" if ctx.get("source") == "lakehouse" else "opensearch",
+        kind="ingest_file_ledger",
+        payload=ctx,
+    )
+    md = format_ingest_ledger_markdown(trace_id, ctx)
+    return KnowledgeRagResult(
+        plan=plan,
+        bundle=RetrievalBundle(plan=plan, hits=[hit], errors=[]),
+        answer_markdown=md,
+    )
+
+
 _VB_MACHINE_CYPHER = """
 MATCH (v:VbMachine {id: $vb_id})-[:VB_TEST]->(p:Product)
 OPTIONAL MATCH (f:SourceFile)-[:INGESTED_INTO]->(p)
@@ -1187,6 +1370,9 @@ __all__ = [
     "is_manufacturing_trace_graph_prompt",
     "fetch_trace_graph_context",
     "format_trace_graph_markdown",
+    "is_manufacturing_ingest_ledger_prompt",
+    "format_ingest_ledger_markdown",
+    "try_answer_manufacturing_ingest_ledger_prompt",
     "parse_vb_machine_from_prompt",
     "is_vb_machine_lookup_prompt",
     "format_vb_machine_markdown",

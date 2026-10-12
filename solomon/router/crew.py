@@ -256,9 +256,19 @@ def heuristic_classify(
 
     # 0c) 製品トレース・グラフ説明（「取り込んだ」が INGEST に誤爆しない）
     from solomon.graph.manufacturing.trace_qa import (
+        is_manufacturing_ingest_ledger_prompt,
         is_manufacturing_trace_graph_prompt,
         is_vb_machine_lookup_prompt,
     )
+
+    if is_manufacturing_ingest_ledger_prompt(prompt):
+        return IntentClassification(
+            intent="KNOWLEDGE_RAG",
+            confidence=0.94,
+            extracted_args={"question": prompt},
+            needs_clarification=False,
+            reasoning="ingest_file_state ledger by KIBAN",
+        )
 
     if is_vb_machine_lookup_prompt(prompt):
         return IntentClassification(
@@ -280,7 +290,12 @@ def heuristic_classify(
 
     # 1) INGEST が最優先 (s3 URI があれば確定)
     m = _S3_URI_RE.search(prompt)
-    if m or any(kw in prompt for kw in _INGEST_KEYWORDS) or any(kw in p_lower for kw in _INGEST_KEYWORDS):
+    ingest_keyword_hit = any(kw in prompt for kw in _INGEST_KEYWORDS) or any(
+        kw in p_lower for kw in _INGEST_KEYWORDS
+    )
+    if m or (
+        ingest_keyword_hit and not is_manufacturing_ingest_ledger_prompt(prompt)
+    ):
         if m:
             graph_ingest = is_graph_ingest_request(prompt)
             node_fields = parse_node_fields(prompt) if graph_ingest else None
@@ -381,6 +396,7 @@ def heuristic_classify(
         is_manufacturing_part_lookup_prompt,
         is_manufacturing_trace_detail_prompt,
         is_manufacturing_trace_documents_prompt,
+        is_manufacturing_ingest_ledger_prompt,
         is_manufacturing_trace_graph_prompt,
         is_vb_machine_lookup_prompt,
         is_vb_path_lookup_prompt,
@@ -391,6 +407,7 @@ def heuristic_classify(
         or is_manufacturing_trace_documents_prompt(prompt)
         or is_manufacturing_trace_detail_prompt(prompt)
         or is_manufacturing_trace_graph_prompt(prompt)
+        or is_manufacturing_ingest_ledger_prompt(prompt)
         or is_vb_machine_lookup_prompt(prompt)
         or is_vb_path_lookup_prompt(prompt)
     ):
