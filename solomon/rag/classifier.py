@@ -131,6 +131,25 @@ def is_knowledge_query(prompt: str) -> bool:
     text = prompt.strip()
     if not text:
         return False
+    from solomon.graph.manufacturing.trace_qa import (
+        is_manufacturing_part_lookup_prompt,
+        is_manufacturing_trace_detail_prompt,
+        is_manufacturing_trace_documents_prompt,
+        is_vb_path_lookup_prompt,
+        parse_trace_id_from_prompt,
+    )
+
+    if (
+        is_manufacturing_part_lookup_prompt(text)
+        or is_manufacturing_trace_documents_prompt(text)
+        or is_manufacturing_trace_detail_prompt(text)
+        or is_vb_path_lookup_prompt(text)
+    ):
+        return True
+    if parse_trace_id_from_prompt(text) and re.search(
+        r"KIBAN|機番|trace", text, re.IGNORECASE
+    ):
+        return True
     knowledge_markers = (
         *_GRAPH_PATTERNS,
         *_SQL_PATTERNS,
@@ -140,6 +159,8 @@ def is_knowledge_query(prompt: str) -> bool:
         r"検索",
         r"調べ",
         r"教えて",
+        r"見つけ",
+        r"ドキュメント",
         r"what is",
         r"find ",
     )

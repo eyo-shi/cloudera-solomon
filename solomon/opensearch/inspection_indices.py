@@ -217,6 +217,101 @@ def search_documents_by_trace_id(
     return [normalize_inspection_hit(h) for h in response.get("hits", {}).get("hits", [])]
 
 
+def search_documents_by_part_number(
+    part_number: str,
+    *,
+    config: OpenSearchConfig | None = None,
+    size: int = 50,
+) -> list[dict[str, Any]]:
+    """品番 (HINBAN / customer_hinban) が payload に含まれる Bronze doc を検索する。"""
+    pn = part_number.strip()
+    if not pn:
+        return []
+    cfg = config or get_opensearch_config()
+    if cfg is None:
+        return []
+
+    client = build_client(cfg)
+    body = {
+        "size": size,
+        "query": {
+            "bool": {
+                "should": [
+                    {"term": {"payload.hinban.keyword": pn}},
+                    {"term": {"payload.hinban": pn}},
+                    {"term": {"payload.customer_hinban.keyword": pn}},
+                    {"term": {"payload.customer_hinban": pn}},
+                    {"match_phrase": {"payload.hinban": pn}},
+                    {"match_phrase": {"payload.customer_hinban": pn}},
+                ],
+                "minimum_should_match": 1,
+            }
+        },
+    }
+    index_candidates = (
+        inspection_index_pattern(),
+        inspection_index_list_csv(),
+    )
+    for index in index_candidates:
+        try:
+            response = client.search(
+                index=index,
+                body=body,
+                params=_OS_SEARCH_PARAMS,
+            )
+            return [
+                normalize_inspection_hit(h)
+                for h in response.get("hits", {}).get("hits", [])
+            ]
+        except Exception:  # noqa: BLE001
+            continue
+    return []
+
+
+def search_vb_documents_by_path_terms(
+    terms: list[str],
+    *,
+    config: OpenSearchConfig | None = None,
+    size: int = 50,
+) -> list[dict[str, Any]]:
+    """``inspection-vb`` の ``object_key`` にパス断片が含まれる doc を検索する。"""
+    cleaned = [t.strip() for t in terms if t and t.strip()]
+    if not cleaned:
+        return []
+    cfg = config or get_opensearch_config()
+    if cfg is None:
+        return []
+
+    should: list[dict[str, Any]] = []
+    for term in cleaned:
+        should.append({"wildcard": {"object_key": f"*{term}*"}})
+        should.append({"match_phrase": {"object_key": term}})
+
+    client = build_client(cfg)
+    body = {
+        "size": size,
+        "query": {
+            "bool": {
+                "should": should,
+                "minimum_should_match": 1,
+            }
+        },
+    }
+    index = inspection_index_name("vb")
+    try:
+        response = client.search(
+            index=index,
+            body=body,
+            params=_OS_SEARCH_PARAMS,
+        )
+        return [
+            normalize_inspection_hit(h)
+            for h in response.get("hits", {}).get("hits", [])
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def summarize_trace_documents(docs: list[dict[str, Any]]) -> str | None:
     if not docs:
         return None
@@ -238,5 +333,7 @@ __all__ = [
     "search_inspection_documents",
     "search_tab_scope",
     "search_documents_by_trace_id",
+    "search_documents_by_part_number",
+    "search_vb_documents_by_path_terms",
     "summarize_trace_documents",
 ]

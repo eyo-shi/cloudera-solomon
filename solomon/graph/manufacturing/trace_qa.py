@@ -30,8 +30,24 @@ _TRACE_PROMPT_MARKERS = (
     "アドレスマップ",
     "測定",
     "機番",
-    "KIBAN",
 )
+_PART_NO_RE = re.compile(r"\b(\d{10})\b")
+_HINBAN_PROMPT_MARKERS = (
+    "品番",
+    "試験データ",
+    "ファイル名",
+    "種類",
+    "載",
+    "どの",
+    "ヒット",
+    "含",
+)
+_FORMAT_LABELS: dict[str, str] = {
+    "vb": "VB試験 (inspection-vb)",
+    "j5_main_id": "J5-メインID (inspection-j5_main_id)",
+    "kanken": "J5-完検 (inspection-kanken)",
+    "j5_shukken_id": "J5-出検ID (inspection-j5_shukken_id)",
+}
 
 
 def parse_trace_id_from_prompt(prompt: str) -> str | None:
@@ -45,6 +61,211 @@ def is_manufacturing_trace_detail_prompt(prompt: str) -> bool:
         return False
     lower = text.lower()
     return any(m in text or m.lower() in lower for m in _TRACE_PROMPT_MARKERS)
+
+
+def parse_part_number_from_prompt(prompt: str) -> str | None:
+    """品番 3061042090 形式、または文脈付き 10 桁品番を抽出する。"""
+    text = prompt.strip()
+    m = re.search(r"品番\s*[：:]?\s*(\d{10})\b", text)
+    if m:
+        return m.group(1)
+    if "品番" in text or "ヒンバン" in text.upper():
+        m2 = _PART_NO_RE.search(text)
+        if m2:
+            return m2.group(1)
+    return None
+
+
+def is_manufacturing_part_lookup_prompt(prompt: str) -> bool:
+    """品番横断検索（試験種別・ファイル名）向けデモ QA。"""
+    text = prompt.strip()
+    if parse_part_number_from_prompt(text) is None:
+        return False
+    if parse_trace_id_from_prompt(text) is not None and is_manufacturing_trace_detail_prompt(text):
+        return False
+    return any(m in text for m in _HINBAN_PROMPT_MARKERS)
+
+
+def _format_label(fmt: str | None) -> str:
+    if not fmt:
+        return "—"
+    return _FORMAT_LABELS.get(fmt, fmt)
+
+
+_TRACE_DOC_MARKERS = (
+    "ドキュメント",
+    "見つけ",
+    "全部",
+    "関連",
+    "関係",
+    "ファイル",
+    "document",
+    "find",
+    "semantic",
+)
+
+
+def is_manufacturing_trace_documents_prompt(prompt: str) -> bool:
+    """KIBAN に紐づく Bronze ファイル一覧（inspection-* 横断）。"""
+    text = prompt.strip()
+    if parse_trace_id_from_prompt(text) is None:
+        return False
+    if is_manufacturing_trace_detail_prompt(text):
+        return False
+    lower = text.lower()
+    return any(m in text or m in lower for m in _TRACE_DOC_MARKERS)
+
+
+def format_trace_documents_markdown(trace_id: str, docs: list[dict[str, Any]]) -> str:
+    """KIBAN / trace_id に一致する Bronze ファイル一覧。"""
+    lines = [
+        f"**{trace_id}**（KIBAN）に関連する試験データ（OpenSearch `inspection-*`）",
+        "",
+        "| 種類 | ファイル名 | 品番 (payload) | object_key |",
+        "|------|------------|----------------|------------|",
+    ]
+    seen_keys: set[str] = set()
+    for doc in docs:
+        key = str(doc.get("object_key") or doc.get("title") or "")
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        title = str(doc.get("title") or key.rsplit("/", 1)[-1] or "—")
+        raw_fmt = doc.get("format")
+        fmt = _format_label(str(raw_fmt) if raw_fmt else None)
+        payload = doc.get("payload") if isinstance(doc.get("payload"), dict) else {}
+        part_bits: list[str] = []
+        for field in ("hinban", "at_kiban", "customer_hinban", "kiban"):
+            val = payload.get(field)
+            if val not in (None, ""):
+                part_bits.append(f"{field}={val}")
+        part_col = " · ".join(part_bits) if part_bits else "—"
+        obj = key or "—"
+        lines.append(f"| {fmt} | {title} | {part_col} | `{obj}` |")
+    if not seen_keys:
+        lines.append("| — | 該当なし | — | — |")
+    lines.extend(
+        [
+            "",
+            "_Semantic Search タブと同じ `inspection-*` インデックス。"
+            " ファイル名を覚えていなくても trace_id / 平坦化メタで入口を作れます。_",
+        ]
+    )
+    return "\n".join(lines)
+
+
+_VB_PATH_KNOWN_TOKENS = ("VB_圧無", "圧無", "蘇州")
+_VB_PATH_PROMPT_MARKERS = (
+    "フォルダ",
+    "object_key",
+    "試験ファイル",
+    "パス",
+    "階層",
+    "ある？",
+    "あります",
+)
+
+
+def parse_vb_path_terms(prompt: str) -> list[str]:
+    """プロンプト内の VB 試験パス断片（デモ: 圧無 / 蘇州 / VB_圧無 等）。"""
+    text = prompt.strip()
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    def add(raw: str) -> None:
+        t = raw.strip().strip("「」『』\"'")
+        if len(t) < 2 or t in seen:
+            return
+        seen.add(t)
+        terms.append(t)
+
+    for tok in _VB_PATH_KNOWN_TOKENS:
+        if tok in text:
+            add(tok)
+    for m in re.finditer(r"VB[_\w\u4e00-\u9fff]+", text):
+        add(m.group(0))
+    for m in re.finditer(r"([^\sや、?？]+)\s*みたいな", text):
+        add(m.group(1))
+    return terms
+
+
+def is_vb_path_lookup_prompt(prompt: str) -> bool:
+    """VB 試験の S3/OS パス（object_key）探索デモ QA。"""
+    text = prompt.strip()
+    is_vb = bool(
+        re.search(r"\bVB\b", text, re.IGNORECASE)
+        or "VB_" in text
+        or "ＶＢ" in text
+    )
+    if not is_vb:
+        return False
+    if parse_vb_path_terms(text):
+        return True
+    return any(m in text for m in _VB_PATH_PROMPT_MARKERS) and (
+        "圧無" in text or "蘇州" in text
+    )
+
+
+def format_vb_path_lookup_markdown(terms: list[str], docs: list[dict[str, Any]]) -> str:
+    term_csv = " / ".join(terms)
+    lines = [
+        f"VB 試験（`inspection-vb`）で object_key に **{term_csv}** を含むファイル",
+        "",
+        "| ファイル名 | object_key | V/B機番 | 判定 |",
+        "|------------|------------|---------|------|",
+    ]
+    seen: set[str] = set()
+    for doc in docs:
+        key = str(doc.get("object_key") or "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        title = str(doc.get("title") or key.rsplit("/", 1)[-1])
+        payload = doc.get("payload") if isinstance(doc.get("payload"), dict) else {}
+        vb_no = payload.get("vb_machine_no") or "—"
+        judge = payload.get("judge") or "—"
+        lines.append(f"| {title} | `{key}` | {vb_no} | {judge} |")
+    if not seen:
+        lines.append("| — | — | — | — |")
+    lines.extend(
+        [
+            "",
+            "_Bronze の階層パスが OpenSearch の object_key に載っているため、"
+            "フォルダ名だけ覚えていなくても Semantic Search + メタで入口を作れます。_",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def format_part_lookup_markdown(part_number: str, docs: list[dict[str, Any]]) -> str:
+    """品番が載る Bronze ファイル一覧（OpenSearch inspection-*）。"""
+    lines = [
+        f"品番 **{part_number}** が payload に含まれる試験データ（OpenSearch `inspection-*`）",
+        "",
+        "| 種類 | ファイル名 | KIBAN (trace_id) | object_key |",
+        "|------|------------|------------------|------------|",
+    ]
+    seen_keys: set[str] = set()
+    for doc in docs:
+        key = str(doc.get("object_key") or doc.get("title") or "")
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        title = str(doc.get("title") or key.rsplit("/", 1)[-1] or "—")
+        trace = str(doc.get("trace_id") or "—")
+        raw_fmt = doc.get("format")
+        fmt = _format_label(str(raw_fmt) if raw_fmt else None)
+        obj = key or "—"
+        lines.append(f"| {fmt} | {title} | {trace} | `{obj}` |")
+    if len(seen_keys) == 0:
+        lines.append("| — | 該当なし | — | — |")
+    lines.extend(
+        [
+            "",
+            "_根拠: CDE Bronze 取込インデックス（メインID の HINBAN / 出検の customer_hinban 等）。_",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def format_trace_summary_markdown(summary: dict[str, Any]) -> str:
@@ -260,6 +481,204 @@ def fetch_trace_summary(
     return merged
 
 
+def try_answer_manufacturing_trace_documents_prompt(
+    prompt: str,
+    *,
+    user_ctx: UserContext | None = None,
+) -> Optional[KnowledgeRagResult]:
+    """KIBAN 横断 — inspection-* 上の関連 Bronze doc 一覧。"""
+    _ = user_ctx
+    if not is_manufacturing_trace_documents_prompt(prompt):
+        return None
+    trace_id = parse_trace_id_from_prompt(prompt)
+    if not trace_id:
+        return None
+
+    from solomon.opensearch.inspection_indices import search_documents_by_trace_id
+    from solomon.transport.config import get_opensearch_config
+
+    plan = RetrievalPlan(
+        strategy="KEYWORD",
+        query=prompt.strip(),
+        confidence=0.93,
+        reasoning="manufacturing trace document lookup (inspection-*)",
+        entity_hint=trace_id,
+    )
+    if get_opensearch_config() is None:
+        md = (
+            f"OpenSearch が未設定です。KIBAN **{trace_id}** の検索には "
+            "`inspection-*` が必要です。"
+        )
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(plan=plan, hits=[], errors=[{"source": "opensearch", "message": md}]),
+            answer_markdown=md,
+        )
+
+    docs = search_documents_by_trace_id(trace_id, size=50)
+    if not docs:
+        md = (
+            f"KIBAN **{trace_id}** に一致する Bronze ドキュメントが "
+            "`inspection-*` に見つかりません。CDE 取込と Search タブを確認してください。"
+        )
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(
+                plan=plan,
+                hits=[],
+                errors=[{"source": "opensearch", "message": "no hits"}],
+            ),
+            answer_markdown=md,
+        )
+
+    hits = [
+        SourceHit(
+            source="opensearch",
+            kind="inspection_trace_lookup",
+            payload=doc,
+            score=doc.get("score"),
+        )
+        for doc in docs[:20]
+    ]
+    md = format_trace_documents_markdown(trace_id, docs)
+    return KnowledgeRagResult(
+        plan=plan,
+        bundle=RetrievalBundle(plan=plan, hits=hits, errors=[]),
+        answer_markdown=md,
+    )
+
+
+def try_answer_vb_path_prompt(
+    prompt: str,
+    *,
+    user_ctx: UserContext | None = None,
+) -> Optional[KnowledgeRagResult]:
+    """VB 試験 object_key パス探索（inspection-vb）。"""
+    _ = user_ctx
+    if not is_vb_path_lookup_prompt(prompt):
+        return None
+    terms = parse_vb_path_terms(prompt)
+    if not terms:
+        return None
+
+    from solomon.opensearch.inspection_indices import search_vb_documents_by_path_terms
+    from solomon.transport.config import get_opensearch_config
+
+    plan = RetrievalPlan(
+        strategy="KEYWORD",
+        query=prompt.strip(),
+        confidence=0.91,
+        reasoning="VB path lookup on inspection-vb object_key",
+        entity_hint=",".join(terms),
+    )
+    if get_opensearch_config() is None:
+        md = "OpenSearch が未設定です。VB パス検索には `inspection-vb` が必要です。"
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(plan=plan, hits=[], errors=[{"source": "opensearch", "message": md}]),
+            answer_markdown=md,
+        )
+
+    docs = search_vb_documents_by_path_terms(terms, size=50)
+    if not docs:
+        md = (
+            f"object_key に **{' / '.join(terms)}** を含む VB 試験が "
+            "`inspection-vb` に見つかりません。Search タブでパスを確認してください。"
+        )
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(
+                plan=plan,
+                hits=[],
+                errors=[{"source": "opensearch", "message": "no vb hits"}],
+            ),
+            answer_markdown=md,
+        )
+
+    hits = [
+        SourceHit(
+            source="opensearch",
+            kind="inspection_vb_path_lookup",
+            payload=doc,
+            score=doc.get("score"),
+        )
+        for doc in docs[:20]
+    ]
+    md = format_vb_path_lookup_markdown(terms, docs)
+    return KnowledgeRagResult(
+        plan=plan,
+        bundle=RetrievalBundle(plan=plan, hits=hits, errors=[]),
+        answer_markdown=md,
+    )
+
+
+def try_answer_manufacturing_part_prompt(
+    prompt: str,
+    *,
+    user_ctx: UserContext | None = None,
+) -> Optional[KnowledgeRagResult]:
+    """品番横断 QA — solomon-datasets ではなく inspection-* を参照する。"""
+    _ = user_ctx
+    if not is_manufacturing_part_lookup_prompt(prompt):
+        return None
+    part_no = parse_part_number_from_prompt(prompt)
+    if not part_no:
+        return None
+
+    from solomon.opensearch.inspection_indices import search_documents_by_part_number
+    from solomon.transport.config import get_opensearch_config
+
+    plan = RetrievalPlan(
+        strategy="KEYWORD",
+        query=prompt.strip(),
+        confidence=0.92,
+        reasoning="manufacturing part number lookup (inspection-*)",
+        entity_hint=part_no,
+    )
+    if get_opensearch_config() is None:
+        md = (
+            "OpenSearch が未設定です。品番検索には CDE の `inspection-*` が必要です。"
+            " `OPENSEARCH_URL` / 認証 env を設定してください。"
+        )
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(plan=plan, hits=[], errors=[{"source": "opensearch", "message": md}]),
+            answer_markdown=md,
+        )
+
+    docs = search_documents_by_part_number(part_no, size=50)
+    if not docs:
+        md = (
+            f"品番 **{part_no}** に一致する Bronze ドキュメントが `inspection-*` に見つかりません。"
+            " Search タブで `3061042090` を検索するか、CDE 取込を確認してください。"
+        )
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(
+                plan=plan,
+                hits=[],
+                errors=[{"source": "opensearch", "message": "no hits on inspection-*"}],
+            ),
+            answer_markdown=md,
+        )
+
+    hits = [
+        SourceHit(
+            source="opensearch",
+            kind="inspection_part_lookup",
+            payload=doc,
+            score=doc.get("score"),
+        )
+        for doc in docs[:20]
+    ]
+    md = format_part_lookup_markdown(part_no, docs)
+    return KnowledgeRagResult(
+        plan=plan,
+        bundle=RetrievalBundle(plan=plan, hits=hits, errors=[]),
+        answer_markdown=md,
+    )
+
+
 def try_answer_manufacturing_trace_prompt(
     prompt: str,
     *,
@@ -332,8 +751,19 @@ def try_answer_manufacturing_trace_prompt(
 
 __all__ = [
     "parse_trace_id_from_prompt",
+    "parse_part_number_from_prompt",
     "is_manufacturing_trace_detail_prompt",
+    "is_manufacturing_part_lookup_prompt",
+    "is_manufacturing_trace_documents_prompt",
     "fetch_trace_summary",
     "format_trace_summary_markdown",
+    "format_part_lookup_markdown",
+    "format_trace_documents_markdown",
+    "parse_vb_path_terms",
+    "is_vb_path_lookup_prompt",
+    "format_vb_path_lookup_markdown",
+    "try_answer_vb_path_prompt",
+    "try_answer_manufacturing_part_prompt",
+    "try_answer_manufacturing_trace_documents_prompt",
     "try_answer_manufacturing_trace_prompt",
 ]

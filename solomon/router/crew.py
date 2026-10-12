@@ -352,6 +352,28 @@ def heuristic_classify(
             reasoning="analyze keyword but no last_table in entity_memory",
         )
 
+    # 2b) 製造デモ QA (KIBAN / 品番) — CHITCHAT より先に KNOWLEDGE_RAG へ
+    from solomon.graph.manufacturing.trace_qa import (
+        is_manufacturing_part_lookup_prompt,
+        is_manufacturing_trace_detail_prompt,
+        is_manufacturing_trace_documents_prompt,
+        is_vb_path_lookup_prompt,
+    )
+
+    if (
+        is_manufacturing_part_lookup_prompt(prompt)
+        or is_manufacturing_trace_documents_prompt(prompt)
+        or is_manufacturing_trace_detail_prompt(prompt)
+        or is_vb_path_lookup_prompt(prompt)
+    ):
+        return IntentClassification(
+            intent="KNOWLEDGE_RAG",
+            confidence=0.92,
+            extracted_args={"question": prompt},
+            needs_clarification=False,
+            reasoning="manufacturing trace/part QA",
+        )
+
     # 3) KNOWLEDGE_RAG (取り込み/分析/雑談以外のナレッジ探索)
     from solomon.rag.classifier import is_knowledge_query
 
