@@ -180,8 +180,52 @@ WHERE object_key = '{ok}' AND etag = '{eg}'
             pass
 
 
+def fetch_ingest_files_for_trace(
+    trace_id: str,
+    user_ctx: Optional[UserContext] = None,
+) -> list[dict[str, Any]]:
+    """``ingest_file_state`` から trace_id に紐づく取込済みソースファイル一覧。"""
+    from solomon.tools._trino_client import trino_connection_for_user
+
+    cfg = get_trino_config()
+    if cfg is None:
+        return []
+
+    tid = trace_id.replace("'", "''")
+    table = _fq("ingest_file_state")
+    sql = f"""
+SELECT object_key, format, trace_id, vb_machine_no, ingested_at
+FROM {table}
+WHERE trace_id = '{tid}'
+ORDER BY format, object_key
+LIMIT 50
+"""
+    conn_or_err = trino_connection_for_user(
+        user_ctx,
+        catalog=silver_catalog_name(),
+        schema=silver_schema_name(),
+    )
+    if isinstance(conn_or_err, dict):
+        return []
+    try:
+        cur = conn_or_err.cursor()
+        cur.execute(sql)
+        if not cur.description:
+            return []
+        names = [d[0] for d in cur.description]
+        return [dict(zip(names, row, strict=False)) for row in cur.fetchall()]
+    except Exception:  # noqa: BLE001
+        return []
+    finally:
+        try:
+            conn_or_err.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 __all__ = [
     "silver_schema_name",
     "silver_catalog_name",
     "fetch_trace_summary_from_silver",
+    "fetch_ingest_files_for_trace",
 ]

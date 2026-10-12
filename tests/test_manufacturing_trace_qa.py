@@ -8,12 +8,14 @@ from solomon.graph.manufacturing.trace_qa import (
     is_manufacturing_part_lookup_prompt,
     is_manufacturing_trace_detail_prompt,
     is_manufacturing_trace_documents_prompt,
+    is_manufacturing_trace_graph_prompt,
     is_vb_path_lookup_prompt,
     parse_part_number_from_prompt,
     parse_trace_id_from_prompt,
     parse_vb_path_terms,
     try_answer_manufacturing_part_prompt,
     try_answer_manufacturing_trace_documents_prompt,
+    try_answer_manufacturing_trace_graph_prompt,
     try_answer_vb_path_prompt,
 )
 from solomon.router.crew import heuristic_classify
@@ -31,6 +33,10 @@ _Q1_PART_PROMPT = (
 _Q2_TRACE_DOCS = "KIBAN 26G3V05354 に関係するドキュメントを全部見つけて。"
 _Q3_VB_PATH = (
     "VB 圧無 や 蘇州 みたいなフォルダ名が付いている VB 試験ファイルはある？"
+)
+_Q4_TRACE_GRAPH = (
+    "26G3V05390 という製品トレースについて、取り込んだ ソースファイル と "
+    "KIBAN の関係をグラフで説明して。"
 )
 
 
@@ -78,6 +84,36 @@ def test_try_answer_trace_documents_prompt(monkeypatch) -> None:
     assert result is not None
     assert "26G3V05354" in result.answer_markdown
     assert "j5_main_id" in result.answer_markdown
+
+
+def test_q4_trace_graph_prompt() -> None:
+    assert parse_trace_id_from_prompt(_Q4_TRACE_GRAPH) == "26G3V05390"
+    assert is_manufacturing_trace_graph_prompt(_Q4_TRACE_GRAPH) is True
+    assert heuristic_classify(_Q4_TRACE_GRAPH).intent == "KNOWLEDGE_RAG"
+    assert heuristic_classify(_Q4_TRACE_GRAPH).needs_clarification is False
+
+
+def test_try_answer_trace_graph_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "solomon.graph.manufacturing.trace_qa.fetch_trace_graph_context",
+        lambda _tid, **kw: {
+            "trace_id": "26G3V05390",
+            "model": "bronze",
+            "source": "neo4j",
+            "neo4j_source_files": [
+                {
+                    "key": "j5_main_id/a.txt",
+                    "format": "j5_main_id",
+                    "product_trace_id": "26G3V05390",
+                },
+            ],
+        },
+    )
+    result = try_answer_manufacturing_trace_graph_prompt(_Q4_TRACE_GRAPH)
+    assert result is not None
+    assert "HAS_KIBAN" in result.answer_markdown
+    assert "INGESTED_INTO" in result.answer_markdown
+    assert "j5_main_id/a.txt" in result.answer_markdown
 
 
 def test_q3_vb_path_prompt() -> None:

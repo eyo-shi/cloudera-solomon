@@ -206,6 +206,171 @@ def is_vb_path_lookup_prompt(prompt: str) -> bool:
     )
 
 
+_TRACE_GRAPH_MARKERS = (
+    "グラフ",
+    "ソースファイル",
+    "トレース",
+    "関係",
+    "説明",
+    "Cypher",
+    "Product",
+    "Kiban",
+    "HAS_KIBAN",
+    "INGESTED_INTO",
+    "製品",
+)
+
+_GRAPH_CYPHER = """
+MATCH (k:Kiban {id: $trace_id})<-[:HAS_KIBAN]-(p:Product)<-[:INGESTED_INTO]-(f:SourceFile)
+RETURN f.key AS key, f.format AS format, p.trace_id AS product_trace_id
+ORDER BY f.format, f.key
+""".strip()
+
+
+def is_manufacturing_trace_graph_prompt(prompt: str) -> bool:
+    """製品トレースと SourceFile / Kiban のグラフ関係説明（デモ Q4）。"""
+    text = prompt.strip()
+    if parse_trace_id_from_prompt(text) is None:
+        return False
+    if is_manufacturing_trace_detail_prompt(text):
+        return False
+    lower = text.lower()
+    return any(m in text or m.lower() in lower for m in _TRACE_GRAPH_MARKERS)
+
+
+def fetch_trace_graph_context(
+    trace_id: str,
+    *,
+    user_ctx: UserContext | None = None,
+) -> dict[str, Any]:
+    """Neo4j Bronze → Iceberg ingest_file_state → OpenSearch の順でファイル関係を集める。"""
+    from solomon.graph.manufacturing.neo4j_bronze import fetch_bronze_graph_context
+    from solomon.graph.manufacturing.silver_trino import (
+        fetch_ingest_files_for_trace,
+        silver_schema_name,
+    )
+    from solomon.opensearch.inspection_indices import search_documents_by_trace_id
+
+    bronze = fetch_bronze_graph_context(trace_id)
+    if not bronze.get("error"):
+        return bronze
+
+    ice_files = fetch_ingest_files_for_trace(trace_id, user_ctx)
+    if ice_files:
+        return {
+            "trace_id": trace_id,
+            "source": "lakehouse",
+            "model": "ingest_file_state",
+            "ingest_files": ice_files,
+            "notes": (
+                f"Iceberg `{silver_schema_name()}.ingest_file_state` から "
+                f"{len(ice_files)} 件（Neo4j 未投入時のフォールバック）。"
+            ),
+        }
+
+    docs = search_documents_by_trace_id(trace_id, size=50)
+    if docs:
+        return {
+            "trace_id": trace_id,
+            "source": "opensearch",
+            "model": "inspection",
+            "opensearch_docs": docs,
+            "notes": "OpenSearch inspection-*（Neo4j / ingest_file_state 不在時）。",
+        }
+
+    return bronze
+
+
+def format_trace_graph_markdown(trace_id: str, ctx: dict[str, Any]) -> str:
+    model = ctx.get("model") or "bronze"
+    lines = [
+        f"**{trace_id}** の製品トレース — ソースファイルと KIBAN の関係",
+        "",
+        "```mermaid",
+        "graph LR",
+        "  SF[SourceFile]",
+        "  P[Product]",
+        "  K[Kiban]",
+        "  SF -->|INGESTED_INTO| P",
+        "  P -->|HAS_KIBAN| K",
+        "```",
+        "",
+        "参照 Cypher（Neo4j Bronze モデル）:",
+        "",
+        f"```cypher\n{_GRAPH_CYPHER}\n```",
+        "",
+        f"（データソース: **{model}** / {ctx.get('source', '—')}）",
+        "",
+    ]
+    if ctx.get("notes"):
+        lines.append(f"_{ctx['notes']}_")
+        lines.append("")
+
+    neo_files = ctx.get("neo4j_source_files")
+    if isinstance(neo_files, list) and neo_files:
+        lines.extend(
+            [
+                "| format | object_key (SourceFile.key) | product_trace_id |",
+                "|--------|---------------------------|------------------|",
+            ]
+        )
+        for row in neo_files:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                f"| {row.get('format') or '—'} | `{row.get('key') or '—'}` | "
+                f"{row.get('product_trace_id') or trace_id} |"
+            )
+        vb = ctx.get("neo4j_vb_links")
+        if isinstance(vb, list) and vb:
+            lines.append("")
+            lines.append("**Kiban → VbMachine (TESTED_ON_VB)**")
+            for link in vb[:5]:
+                if isinstance(link, dict):
+                    lines.append(
+                        f"- VB `{link.get('vb_machine_no')}` "
+                        f"({link.get('link_type') or 'link'}, confidence={link.get('confidence')})"
+                    )
+        return "\n".join(lines)
+
+    ice_files = ctx.get("ingest_files")
+    if isinstance(ice_files, list) and ice_files:
+        lines.extend(
+            [
+                "| format | object_key | vb_machine_no |",
+                "|--------|------------|---------------|",
+            ]
+        )
+        for row in ice_files:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                f"| {row.get('format') or '—'} | `{row.get('object_key') or '—'}` | "
+                f"{row.get('vb_machine_no') or '—'} |"
+            )
+        return "\n".join(lines)
+
+    docs = ctx.get("opensearch_docs")
+    if isinstance(docs, list) and docs:
+        lines.extend(
+            [
+                "| format | ファイル名 | object_key |",
+                "|--------|------------|------------|",
+            ]
+        )
+        for doc in docs:
+            if not isinstance(doc, dict):
+                continue
+            lines.append(
+                f"| {doc.get('format') or '—'} | {doc.get('title') or '—'} | "
+                f"`{doc.get('object_key') or '—'}` |"
+            )
+        return "\n".join(lines)
+
+    lines.append("該当するソースファイルが見つかりませんでした。")
+    return "\n".join(lines)
+
+
 def format_vb_path_lookup_markdown(terms: list[str], docs: list[dict[str, Any]]) -> str:
     term_csv = " / ".join(terms)
     lines = [
@@ -548,6 +713,73 @@ def try_answer_manufacturing_trace_documents_prompt(
     )
 
 
+def try_answer_manufacturing_trace_graph_prompt(
+    prompt: str,
+    *,
+    user_ctx: UserContext | None = None,
+) -> Optional[KnowledgeRagResult]:
+    """Q4: Product / Kiban / SourceFile 関係のグラフ説明。"""
+    if not is_manufacturing_trace_graph_prompt(prompt):
+        return None
+    trace_id = parse_trace_id_from_prompt(prompt)
+    if not trace_id:
+        return None
+
+    plan = RetrievalPlan(
+        strategy="GRAPH_QUERY",
+        query=prompt.strip(),
+        confidence=0.94,
+        reasoning="manufacturing trace graph (Product/Kiban/SourceFile)",
+        entity_hint=trace_id,
+    )
+
+    ctx = fetch_trace_graph_context(trace_id, user_ctx=user_ctx)
+    if ctx.get("error") == "NEO4J_NOT_CONFIGURED" and not ctx.get("ingest_files"):
+        md = (
+            "Neo4j が未設定です。`NEO4J_URI` または `NEO4J_MODE=internal` を設定してください。"
+        )
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(plan=plan, hits=[], errors=[{"source": "neo4j", "message": md}]),
+            answer_markdown=md,
+        )
+
+    if ctx.get("error") == "NOT_FOUND" or (
+        ctx.get("error") and not ctx.get("neo4j_source_files") and not ctx.get("ingest_files")
+    ):
+        md = (
+            f"機番 **{trace_id}** の SourceFile / Kiban 関係が "
+            "Neo4j・Iceberg・OpenSearch のいずれにも見つかりません。"
+        )
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(plan=plan, hits=[], errors=[{"source": "neo4j", "message": md}]),
+            answer_markdown=md,
+        )
+
+    if ctx.get("error") and not (
+        ctx.get("neo4j_source_files") or ctx.get("ingest_files") or ctx.get("opensearch_docs")
+    ):
+        md = f"参照に失敗しました: {ctx['error']}"
+        return KnowledgeRagResult(
+            plan=plan,
+            bundle=RetrievalBundle(plan=plan, hits=[], errors=[{"source": "neo4j", "message": ctx["error"]}]),
+            answer_markdown=md,
+        )
+
+    hit = SourceHit(
+        source="neo4j" if ctx.get("model") == "bronze" else ctx.get("source", "neo4j"),  # type: ignore[arg-type]
+        kind="manufacturing_trace_graph",
+        payload=ctx,
+    )
+    md = format_trace_graph_markdown(trace_id, ctx)
+    return KnowledgeRagResult(
+        plan=plan,
+        bundle=RetrievalBundle(plan=plan, hits=[hit], errors=[]),
+        answer_markdown=md,
+    )
+
+
 def try_answer_vb_path_prompt(
     prompt: str,
     *,
@@ -762,6 +994,10 @@ __all__ = [
     "parse_vb_path_terms",
     "is_vb_path_lookup_prompt",
     "format_vb_path_lookup_markdown",
+    "is_manufacturing_trace_graph_prompt",
+    "fetch_trace_graph_context",
+    "format_trace_graph_markdown",
+    "try_answer_manufacturing_trace_graph_prompt",
     "try_answer_vb_path_prompt",
     "try_answer_manufacturing_part_prompt",
     "try_answer_manufacturing_trace_documents_prompt",
