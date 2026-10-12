@@ -7,6 +7,9 @@ from typing import Any, Literal
 from solomon.opensearch.client import build_client
 from solomon.opensearch.env import opensearch_env
 from solomon.transport.config import OpenSearchConfig, get_opensearch_config
+from solomon.transport.logging import get_logger
+
+_logger = get_logger(__name__)
 
 SearchScope = Literal["inspection", "datasets", "both"]
 
@@ -151,13 +154,30 @@ def search_inspection_documents(
     """Search タブ向け: ``inspection-*`` をキーワード検索 (空なら match_all)。"""
     client = build_client(config)
     body = _inspection_search_body(query, size=limit)
-    response = client.search(
-        index=inspection_index_pattern(),
-        body=body,
-        params=_OS_SEARCH_PARAMS,
+    index_candidates = (
+        inspection_index_pattern(),
+        inspection_index_list_csv(),
     )
-    hits = response.get("hits", {}).get("hits", [])
-    return [normalize_inspection_hit(h) for h in hits]
+    last_exc: Exception | None = None
+    for index in index_candidates:
+        try:
+            response = client.search(
+                index=index,
+                body=body,
+                params=_OS_SEARCH_PARAMS,
+            )
+            hits = response.get("hits", {}).get("hits", [])
+            return [normalize_inspection_hit(h) for h in hits]
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            _logger.debug(
+                "opensearch.inspection_search_failed",
+                index=index,
+                error=str(exc),
+            )
+    if last_exc is not None:
+        raise last_exc
+    return []
 
 
 def search_documents_by_trace_id(
