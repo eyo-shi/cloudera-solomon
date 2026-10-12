@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from solomon.api.auth import require_user_context
 from solomon.opensearch.client import build_client, ping_inspection
+from solomon.opensearch.env import opensearch_env, opensearch_username
 from solomon.opensearch.indexer import ensure_index
 from solomon.opensearch.inspection_indices import (
     inspection_index_pattern,
@@ -87,6 +88,31 @@ def _resolve_scope(scope: ScopeParam | None) -> ScopeParam:
     if scope is not None:
         return scope
     return search_tab_scope()
+
+
+@router.get("/diagnostics")
+def search_diagnostics(
+    _user_ctx: Annotated[UserContext, Depends(require_user_context)],
+) -> dict[str, Any]:
+    """Search タブ用。Application env の OpenSearch 設定と inspection 到達性（秘密は返さない）。"""
+    config = get_opensearch_config()
+    if config is None:
+        return {
+            "opensearch_configured": False,
+            "password_set": bool((opensearch_env("PASSWORD") or "").strip()),
+            "username": opensearch_username(),
+        }
+    prefix = getattr(config, "url_prefix", "") or ""
+    return {
+        "opensearch_configured": True,
+        "username": config.username,
+        "password_set": bool(config.password),
+        "host": config.host,
+        "port": config.port,
+        "url_prefix": prefix,
+        "inspection_index_pattern": inspection_index_pattern(),
+        "inspection_ping_ok": ping_inspection(config),
+    }
 
 
 @router.get("/documents")
