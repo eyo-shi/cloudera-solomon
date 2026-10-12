@@ -23,13 +23,17 @@ def build_client(config: OpenSearchConfig) -> Any:
     if config.username and config.password:
         http_auth = (config.username, config.password)
 
-    return OpenSearch(
-        hosts=[{"host": config.host, "port": config.port}],
-        http_auth=http_auth,
-        use_ssl=config.scheme == "https",
-        verify_certs=config.verify_ssl,
-        ssl_show_warn=False,
-    )
+    client_kwargs: dict[str, Any] = {
+        "hosts": [{"host": config.host, "port": config.port}],
+        "http_auth": http_auth,
+        "use_ssl": config.scheme == "https",
+        "verify_certs": config.verify_ssl,
+        "ssl_show_warn": False,
+    }
+    prefix = (getattr(config, "url_prefix", None) or "").strip()
+    if prefix:
+        client_kwargs["url_prefix"] = prefix if prefix.startswith("/") else f"/{prefix}"
+    return OpenSearch(**client_kwargs)
 
 
 def ping(config: OpenSearchConfig) -> bool:

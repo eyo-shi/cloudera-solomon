@@ -158,6 +158,8 @@ class OpenSearchConfig:
     password: Optional[str] = None
     embedding_dim: int = 1024
     connection_name: Optional[str] = None
+    #: Knox ``.../cdp-proxy-api/opensearch`` 等（``OPENSEARCH_URL`` の path 部）
+    url_prefix: str = ""
 
 
 # ------------------------------------------------------------------ #
@@ -641,8 +643,8 @@ _OPENSEARCH_CONN_TYPES = frozenset(
 )
 
 
-def _parse_opensearch_endpoint(raw: str) -> tuple[str, int, str]:
-    """``https://host:9200`` 形式または ``host`` のみを (host, port, scheme) に分解。"""
+def _parse_opensearch_endpoint(raw: str) -> tuple[str, int, str, str]:
+    """``https://host/path`` を (host, port, scheme, url_prefix) に分解。"""
     text = raw.strip()
     if "://" in text:
         from urllib.parse import urlparse
@@ -650,12 +652,15 @@ def _parse_opensearch_endpoint(raw: str) -> tuple[str, int, str]:
         parsed = urlparse(text)
         host = (parsed.hostname or "").strip()
         if not host:
-            return "", 9200, "https"
+            return "", 9200, "https", ""
         scheme = parsed.scheme or "https"
         default_port = 443 if scheme == "https" else 9200
         port = parsed.port if parsed.port is not None else default_port
-        return host, port, scheme
-    return text, 9200, "https"
+        prefix = (parsed.path or "").strip()
+        if prefix.endswith("/"):
+            prefix = prefix.rstrip("/")
+        return host, port, scheme, prefix
+    return text, 9200, "https", ""
 
 
 def _opensearch_config_from_params(
@@ -674,7 +679,7 @@ def _opensearch_config_from_params(
     )
     if not endpoint:
         return None
-    host, port, scheme = _parse_opensearch_endpoint(str(endpoint))
+    host, port, scheme, url_prefix = _parse_opensearch_endpoint(str(endpoint))
     if not host:
         return None
     port_raw = p.get("port") or port
@@ -711,6 +716,7 @@ def _opensearch_config_from_params(
         password=str(password) if password else None,
         embedding_dim=embedding_dim,
         connection_name=connection_name,
+        url_prefix=url_prefix,
     )
 
 
@@ -724,11 +730,14 @@ def _opensearch_config_from_endpoint(
     default_scheme: str = "https",
     default_verify_ssl: Any = True,
 ) -> Optional[OpenSearchConfig]:
-    host, port, scheme = _parse_opensearch_endpoint(endpoint)
+    host, port, scheme, url_prefix = _parse_opensearch_endpoint(endpoint)
     if not host:
         return None
     from solomon.opensearch.env import opensearch_env, opensearch_username
 
+    prefix_env = opensearch_env("URL_PREFIX") or opensearch_env("PATH_PREFIX")
+    if prefix_env is not None:
+        url_prefix = prefix_env.strip().rstrip("/")
     port = int(opensearch_env("PORT") or str(port))
     scheme = opensearch_env("SCHEME") or scheme or default_scheme
     verify_raw = opensearch_env("VERIFY_SSL")
@@ -751,6 +760,7 @@ def _opensearch_config_from_endpoint(
         password=opensearch_env("PASSWORD"),
         embedding_dim=embedding_dim,
         connection_name=connection_name,
+        url_prefix=url_prefix,
     )
 
 

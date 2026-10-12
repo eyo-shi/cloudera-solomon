@@ -72,7 +72,7 @@ Solomon 最小例:
 
 ```text
 OPENSEARCH_MODE=external
-OPENSEARCH_URL=https://.../cdp-proxy-api/opensearch
+OPENSEARCH_URL=https://go01-css-gateway.../go01-css/cdp-proxy-api/opensearch
 OPENSEARCH_USER=<CDE と同じ>
 OPENSEARCH_PASSWORD=<CDE と同じ>
 OPENSEARCH_INSPECTION_INDEX_PREFIX=inspection

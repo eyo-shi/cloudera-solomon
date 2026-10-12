@@ -63,6 +63,18 @@ def test_legacy_connection_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.host == "legacy.example.com"
 
 
+def test_opensearch_url_knox_path_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENSEARCH_MODE", "external")
+    monkeypatch.setenv(
+        "OPENSEARCH_URL",
+        "https://go01-css-gateway.example/cdp-proxy-api/opensearch",
+    )
+    cfg = cfg_mod.get_opensearch_config()
+    assert cfg is not None
+    assert cfg.host == "go01-css-gateway.example"
+    assert cfg.url_prefix == "/cdp-proxy-api/opensearch"
+
+
 def test_external_mode_uses_data_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
