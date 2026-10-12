@@ -97,6 +97,11 @@ def _is_cml_application_mode() -> bool:
     return bool(raw) and raw.isdigit() and int(raw) > 0
 
 
+def load_workload_jwt_token() -> Optional[str]:
+    """CML workload pod の ``/tmp/jwt`` からデータレイク / IDBroker 用トークンを読む。"""
+    return _load_workload_jwt_file()
+
+
 def _load_workload_jwt_file() -> Optional[str]:
     """CML workload pod の /tmp/jwt から Bearer トークンを読む (フォールバック)。"""
     path = Path(os.environ.get("SOLOMON_CML_JWT_PATH", "/tmp/jwt"))

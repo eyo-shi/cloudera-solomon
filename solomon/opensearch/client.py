@@ -37,9 +37,16 @@ def build_client(config: OpenSearchConfig) -> Any:
 
 
 def ping(config: OpenSearchConfig) -> bool:
-    """外部 OpenSearch クラスタへの接続確認。"""
+    """外部 OpenSearch クラスタへの接続確認。
+
+    Knox CSS ゲートウェイはルートへの ``HEAD`` を 403 にすることがあるため、
+    ``cluster.health`` (GET) を優先する。
+    """
     try:
         client = build_client(config)
+        health = client.cluster.health()
+        if isinstance(health, dict) and health.get("cluster_name"):
+            return True
         return bool(client.ping())
     except Exception as exc:  # noqa: BLE001
         _logger.debug("opensearch.ping_failed", error=str(exc), host=config.host)

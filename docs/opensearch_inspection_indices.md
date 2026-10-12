@@ -85,6 +85,8 @@ Data Connection 経由でも可（`OPENSEARCH_CONNECTION_NAME`）。その場合
 
 **Search タブ**（`GET /api/search/documents?scope=inspection`）は **`inspection-*`** をキーワード検索する（空フィルタは match_all）。Solomon Ingestion 用 **`solomon-datasets`** は `scope=datasets` または `OPENSEARCH_SEARCH_SCOPE=datasets`。
 
+Log に `HEAD .../opensearch/ [status:403]` と出る場合: Knox path は合っているが **Basic 認証または Ranger** で拒否されている。CDE と同じ `OPENSEARCH_USER` / `OPENSEARCH_PASSWORD` か、Session から `curl -u USER:PASS "$OPENSEARCH_URL/inspection-vb/_count"` を確認する。
+
 ---
 
 ## 確認例

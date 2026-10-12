@@ -19,10 +19,11 @@ from __future__ import annotations
 import os
 import time
 from datetime import datetime
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import httpx
 
+from solomon.transport.auth import load_workload_jwt_token
 from solomon.transport.errors import ErrorCode, err
 from solomon.transport.logging import get_logger
 from solomon.transport.user_context import AwsCredentials, UserContext
@@ -63,6 +64,22 @@ def _parse_expiration(exp: Any) -> int:
     return int(time.time()) + 1800
 
 
+def _cab_bearer_token(user_ctx: UserContext) -> Optional[str]:
+    """IDBroker CAB が受け付ける Bearer。
+
+    Workbench Application の Cookie JWT は aws-cab で 401 になりやすい。
+    CML がマウントする ``/tmp/jwt`` を優先する。
+    """
+    return load_workload_jwt_token() or user_ctx.knox_jwt
+
+
+def _credential_fields(data: dict[str, Any]) -> dict[str, Any]:
+    nested = data.get("Credentials")
+    if isinstance(nested, dict):
+        return nested
+    return data
+
+
 def fetch_aws_credentials(user_ctx: UserContext) -> Union[AwsCredentials, dict[str, Any]]:
     """Knox JWT を IDBroker に渡して STS credentials を取得する。
 
@@ -74,7 +91,8 @@ def fetch_aws_credentials(user_ctx: UserContext) -> Union[AwsCredentials, dict[s
             ErrorCode.S3_ASSUMEROLE_FAILED,
             "SOLOMON_IDBROKER_URL is not configured; cannot obtain S3 credentials.",
         )
-    if not user_ctx.knox_jwt:
+    bearer = _cab_bearer_token(user_ctx)
+    if not bearer:
         return err(
             ErrorCode.AUTH_MISSING,
             "Knox JWT is required to exchange for AWS credentials.",
@@ -82,7 +100,7 @@ def fetch_aws_credentials(user_ctx: UserContext) -> Union[AwsCredentials, dict[s
 
     endpoint = f"{idb_url.rstrip('/')}{_CAB_PATH}"
     headers = {
-        "Authorization": f"Bearer {user_ctx.knox_jwt}",
+        "Authorization": f"Bearer {bearer}",
         "Accept": "application/json",
     }
     try:
@@ -125,11 +143,12 @@ def fetch_aws_credentials(user_ctx: UserContext) -> Union[AwsCredentials, dict[s
             "IDBroker returned non-JSON body.",
         )
     try:
+        fields = _credential_fields(data)
         creds = AwsCredentials(
-            access_key_id=data["AccessKeyId"],
-            secret_access_key=data["SecretAccessKey"],
-            session_token=data["SessionToken"],
-            expiration_epoch=_parse_expiration(data.get("Expiration")),
+            access_key_id=fields["AccessKeyId"],
+            secret_access_key=fields["SecretAccessKey"],
+            session_token=fields["SessionToken"],
+            expiration_epoch=_parse_expiration(fields.get("Expiration")),
         )
     except (KeyError, TypeError) as e:
         return err(

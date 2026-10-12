@@ -62,6 +62,12 @@ Storage タブで一覧が空 / 403 のとき:
 2. `SOLOMON_IDBROKER_URL` が正しいか（Application 再起動済みか）
 3. ログインユーザーに **Ranger / S3 ポリシー**でその prefix が読めるか
 
+Application Log で **`idbroker.access_denied` / HTTP 401** のとき:
+
+- **IDBroker URL は到達できている**（401 = トークン拒否）。Console → Environment → **Manage Access → ID Broker Mappings** でユーザー / グループを Data Access ロールにマップし **Sync** する。
+- Workbench Application の **Cookie JWT** は aws-cab で拒否されやすい。Solomon は **`/tmp/jwt`**（CML データレイクアクセス用）を優先する。Session で `test -f /tmp/jwt && wc -c /tmp/jwt` を確認。
+- ホスト名は `...-idbroker0...`（`idbroker` の綴りに注意）。
+
 ---
 
 ## Data Connection に S3 を出したい場合（任意）
