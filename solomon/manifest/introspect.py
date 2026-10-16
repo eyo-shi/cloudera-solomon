@@ -1,8 +1,8 @@
 """Tool / Agent / Crew を pure dict にする introspection 関数群。
 
 このモジュールは **LLM を呼ばない**。Python の Tool クラスと Crew インスタンスを
-リフレクションで読むだけ。crewai が未インストールでも、:mod:`solomon.ingestion.crew`
-のスタブ経由で Crew 構造は組み立たるので、生成は問題なく動く。
+リフレクションで読むだけ。crewai が未インストールでも Router / Analytics の
+スタブ経由で Crew 構造は組み立たる。
 
 規約:
   * Tool 名: クラス属性 ``name`` (crewai の Tool 契約と一致)
@@ -167,26 +167,18 @@ def build_tools_manifest() -> dict[str, Any]:
 def _crew_registry() -> list[dict[str, Any]]:
     """(crew_name, factory, implemented) のリストを返す。
 
-    Router / Ingestion / AnalyticsSummary / AnalyticsDashboard は実装済み。
+    Router / AnalyticsSummary / AnalyticsDashboard は実装済み。
     """
     from solomon.analytics.crew import (
         build_analytics_dashboard_crew,
         build_analytics_summary_crew,
     )
-    from solomon.ingestion.crew import build_ingestion_crew
     from solomon.router.crew import build_router_crew
 
     return [
         {
             "name": "router",
             "factory": lambda: build_router_crew(memory=False),
-            "implemented": True,
-            "process": "sequential",
-        },
-        {
-            "name": "ingestion",
-            # LLM を渡さずに Crew を組み立てられる (Agent には llm=None)
-            "factory": lambda: build_ingestion_crew(memory=False),
             "implemented": True,
             "process": "sequential",
         },
@@ -233,7 +225,7 @@ def build_agents_manifest() -> dict[str, Any]:
             agents_out.append(_agent_to_dict(agent, crew_name))
     return {
         "version": 1,
-        "generated_from": "solomon.{router,ingestion,analytics}.crew",
+        "generated_from": "solomon.{router,analytics}.crew",
         "agents": agents_out,
     }
 
@@ -322,7 +314,7 @@ def build_crews_manifest() -> dict[str, Any]:
     """3 Crew を列挙した crews.yaml 相当の dict を返す。"""
     return {
         "version": 1,
-        "generated_from": "solomon.{router,ingestion,analytics}.crew",
+        "generated_from": "solomon.{router,analytics}.crew",
         "crews": [_crew_to_dict(e) for e in _crew_registry()],
     }
 

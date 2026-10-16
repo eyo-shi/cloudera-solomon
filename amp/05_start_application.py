@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import time
 
+from solomon.infra.deploy_env import bootstrap_deploy_env
+
 
 def _normalize_deploy_env() -> None:
     """空の optional env を Workbench 向けデフォルトに置き換える。"""
@@ -43,6 +45,7 @@ def _wait_for_app_port(timeout_sec: float = 60.0) -> int:
     )
 
 
+bootstrap_deploy_env()
 _normalize_deploy_env()
 _wait_for_app_port()
 

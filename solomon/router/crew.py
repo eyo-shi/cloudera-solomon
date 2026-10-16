@@ -9,7 +9,7 @@
 
 **セキュリティ**: Knox JWT / STS 資格情報は :class:`UserContext` に閉じ、
 Task の ``inputs`` / ``context`` にも LLM プロンプトにも決して載せない。
-子 Crew (Ingestion / Analytics) の起動は Python 側で行う (LLM 経由の
+子 Crew (Analytics / Knowledge RAG) の起動は Python 側で行う (LLM 経由の
 Tool 呼び出しではない) ため、資格情報が LLM に漏れる経路は無い。
 """
 from __future__ import annotations
@@ -19,17 +19,6 @@ import re
 from typing import Any, Literal, Optional
 
 from solomon.router.agents import make_dispatcher_agent, make_intent_classifier_agent
-from solomon.router.graph_ingest import (
-    build_graph_ingest_clarification,
-    is_graph_ingest_request,
-    parse_node_fields,
-    resolve_pending_graph_ingest,
-)
-from solomon.router.ingest_target import (
-    build_ingest_target_clarification,
-    prompt_specifies_table,
-    resolve_pending_table_ingest,
-)
 from solomon.router.models import (
     DispatchPlan,
     IntentClassification,
@@ -101,10 +90,6 @@ def build_router_crew(
 # ------------------------------------------------------------------ #
 _S3_URI_RE = re.compile(r"s3://([^/\s]+)/([^\s]+)")
 
-_INGEST_KEYWORDS = (
-    "取り込", "取込", "インジェスト", "インポート", "テーブルにして",
-    "テーブル化", "ingest", "import",
-)
 _SUMMARY_KEYWORDS = (
     "サマリ", "サマリー", "まとめて", "要約", "概要", "傾向", "分析",
     "summary", "summarize", "summarise",
@@ -117,8 +102,29 @@ _CHITCHAT_KEYWORDS = (
     "こんにちは", "こんばんは", "おはよう", "ありがとう", "ヘルプ",
     "使い方", "何ができ", "hello", "hi", "hey", "help", "thanks", "thank you",
 )
-_TASK_KEYWORDS = _INGEST_KEYWORDS + _SUMMARY_KEYWORDS + _DASHBOARD_KEYWORDS
+_TASK_KEYWORDS = _SUMMARY_KEYWORDS + _DASHBOARD_KEYWORDS
 _PRONOUN_KEYWORDS = ("その", "そのテーブル", "さっき", "先ほど", "that", "the same")
+
+_DATA_INGEST_OUT_OF_SCOPE_MSG = (
+    "データの取り込み（Storage → Iceberg / Neo4j / OpenSearch）は "
+    "別プロジェクトで実行してください。Solomon では投入済みデータに対する "
+    "ナレッジ検索・テーブル分析・ダッシュボード作成を行えます。"
+)
+
+_INGEST_KEYWORDS = (
+    "取り込",
+    "インジェスト",
+    "ingest",
+    "テーブルにして",
+    "アップロード",
+)
+
+
+def _looks_like_data_ingest_request(prompt: str) -> bool:
+    if _S3_URI_RE.search(prompt):
+        return True
+    lower = prompt.lower()
+    return any(kw in prompt or kw in lower for kw in _INGEST_KEYWORDS)
 
 
 def _looks_like_casual_chat(prompt: str) -> bool:
@@ -127,8 +133,6 @@ def _looks_like_casual_chat(prompt: str) -> bool:
     if not text or len(text) > 300:
         return False
     if _S3_URI_RE.search(text):
-        return False
-    if is_graph_ingest_request(text):
         return False
     lower = text.lower()
     if any(kw in text or kw in lower for kw in _TASK_KEYWORDS):
@@ -157,273 +161,24 @@ def heuristic_classify(
     """LLM を使わない決定論的分類。プランのフォールバック用。
 
     テーブル参照は entity_memory の ``last_table`` を優先。s3 URI が明示的に
-    含まれれば INGEST が最優先。
     """
     entity_memory = entity_memory or {}
     p_lower = prompt.lower()
 
-    # 0a) 取り込み先テーブルの聞き返し (pending + 回答)
-    pending_table = resolve_pending_table_ingest(prompt, entity_memory)
-    if pending_table:
+    if _looks_like_data_ingest_request(prompt):
         return IntentClassification(
-            intent="INGEST",
-            confidence=0.92,
-            extracted_args=pending_table,
-            needs_clarification=False,
-            reasoning="resolved pending_table_ingest with target table",
-        )
-
-    pending_table_raw = entity_memory.get("pending_table_ingest")
-    if (
-        isinstance(pending_table_raw, dict)
-        and pending_table_raw.get("bucket")
-        and pending_table_raw.get("key")
-    ):
-        return IntentClassification(
-            intent="INGEST",
-            confidence=0.75,
-            extracted_args={
-                "bucket": str(pending_table_raw["bucket"]),
-                "key": str(pending_table_raw["key"]),
-                "target_schema": str(
-                    pending_table_raw.get("target_schema") or "demo"
-                ),
-                "awaiting_table_target": True,
-                **(
-                    {"graph_ingest": True}
-                    if pending_table_raw.get("graph_ingest")
-                    else {}
-                ),
-            },
-            needs_clarification=True,
-            clarification_prompt=build_ingest_target_clarification(
-                key=str(pending_table_raw["key"]),
-                failure_message=pending_table_raw.get("failure_message"),
-                attempted_fq=pending_table_raw.get("attempted_fq"),
-            ),
-            reasoning="pending table ingest awaiting target specification",
-        )
-
-    # 0b) グラフ取り込みの聞き返し (pending + フィールド名回答)
-    pending_ingest = resolve_pending_graph_ingest(prompt, entity_memory)
-    if pending_ingest:
-        if not prompt_specifies_table(prompt) and not pending_ingest.get(
-            "proposed_table_name"
-        ):
-            return IntentClassification(
-                intent="INGEST",
-                confidence=0.9,
-                extracted_args={
-                    **pending_ingest,
-                    "awaiting_table_target": True,
-                },
-                needs_clarification=True,
-                clarification_prompt=build_ingest_target_clarification(
-                    key=str(pending_ingest.get("key") or "")
-                ),
-                reasoning="graph fields resolved; awaiting target table",
-            )
-        return IntentClassification(
-            intent="INGEST",
-            confidence=0.92,
-            extracted_args=pending_ingest,
-            needs_clarification=False,
-            reasoning="resolved pending_graph_ingest with node_fields",
-        )
-
-    pending_raw = entity_memory.get("pending_graph_ingest")
-    if (
-        isinstance(pending_raw, dict)
-        and pending_raw.get("bucket")
-        and pending_raw.get("key")
-    ):
-        return IntentClassification(
-            intent="INGEST",
-            confidence=0.75,
-            extracted_args={
-                "bucket": str(pending_raw["bucket"]),
-                "key": str(pending_raw["key"]),
-                "target_schema": str(pending_raw.get("target_schema") or "demo"),
-                "graph_ingest": True,
-                "awaiting_node_fields": True,
-            },
-            needs_clarification=True,
-            clarification_prompt=build_graph_ingest_clarification(
-                key=str(pending_raw["key"])
-            ),
-            reasoning="pending graph ingest awaiting valid node_fields",
-        )
-
-    # 0c) 製品トレース・グラフ説明（「取り込んだ」が INGEST に誤爆しない）
-    from solomon.graph.manufacturing.trace_qa import (
-        is_manufacturing_trace_bundle_report_prompt,
-        is_manufacturing_ingest_ledger_prompt,
-        is_manufacturing_kanken_measurements_prompt,
-        is_manufacturing_id_field_judge_prompt,
-        is_manufacturing_id_dump_alt_kiban_prompt,
-        is_manufacturing_dual_timing_kiban_prompt,
-        is_manufacturing_vb_ng_list_prompt,
-        is_manufacturing_trace_graph_prompt,
-        is_vb_machine_lookup_prompt,
-    )
-
-    if is_manufacturing_vb_ng_list_prompt(prompt):
-        return IntentClassification(
-            intent="KNOWLEDGE_RAG",
-            confidence=0.94,
-            extracted_args={"question": prompt},
-            needs_clarification=False,
-            reasoning="silver_vb NG listing with steps and S3 paths",
-        )
-
-    if is_manufacturing_trace_bundle_report_prompt(prompt):
-        return IntentClassification(
-            intent="KNOWLEDGE_RAG",
-            confidence=0.95,
-            extracted_args={"question": prompt},
-            needs_clarification=False,
-            reasoning="composite trace report OS+Trino+Neo4j",
-        )
-
-    if is_manufacturing_dual_timing_kiban_prompt(prompt):
-        return IntentClassification(
-            intent="KNOWLEDGE_RAG",
-            confidence=0.94,
-            extracted_args={"question": prompt},
-            needs_clarification=False,
-            reasoning="ingest_file_state shukken+kanken cross-trace listing",
-        )
-
-    if is_manufacturing_ingest_ledger_prompt(prompt):
-        return IntentClassification(
-            intent="KNOWLEDGE_RAG",
-            confidence=0.94,
-            extracted_args={"question": prompt},
-            needs_clarification=False,
-            reasoning="ingest_file_state ledger by KIBAN",
-        )
-
-    if is_vb_machine_lookup_prompt(prompt):
-        return IntentClassification(
-            intent="KNOWLEDGE_RAG",
-            confidence=0.93,
-            extracted_args={"question": prompt},
-            needs_clarification=False,
-            reasoning="VB machine graph lookup",
-        )
-
-    if is_manufacturing_trace_graph_prompt(prompt):
-        return IntentClassification(
-            intent="KNOWLEDGE_RAG",
-            confidence=0.93,
-            extracted_args={"question": prompt},
-            needs_clarification=False,
-            reasoning="manufacturing trace graph explanation",
-        )
-
-    if is_manufacturing_kanken_measurements_prompt(prompt):
-        return IntentClassification(
-            intent="KNOWLEDGE_RAG",
-            confidence=0.93,
-            extracted_args={"question": prompt},
-            needs_clarification=False,
-            reasoning="kanken measurement fields lookup",
-        )
-
-    if is_manufacturing_id_field_judge_prompt(prompt):
-        return IntentClassification(
-            intent="KNOWLEDGE_RAG",
-            confidence=0.93,
-            extracted_args={"question": prompt},
-            needs_clarification=False,
-            reasoning="silver_id_fields T447 judge lookup",
-        )
-
-    if is_manufacturing_id_dump_alt_kiban_prompt(prompt):
-        return IntentClassification(
-            intent="KNOWLEDGE_RAG",
-            confidence=0.93,
-            extracted_args={"question": prompt},
-            needs_clarification=False,
-            reasoning="silver_trace_links id_dump_alt_kiban with confidence",
-        )
-
-    # 1) INGEST が最優先 (s3 URI があれば確定)
-    m = _S3_URI_RE.search(prompt)
-    ingest_keyword_hit = any(kw in prompt for kw in _INGEST_KEYWORDS) or any(
-        kw in p_lower for kw in _INGEST_KEYWORDS
-    )
-    if m or (
-        ingest_keyword_hit and not is_manufacturing_ingest_ledger_prompt(prompt)
-    ):
-        if m:
-            graph_ingest = is_graph_ingest_request(prompt)
-            node_fields = parse_node_fields(prompt) if graph_ingest else None
-            args: dict[str, Any] = {
-                "bucket": m.group(1),
-                "key": m.group(2),
-                "target_schema": "demo",
-            }
-            if graph_ingest:
-                args["graph_ingest"] = True
-                if node_fields:
-                    args["node_fields"] = node_fields
-                else:
-                    return IntentClassification(
-                        intent="INGEST",
-                        confidence=0.9,
-                        extracted_args={
-                            **args,
-                            "awaiting_node_fields": True,
-                        },
-                        needs_clarification=True,
-                        clarification_prompt=build_graph_ingest_clarification(
-                            key=m.group(2)
-                        ),
-                        reasoning="graph ingest without node_fields",
-                    )
-            if not prompt_specifies_table(prompt) and not args.get(
-                "proposed_table_name"
-            ):
-                return IntentClassification(
-                    intent="INGEST",
-                    confidence=0.9,
-                    extracted_args={
-                        **args,
-                        "awaiting_table_target": True,
-                    },
-                    needs_clarification=True,
-                    clarification_prompt=build_ingest_target_clarification(
-                        key=m.group(2)
-                    ),
-                    reasoning="ingest without explicit target table",
-                )
-            return IntentClassification(
-                intent="INGEST",
-                confidence=0.95,
-                extracted_args=args,
-                needs_clarification=False,
-                reasoning="s3 URI matched by heuristic",
-            )
-        # キーワードのみ (s3 URI 無し) は情報不足
-        return IntentClassification(
-            intent="INGEST",
-            confidence=0.5,
+            intent="UNKNOWN",
+            confidence=0.9,
             extracted_args={},
             needs_clarification=True,
-            clarification_prompt=(
-                "取り込みたい S3 パスを教えてください (例: s3://demo-bucket/2024/sales.xlsx)。"
-            ),
-            reasoning="ingest keyword without s3 URI",
+            clarification_prompt=_DATA_INGEST_OUT_OF_SCOPE_MSG,
+            reasoning="data ingest is out of scope for Solomon query agent",
         )
 
-    # 2) ANALYZE_DASHBOARD / ANALYZE_SUMMARY
+    # 1) ANALYZE_DASHBOARD / ANALYZE_SUMMARY
     is_dashboard = (
-        not is_graph_ingest_request(prompt)
-        and (
-            any(kw in prompt for kw in _DASHBOARD_KEYWORDS)
-            or any(kw in p_lower for kw in _DASHBOARD_KEYWORDS)
-        )
+        any(kw in prompt for kw in _DASHBOARD_KEYWORDS)
+        or any(kw in p_lower for kw in _DASHBOARD_KEYWORDS)
     )
     is_summary = any(kw in prompt for kw in _SUMMARY_KEYWORDS) or any(
         kw in p_lower for kw in _SUMMARY_KEYWORDS
@@ -451,50 +206,10 @@ def heuristic_classify(
             reasoning="analyze keyword but no last_table in entity_memory",
         )
 
-    # 2b) 製造デモ QA (KIBAN / 品番) — CHITCHAT より先に KNOWLEDGE_RAG へ
-    from solomon.graph.manufacturing.trace_qa import (
-        is_manufacturing_part_lookup_prompt,
-        is_manufacturing_trace_detail_prompt,
-        is_manufacturing_trace_documents_prompt,
-        is_manufacturing_trace_bundle_report_prompt,
-        is_manufacturing_ingest_ledger_prompt,
-        is_manufacturing_kanken_measurements_prompt,
-        is_manufacturing_id_field_judge_prompt,
-        is_manufacturing_id_dump_alt_kiban_prompt,
-        is_manufacturing_dual_timing_kiban_prompt,
-        is_manufacturing_vb_ng_list_prompt,
-        is_manufacturing_trace_graph_prompt,
-        is_vb_machine_lookup_prompt,
-        is_vb_path_lookup_prompt,
-    )
-
-    if (
-        is_manufacturing_part_lookup_prompt(prompt)
-        or is_manufacturing_trace_documents_prompt(prompt)
-        or is_manufacturing_trace_detail_prompt(prompt)
-        or is_manufacturing_trace_graph_prompt(prompt)
-        or is_manufacturing_ingest_ledger_prompt(prompt)
-        or is_manufacturing_kanken_measurements_prompt(prompt)
-        or is_manufacturing_id_field_judge_prompt(prompt)
-        or is_manufacturing_id_dump_alt_kiban_prompt(prompt)
-        or is_manufacturing_dual_timing_kiban_prompt(prompt)
-        or is_manufacturing_vb_ng_list_prompt(prompt)
-        or is_manufacturing_trace_bundle_report_prompt(prompt)
-        or is_vb_machine_lookup_prompt(prompt)
-        or is_vb_path_lookup_prompt(prompt)
-    ):
-        return IntentClassification(
-            intent="KNOWLEDGE_RAG",
-            confidence=0.92,
-            extracted_args={"question": prompt},
-            needs_clarification=False,
-            reasoning="manufacturing trace/part QA",
-        )
-
-    # 3) KNOWLEDGE_RAG (取り込み/分析/雑談以外のナレッジ探索)
+    # 2) KNOWLEDGE_RAG (分析/雑談以外のナレッジ探索)
     from solomon.rag.classifier import is_knowledge_query
 
-    if is_knowledge_query(prompt) and not is_graph_ingest_request(prompt):
+    if is_knowledge_query(prompt):
         return IntentClassification(
             intent="KNOWLEDGE_RAG",
             confidence=0.85,
@@ -532,9 +247,10 @@ def heuristic_classify(
         extracted_args={},
         needs_clarification=True,
         clarification_prompt=(
-            "ご依頼の内容を『S3 パスを取り込む』『ファイルをナレッジグラフに追加』"
-            "『テーブルをサマリーする』『テーブルからダッシュボードを作る』"
-            "『ナレッジ検索』のいずれかで教えてください。"
+            "ご依頼の内容を『テーブルをサマリーする』"
+            "『テーブルからダッシュボードを作る』『ナレッジ検索』"
+            "のいずれかで教えてください。"
+            "（S3 からのデータ取り込みは別プロジェクトで行います。）"
         ),
         reasoning="no heuristic matched",
     )
@@ -557,47 +273,6 @@ def build_dispatch_plan(
                 or "もう少し詳しく教えてください。"
             ),
             skip_child=True,
-        )
-
-    if intent == "INGEST":
-        # 必須引数チェック (LLM が抜けたら clarify)
-        if "bucket" not in args or "key" not in args:
-            return DispatchPlan(
-                intent=intent,
-                child_crew="none",
-                inputs={},
-                response_markdown=(
-                    "取り込み対象の S3 パス (bucket / key) が特定できませんでした。"
-                    "s3://<bucket>/<key> の形で指定してください。"
-                ),
-                skip_child=True,
-            )
-        args.setdefault("target_schema", "demo")
-        if args.get("graph_ingest") and not args.get("node_fields"):
-            return DispatchPlan(
-                intent=intent,
-                child_crew="none",
-                inputs={},
-                response_markdown=build_graph_ingest_clarification(
-                    key=str(args.get("key") or "")
-                ),
-                skip_child=True,
-            )
-        ingest_inputs = dict(args)
-        for key in (
-            "proposed_table_name",
-            "create_new_table",
-            "node_fields",
-            "graph_ingest",
-        ):
-            if key in args and args[key] is not None:
-                ingest_inputs[key] = args[key]
-        return DispatchPlan(
-            intent=intent,
-            child_crew="ingestion",
-            inputs=ingest_inputs,
-            response_markdown="",
-            skip_child=False,
         )
 
     if intent == "ANALYZE_SUMMARY":
@@ -667,22 +342,21 @@ RouterMode = Literal["heuristic", "llm", "auto"]
 
 
 def _resolve_mode(mode: RouterMode) -> RouterMode:
-    """``auto`` を post-deploy 環境変数 ``SOLOMON_ROUTER_MODE`` から解決する。
+    """``auto`` は Router Crew (LLM) を優先する。
 
-    * 未設定・空文字 → ``heuristic``
-    * ``llm`` → Router Crew（:paramref:`kickoff_router.llm_light` が無いときは heuristic）
-    * ``heuristic`` → 規則ベース分類
-    * その他の値 → warning のうえ ``heuristic``
+    :paramref:`kickoff_router.llm_light` が無いとき、または Crew 失敗時は
+    呼び出し側で heuristic にフォールバックする。``heuristic`` はテスト用明示指定。
     """
-    if mode != "auto":
-        return mode
-    raw = (os.environ.get("SOLOMON_ROUTER_MODE") or "").strip().lower()
-    if not raw or raw == "heuristic":
-        return "heuristic"
-    if raw == "llm":
+    legacy = (os.environ.get("SOLOMON_ROUTER_MODE") or "").strip()
+    if legacy:
+        _logger.warning(
+            "router.deprecated_env",
+            name="SOLOMON_ROUTER_MODE",
+            hint="ignored; use mode='heuristic' in tests or rely on llm_light fallback",
+        )
+    if mode == "auto":
         return "llm"
-    _logger.warning("router.unknown_mode", configured=raw, fallback="heuristic")
-    return "heuristic"
+    return mode
 
 
 def kickoff_router(
@@ -701,7 +375,7 @@ def kickoff_router(
     :param session_id: セッション ID (未指定なら user_ctx.session_id)。
     :param entity_memory: 現在セッションの entity_memory スナップショット。
     :param llm_light: LLM (mode='llm' の時のみ使う)。
-    :param mode:  'heuristic' / 'llm' / 'auto' (環境変数で決定)。
+    :param mode:  'auto' (既定・LLM Router) / 'heuristic' (テスト・決定論) / 'llm'。
 
     :returns: :class:`RouterResult`。呼び出し側は ``plan.skip_child`` を見て
         子 Crew を起動するかどうか決める。
@@ -709,41 +383,6 @@ def kickoff_router(
     resolved_mode = _resolve_mode(mode)
     sid = session_id or user_ctx.session_id or "unknown"
     entity_memory = entity_memory or {}
-
-    # 取り込み先テーブルの聞き返し (pending + 回答) は LLM/ヒューリスティック共通で最優先。
-    pending_table = resolve_pending_table_ingest(prompt, entity_memory)
-    if pending_table:
-        classification = IntentClassification(
-            intent="INGEST",
-            confidence=0.92,
-            extracted_args=pending_table,
-            needs_clarification=False,
-            reasoning="resolved pending_table_ingest with target table",
-        )
-        plan = build_dispatch_plan(classification)
-        return RouterResult(
-            classification=classification,
-            plan=plan,
-            response_markdown=plan.response_markdown,
-        )
-
-    # グラフ取り込みの聞き返し (pending + フィールド名のみの回答) は LLM/ヒューリスティック
-    # 共通で最優先。LLM 経路だと「order_id, plant_code」だけの短い返答が UNKNOWN になる。
-    pending_ingest = resolve_pending_graph_ingest(prompt, entity_memory)
-    if pending_ingest:
-        classification = IntentClassification(
-            intent="INGEST",
-            confidence=0.92,
-            extracted_args=pending_ingest,
-            needs_clarification=False,
-            reasoning="resolved pending_graph_ingest with node_fields",
-        )
-        plan = build_dispatch_plan(classification)
-        return RouterResult(
-            classification=classification,
-            plan=plan,
-            response_markdown=plan.response_markdown,
-        )
 
     if resolved_mode == "heuristic" or llm_light is None:
         _logger.info(
@@ -890,4 +529,5 @@ __all__ = [
     "heuristic_classify",
     "build_dispatch_plan",
     "build_chitchat_plan",
+    "_DATA_INGEST_OUT_OF_SCOPE_MSG",
 ]

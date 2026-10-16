@@ -1,14 +1,11 @@
 """Wish (自然言語プロンプト) SSE エンドポイント (`POST /api/wish`)。
 
 ChatPane からのプロンプトを :func:`kickoff_router` に渡し、判定された intent
-に応じて子 Crew (現時点では Ingestion のみ実装) を Python 側から起動する。
+に応じて子 Crew (Analytics / Knowledge RAG) を Python 側から起動する。
 実行進捗は Server-Sent Events で逐次返す。
 
-Router モードは :func:`kickoff_router` の ``mode='auto'`` に任せる:
-
-  * ``SOLOMON_ROUTER_MODE`` 未設定・空・``heuristic`` -> 規則ベース分類
-  * ``SOLOMON_ROUTER_MODE=llm`` かつ LLM が組み立てられる場合 -> Router Crew
-  * ``llm`` 指定でも LLM 未構築なら heuristic にフォールバック
+Router は :func:`kickoff_router` の ``mode='auto'`` (Router Crew / LLM) を使う。
+LLM 構築失敗時は heuristic にフォールバックする。
 
 **注意**:
 * Knox JWT は :class:`UserContext` に載せて ContextVar にセットしてから
@@ -45,22 +42,10 @@ from solomon.api.sse import (
     sse_token,
 )
 from solomon.api.state import SessionTurn, get_store
-from solomon.ingestion.chat_report import (
-    format_duration_seconds,
-    format_ingestion_chat_markdown,
-    pipeline_sse_steps,
-)
-from solomon.ingestion.crew import kickoff_ingestion
 from solomon.rag.crew import kickoff_knowledge_rag
 from solomon.router import DispatchPlan, RouterResult, kickoff_router
 from solomon.router.crew import build_chitchat_plan
-from solomon.router.graph_ingest import build_graph_ingest_clarification
-from solomon.router.ingest_target import (
-    build_ingest_target_clarification,
-    extract_attempted_fq_from_message,
-)
 from solomon.transport.errors import ErrorCode
-from solomon.router.s3_columns import peek_s3_column_names
 from solomon.api.setup_checks import llm_not_configured_payload
 from solomon.transport.llm_factory import build_llm_pair
 from solomon.transport.logging import get_logger
@@ -77,8 +62,11 @@ _logger = get_logger(__name__)
 class WishRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=8192)
     session_id: Optional[str] = None
-    #: Ingestion 用: 未指定なら Router 側で "demo"
-    target_schema: Optional[str] = Field(None, max_length=128)
+    target_schema: Optional[str] = Field(
+        None,
+        max_length=128,
+        description="互換用 (取り込みは別プロジェクト)。現行 Router では未使用。",
+    )
 
 
 @router.post("/wish")
@@ -145,96 +133,13 @@ async def post_wish(
             # 2) skip_child (clarify / UNKNOWN) は response_markdown を流す
             if plan.skip_child:
                 md = router_result.response_markdown or plan.response_markdown or ""
-                extracted = router_result.classification.extracted_args or {}
-                if extracted.get("awaiting_table_target"):
-                    bucket = str(extracted.get("bucket") or "")
-                    key = str(extracted.get("key") or "")
-                    md = md or build_ingest_target_clarification(key=key)
-                    pending_table: dict[str, Any] = {
-                        "bucket": bucket,
-                        "key": key,
-                        "target_schema": extracted.get("target_schema", "demo"),
-                    }
-                    if extracted.get("graph_ingest"):
-                        pending_table["graph_ingest"] = True
-                    if extracted.get("node_fields"):
-                        pending_table["node_fields"] = extracted.get("node_fields")
-                    get_store().update_entity_memory(
-                        session.session_id,
-                        {"pending_table_ingest": pending_table},
-                    )
-                elif extracted.get("awaiting_node_fields"):
-                    bucket = str(extracted.get("bucket") or "")
-                    key = str(extracted.get("key") or "")
-                    columns = await asyncio.to_thread(
-                        peek_s3_column_names, user_ctx, bucket, key
-                    )
-                    md = build_graph_ingest_clarification(
-                        key=key, column_names=columns
-                    )
-                    get_store().update_entity_memory(
-                        session.session_id,
-                        {
-                            "pending_graph_ingest": {
-                                "bucket": bucket,
-                                "key": key,
-                                "target_schema": extracted.get(
-                                    "target_schema", "demo"
-                                ),
-                            }
-                        },
-                    )
                 if md:
                     response_md_parts.append(md)
                     yield sse_token(md)
-                # clarify / unknown はエラーではないので error_holder は None のまま
                 return
 
             # 3) 子 Crew ディスパッチ
-            if plan.child_crew == "ingestion":
-                ptn = plan.inputs.get("proposed_table_name")
-                tschema = str(plan.inputs.get("target_schema") or "demo")
-                if ptn:
-                    yield sse_narrative(
-                        f"テーブル `{tschema}.{ptn}` を指定いただきました。"
-                        "同じファイルで取り込みパイプラインを実行します"
-                        "（S3 確認から再実行します）。"
-                    )
-                else:
-                    from solomon.trino.mode import is_internal_trino_mode
-
-                    if is_internal_trino_mode():
-                        yield sse_narrative(
-                            "ファイル取り込みと判断しました。"
-                            "Storage → Trino (DuckDB デモ warehouse) → "
-                            "ナレッジグラフ → セマンティック検索の順で処理します。"
-                        )
-                    else:
-                        yield sse_narrative(
-                            "ファイル取り込みと判断しました。"
-                            "Storage → Iceberg → ナレッジグラフ → "
-                            "セマンティック検索の順で処理します。"
-                        )
-                async for chunk in _handle_ingest(
-                    request=request,
-                    user_ctx=user_ctx,
-                    session_id=session.session_id,
-                    turn_id=turn_id,
-                    bucket=str(plan.inputs.get("bucket", "")),
-                    key=str(plan.inputs.get("key", "")),
-                    target_schema=str(plan.inputs.get("target_schema") or "demo"),
-                    node_fields=plan.inputs.get("node_fields"),
-                    graph_ingest=bool(plan.inputs.get("graph_ingest")),
-                    proposed_table_name=plan.inputs.get("proposed_table_name"),
-                    create_new_table=plan.inputs.get("create_new_table"),
-                    llm_light=llm_light,
-                    llm_strong=llm_strong,
-                    artifacts_created=artifacts_created,
-                    response_md_parts=response_md_parts,
-                    error_holder=error_holder,
-                ):
-                    yield chunk
-            elif plan.child_crew == "analytics_summary":
+            if plan.child_crew == "analytics_summary":
                 async for chunk in _handle_summary(
                     request=request,
                     user_ctx=user_ctx,
@@ -370,25 +275,7 @@ def _run_router(
     finally:
         reset_user_context(token)
 
-    # body.target_schema が明示されていれば Router の判定を上書き
-    if (
-        target_schema_override
-        and result.plan.child_crew == "ingestion"
-        and not result.plan.skip_child
-    ):
-        new_inputs = dict(result.plan.inputs)
-        new_inputs["target_schema"] = target_schema_override
-        result = RouterResult(
-            classification=result.classification,
-            plan=DispatchPlan(
-                intent=result.plan.intent,
-                child_crew=result.plan.child_crew,
-                inputs=new_inputs,
-                response_markdown=result.plan.response_markdown,
-                skip_child=result.plan.skip_child,
-            ),
-            response_markdown=result.response_markdown,
-        )
+    _ = target_schema_override
     return result
 
 
@@ -449,268 +336,6 @@ async def _handle_chitchat(
     )
     yield sse_token(reply)
     yield sse_step("Chat", "done", "返答しました。")
-
-
-# ------------------------------------------------------------------ #
-# Ingestion path
-# ------------------------------------------------------------------ #
-async def _handle_ingest(
-    *,
-    request: Request,
-    user_ctx: UserContext,
-    session_id: str,
-    turn_id: str,
-    bucket: str,
-    key: str,
-    target_schema: str,
-    node_fields: Any = None,
-    graph_ingest: bool = False,
-    proposed_table_name: Any = None,
-    create_new_table: Any = None,
-    llm_light: Optional[Any],
-    llm_strong: Optional[Any],
-    artifacts_created: list[str],
-    response_md_parts: list[str],
-    error_holder: list[Optional[str]],
-) -> AsyncIterator[dict]:
-    """Ingestion Crew を走らせて SSE イベントを yield する。"""
-    if not bucket or not key:
-        error_holder[0] = "INGESTION_MISSING_ARGS"
-        yield sse_error(
-            "INGESTION_MISSING_ARGS",
-            "取り込み対象の S3 パス (bucket / key) が特定できませんでした。",
-        )
-        return
-
-    step_msg = f"s3://{bucket}/{key} を取り込みます..."
-    if graph_ingest and node_fields:
-        joined = ", ".join(str(f) for f in node_fields)
-        step_msg = (
-            f"s3://{bucket}/{key} を取り込み、"
-            f"ナレッジグラフに追加します (ノード: {joined})..."
-        )
-    yield sse_narrative(
-        f"`s3://{bucket}/{key}` のフォーマットを判定し、"
-        "Iceberg テーブル作成とデータ投入の準備を進めます。"
-    )
-    # UserContext を持ち込む session_id つきの派生を用意
-    scoped_ctx = UserContext(
-        user_name=user_ctx.user_name,
-        groups=user_ctx.groups,
-        knox_jwt=user_ctx.knox_jwt,
-        aws_credentials=user_ctx.aws_credentials,
-        session_id=session_id,
-    )
-
-    progress_q: asyncio.Queue[tuple[str, str, str, str]] = asyncio.Queue()
-    loop = asyncio.get_running_loop()
-    started = loop.time()
-
-    def _progress_cb(
-        agent: str, status: str, activity: str, message: str
-    ) -> None:
-        loop.call_soon_threadsafe(
-            progress_q.put_nowait, (agent, status, activity, message)
-        )
-
-    # crew.kickoff は同期 & LLM 呼び出し込みで長い → to_thread で退避
-    def _run() -> dict:
-        # ContextVar は thread ごとに独立なので、この thread 内で set する
-        token = set_user_context(scoped_ctx)
-        try:
-            ptn = (
-                str(proposed_table_name).strip()
-                if proposed_table_name is not None
-                else None
-            )
-            cnt: Optional[bool] = None
-            if create_new_table is not None:
-                if isinstance(create_new_table, bool):
-                    cnt = create_new_table
-                else:
-                    cnt = str(create_new_table).strip().lower() in (
-                        "1",
-                        "true",
-                        "yes",
-                    )
-            return kickoff_ingestion(
-                user_ctx=scoped_ctx,
-                bucket=bucket,
-                key=key,
-                target_schema=target_schema,
-                node_fields=node_fields,
-                graph_ingest=graph_ingest,
-                proposed_table_name=ptn or None,
-                create_new_table=cnt,
-                llm_light=llm_light,
-                llm_strong=llm_strong,
-                include_crew_result=True,
-                progress_callback=_progress_cb,
-            )
-        finally:
-            reset_user_context(token)
-
-    task = asyncio.create_task(asyncio.to_thread(_run))
-
-    async def _drain_progress() -> AsyncIterator[dict]:
-        while True:
-            try:
-                agent, status, activity, message = progress_q.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            yield sse_step(agent, status, message, activity=activity)
-
-    # 実行中は task_callback 由来の activity を流しつつ、クライアント切断も監視
-    while not task.done():
-        async for chunk in _drain_progress():
-            yield chunk
-        try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
-        except asyncio.TimeoutError:
-            if await request.is_disconnected():
-                task.cancel()
-                return
-            elapsed = int(loop.time() - started)
-            if elapsed == 5 or (elapsed > 5 and elapsed % 30 == 0):
-                yield sse_narrative(
-                    f"Ingestion パイプライン実行中…（{elapsed}秒経過）"
-                )
-
-    async for chunk in _drain_progress():
-        yield chunk
-
-    result = await task
-    elapsed = loop.time() - started
-    if result.get("status") != "ok":
-        code = result.get("error_code", "INGESTION_FAILED")
-        msg = result.get("message", "Ingestion failed")
-        yield sse_step(
-            "IngestionCrew",
-            "error",
-            f"失敗 · {format_duration_seconds(elapsed)}",
-        )
-        recoverable = (
-            code
-            in (
-                ErrorCode.TRINO_DDL_FAILED,
-                ErrorCode.PERM_CREATE_DENIED,
-                ErrorCode.SCHEMA_NAME_CONFLICT,
-                "TRINO_DDL_FAILED",
-            )
-            or "TRINO_DDL_FAILED" in msg
-            or "Table does not exist in Trino" in msg
-            or "作成を確認できません" in msg
-            or "propose_schema" in msg.lower()
-            or "resolved_table" in msg.lower()
-        )
-        if recoverable:
-            attempted = extract_attempted_fq_from_message(msg)
-            clarify = build_ingest_target_clarification(
-                key=key,
-                failure_message=msg,
-                attempted_fq=attempted,
-            )
-            get_store().update_entity_memory(
-                session_id,
-                {
-                    "pending_table_ingest": {
-                        "bucket": bucket,
-                        "key": key,
-                        "target_schema": target_schema,
-                        "failure_message": msg,
-                        "attempted_fq": attempted,
-                        **(
-                            {"proposed_table_name": proposed_table_name}
-                            if proposed_table_name
-                            else {}
-                        ),
-                        **(
-                            {"create_new_table": create_new_table}
-                            if create_new_table is not None
-                            else {}
-                        ),
-                        **(
-                            {"graph_ingest": True}
-                            if graph_ingest
-                            else {}
-                        ),
-                        **(
-                            {"node_fields": node_fields}
-                            if node_fields
-                            else {}
-                        ),
-                    },
-                    "pending_graph_ingest": None,
-                },
-            )
-            response_md_parts.append(clarify)
-            yield sse_token(clarify)
-            return
-        error_holder[0] = code
-        yield sse_error(code, msg)
-        return
-
-    payload = result.get("payload") or {}
-    report = payload.get("report") or {}
-    crew_raw = payload.get("crew_result")
-    fq = report.get("fq_table_name")
-    if fq:
-        store = get_store()
-        art = store.register_artifact(
-            "table_preview",
-            ref={"fq": fq, "catalog_schema_table": fq},
-            session_id=session_id,
-        )
-        artifacts_created.append(art.artifact_id)
-        store.update_entity_memory(
-            session_id,
-            {
-                "last_table": fq,
-                "last_s3_path": f"s3://{bucket}/{key}",
-                "last_ossie_path": report.get("ossie_yaml_path"),
-                "pending_graph_ingest": None,
-                "pending_table_ingest": None,
-            },
-        )
-        yield sse_artifact(
-            art.artifact_id,
-            "table_preview",
-            ref={"fq": fq},
-        )
-
-    for agent, status, message, activity in pipeline_sse_steps(
-        bucket=bucket, key=key, report=report, crew_raw=crew_raw
-    ):
-        yield sse_step(agent, status, message, activity=activity)
-        if status == "done" and agent == "Ingestion:Locate":
-            yield sse_narrative(f"Storage 上のオブジェクトを確認しました: {message}")
-        elif status == "done" and agent == "Ingestion:Iceberg":
-            yield sse_narrative(f"Lakehouse（Iceberg）へ投入しました: {message}")
-        elif status == "done" and agent == "Ingestion:Graph":
-            yield sse_narrative(f"ナレッジグラフ（Neo4j）を更新しました: {message}")
-        elif status == "done" and agent == "Ingestion:Search":
-            yield sse_narrative(f"セマンティック検索（OpenSearch）を更新しました: {message}")
-        elif status == "skipped":
-            phase = agent.split(":")[-1] if ":" in agent else agent
-            yield sse_narrative(f"{phase} はスキップしました（{message}）。")
-
-    yield sse_narrative("各段階の結果を整理し、チャットに表示します。")
-
-    md = format_ingestion_chat_markdown(
-        bucket=bucket,
-        key=key,
-        report=report,
-        crew_raw=crew_raw,
-        duration_sec=elapsed,
-    )
-    response_md_parts.append(md)
-    yield sse_token(md)
-    yield sse_step(
-        "IngestionCrew",
-        "done",
-        f"取り込み完了 · {format_duration_seconds(elapsed)}",
-        activity="Ingestion complete",
-    )
 
 
 # ------------------------------------------------------------------ #

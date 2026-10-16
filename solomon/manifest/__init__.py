@@ -1,7 +1,7 @@
 """Agent Studio 用マニフェスト自動生成モジュール。
 
 Model C ハイブリッド方針:
-  * production 経路は Python の :mod:`solomon.ingestion` / :mod:`solomon.router` /
+  * production 経路は Python の :mod:`solomon.router` /
     :mod:`solomon.analytics` を直接呼ぶ (single source of truth)。
   * Cloudera AI Agent Studio 上でのビジュアライズ / 実行のためには、Studio 側の
     契約に沿った YAML マニフェストが必要。手書きすると Python 側との drift が

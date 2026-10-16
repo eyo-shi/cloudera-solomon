@@ -135,12 +135,8 @@ function guideFor(errorCode: string): GuideDetails {
             hint: "external モード: 外部 Bolt URI。internal で DNS 不通時は launcher Log の URI",
           },
           {
-            name: "NEO4J_USERNAME",
-            hint: "通常 neo4j",
-          },
-          {
             name: "NEO4J_PASSWORD",
-            hint: "external モード必須。internal は launcher 既定 (Neo4jPass1234) も可",
+            hint: "任意。.solomon/secrets.env（未設定時 neo4j / Neo4jPass1234）",
           },
           {
             name: "NEO4J_EXTERNAL_URI",
@@ -149,7 +145,7 @@ function guideFor(errorCode: string): GuideDetails {
         ],
         extraSteps: [
           "internal: Applications で neo4j-launcher が Running か確認し .solomon/neo4j_endpoints.json を待つ",
-          "external: Project → Settings → Advanced → Environment Variables に NEO4J_URI 等を設定",
+          "external: .solomon/deploy.env に NEO4J_URI、secrets.env に NEO4J_PASSWORD（任意）",
           "Solomon Application を Restart",
         ],
       };

@@ -32,14 +32,13 @@ def _require_neo4j_or_503() -> None:
             )
         elif is_external_neo4j_mode():
             instruction = (
-                "NEO4J_MODE=external です。Project → Settings → Advanced → "
-                "Environment Variables に NEO4J_URI / NEO4J_USERNAME / "
-                "NEO4J_PASSWORD を設定し、Application を再起動してください。"
+                "NEO4J_MODE=external です。.solomon/deploy.env に NEO4J_URI を設定。"
+                "パスワード変更は .solomon/secrets.env の NEO4J_PASSWORD。"
+                "Solomon Application を再起動してください。"
             )
         else:
             instruction = (
-                "Project → Settings → Advanced → Environment Variables に "
-                "NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD を設定し、"
+                "NEO4J_MODE を確認し、.solomon/deploy.env に NEO4J_URI を設定。"
                 "Application を再起動してください。"
             )
         raise HTTPException(

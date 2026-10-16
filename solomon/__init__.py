@@ -2,7 +2,7 @@
 
 サブパッケージ:
     solomon.router      Router Crew (intent 分類 / ディスパッチ)
-    solomon.ingestion   Ingestion Crew (S3 → Iceberg 取り込み)
+    solomon.rag         Agentic Knowledge RAG (読み取り専用)
     solomon.analytics   Analytics Crew (サマリー / ダッシュボード)
     solomon.semantic    Apache Ossie YAML の読み書き / 検索
     solomon.session     セッション、リクエスト、メモリ
@@ -11,4 +11,4 @@
     solomon.api         FastAPI バックエンド
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"

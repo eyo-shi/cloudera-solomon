@@ -2,10 +2,6 @@
 
   1. classify_intent_task   -> IntentClassification
   2. dispatch_task          -> DispatchPlan
-
-`{prompt}` / `{session_id}` / `{entity_memory_hint}` は Crew.kickoff の
-``inputs`` から差し込まれる。Task 間の受け渡しは ``context=[prev_task]`` で
-Pydantic モデル (:mod:`solomon.router.models`) を経由する。
 """
 from __future__ import annotations
 
@@ -24,9 +20,6 @@ except Exception:  # pragma: no cover
                 setattr(self, k, v)
 
 
-# ------------------------------------------------------------------ #
-# 1. classify_intent_task
-# ------------------------------------------------------------------ #
 def make_classify_intent_task(agent: Any) -> Task:
     return Task(
         description=(
@@ -38,11 +31,9 @@ def make_classify_intent_task(agent: Any) -> Task:
             "SESSION_ID: {session_id}\n"
             "\n"
             "手順:\n"
-            "1) 発話に s3://<bucket>/<key> が含まれる、または『取り込み』"
-            "『インジェスト』『テーブルにして』等の意図があれば "
-            "intent='INGEST' とし、extracted_args に {{bucket, key, "
-            "target_schema}} を抽出する。target_schema が明示されて"
-            "いなければ 'demo' を入れる。\n"
+            "1) 発話に s3:// や『取り込み』『インジェスト』等が含まれる場合は "
+            "intent='UNKNOWN', needs_clarification=true とし、"
+            "clarification_prompt に「データ取り込みは別プロジェクト」と案内する。\n"
             "2) 発話に『サマリー』『まとめて』『どんな傾向』等が含まれ、"
             "対象テーブルが明示されているか代名詞 (『そのテーブル』等) が"
             "使われていれば intent='ANALYZE_SUMMARY'。代名詞は "
@@ -51,8 +42,10 @@ def make_classify_intent_task(agent: Any) -> Task:
             "3) 発話に『ダッシュボード』『可視化』『グラフを作って』等が"
             "含まれれば intent='ANALYZE_DASHBOARD'。同様に fq_table_name "
             "を entity_memory で解決する。\n"
-            "4) 挨拶・ヘルプ要求・意図不明な雑談は intent='CHITCHAT'。\n"
-            "5) 上記いずれにも当てはまらないが情報が足りない場合は "
+            "4) Neo4j / OpenSearch / 設計書・用語・障害などナレッジ横断質問は "
+            "intent='KNOWLEDGE_RAG'。\n"
+            "5) 挨拶・ヘルプ要求・意図不明な雑談は intent='CHITCHAT'。\n"
+            "6) 上記いずれにも当てはまらないが情報が足りない場合は "
             "intent='UNKNOWN' とし、needs_clarification=true, "
             "clarification_prompt に日本語で追加質問を書く。\n"
             "\n"
@@ -69,9 +62,6 @@ def make_classify_intent_task(agent: Any) -> Task:
     )
 
 
-# ------------------------------------------------------------------ #
-# 2. dispatch_task
-# ------------------------------------------------------------------ #
 def make_dispatch_task(agent: Any, context: list[Task]) -> Task:
     return Task(
         description=(
@@ -79,20 +69,18 @@ def make_dispatch_task(agent: Any, context: list[Task]) -> Task:
             "DispatchPlan に変換せよ。\n"
             "\n"
             "変換ルール:\n"
-            "  intent=INGEST            -> child_crew='ingestion', "
-            "inputs={{bucket, key, target_schema}}, skip_child=false\n"
             "  intent=ANALYZE_SUMMARY   -> child_crew='analytics_summary', "
             "inputs={{fq_table_name, question}}, skip_child=false\n"
             "  intent=ANALYZE_DASHBOARD -> child_crew='analytics_dashboard', "
             "inputs={{fq_table_name, question}}, skip_child=false\n"
-            "  intent=CHITCHAT          -> child_crew='none', skip_child=true, "
-            "response_markdown に日本語で短い返答を書く\n"
+            "  intent=KNOWLEDGE_RAG     -> child_crew='knowledge_rag', "
+            "inputs={{question}}, skip_child=false\n"
+            "  intent=CHITCHAT          -> child_crew='chitchat', skip_child=false, "
+            "inputs={{prompt}}\n"
             "  intent=UNKNOWN or needs_clarification=true -> child_crew='none', "
             "skip_child=true, response_markdown に clarification_prompt を書く\n"
             "\n"
-            "重要: あなたは kickoff Tool を『使ってはいけない』。実際の子 Crew "
-            "起動は Python 側 (kickoff_router) が行う。あなたの仕事は"
-            "DispatchPlan の JSON を返すことだけ。"
+            "重要: kickoff Tool は使わない。DispatchPlan の JSON のみ返す。"
         ),
         expected_output=(
             "DispatchPlan の JSON。intent, child_crew, inputs, "
@@ -105,7 +93,4 @@ def make_dispatch_task(agent: Any, context: list[Task]) -> Task:
     )
 
 
-__all__ = [
-    "make_classify_intent_task",
-    "make_dispatch_task",
-]
+__all__ = ["make_classify_intent_task", "make_dispatch_task"]

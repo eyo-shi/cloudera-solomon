@@ -41,13 +41,13 @@ def main() -> int:
         print("[amp:01] pip install failed", file=sys.stderr, flush=True)
         return proc.returncode
 
-    # インポートスモークテスト (crewai / pydantic / solomon.tools / solomon.ingestion)
+    # インポートスモークテスト (crewai / pydantic / solomon.tools / solomon.manifest)
     print("[amp:01] import smoke test", flush=True)
     smoke = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import solomon, solomon.tools, solomon.ingestion, solomon.manifest; "
+            "import solomon, solomon.tools, solomon.manifest, solomon.rag; "
             "print('solomon version:', solomon.__version__ if hasattr(solomon, '__version__') else 'dev')",
         ],
         cwd=REPO_ROOT,

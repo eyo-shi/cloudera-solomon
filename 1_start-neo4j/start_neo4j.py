@@ -536,6 +536,13 @@ class ReuseAddrHTTPServer(ThreadingHTTPServer):
 
 
 if __name__ == "__main__":
+    try:
+        from solomon.infra.deploy_env import bootstrap_deploy_env
+
+        bootstrap_deploy_env()
+    except ImportError:
+        pass
+
     port = int(os.getenv("CDSW_APP_PORT") or "8090")
     bind_host = os.getenv("NEO4J_LAUNCHER_BIND_HOST", "127.0.0.1")
     print(f"Starting Neo4j Launcher on {bind_host}:{port}")

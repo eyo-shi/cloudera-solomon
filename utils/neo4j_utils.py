@@ -2247,7 +2247,7 @@ def get_connection_info() -> dict:
         info["message"] = (
             info.get("message")
             or f"Using built-in Neo4j credentials ({DEFAULT_NEO4J_USERNAME}/{DEFAULT_NEO4J_PASSWORD}). "
-            "Set NEO4J_PASSWORD in the CML Configuration screen to override."
+            "Set NEO4J_PASSWORD in .solomon/secrets.env to override."
         )
     elif not info.get("auth_in_sync"):
         warning = (

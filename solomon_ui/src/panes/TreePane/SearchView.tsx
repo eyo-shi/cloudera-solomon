@@ -1,5 +1,5 @@
 /**
- * Search (Semantic Search) ビュー — CDE Bronze ``inspection-*`` ドキュメント一覧。
+ * Search (Semantic Search) ビュー — ``solomon-datasets`` カタログ一覧。
  */
 import { isSetupGuideError } from "../../api/client";
 import { refreshSearchExplorer } from "../../api/explorerRefresh";
@@ -48,7 +48,7 @@ export function SearchView({ filter }: SearchViewProps) {
   });
 
   const documents = data?.documents ?? [];
-  const indexHint = data?.index ?? "inspection-*";
+  const indexHint = data?.index ?? "solomon-datasets";
 
   const sectionHead = (
     <div className="explorer-section-head">
@@ -132,8 +132,8 @@ export function SearchView({ filter }: SearchViewProps) {
         {documents.length === 0 && (
           <li className="explorer-placeholder">
             {filter.trim()
-              ? "一致する Bronze ファイルがありません"
-              : "inspection-* にドキュメントがありません（CDE 取込を Run してください）"}
+              ? "一致する dataset がありません"
+              : "Semantic Search に dataset がありません（別プロジェクトでインデックス投入後に表示されます）"}
           </li>
         )}
       </ul>

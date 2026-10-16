@@ -3,7 +3,7 @@
 # CI drift check :  python -m solomon.manifest --check --out agent_studio_manifest/
 # Source of truth : Python code under solomon.tools / solomon.<crew>.crew
 version: 1
-generated_from: solomon.{router,ingestion,analytics}.crew
+generated_from: solomon.{router,analytics}.crew
 crews:
 - name: router
   implemented: true
@@ -28,17 +28,18 @@ crews:
 
       手順:
 
-      1) 発話に s3://<bucket>/<key> が含まれる、または『取り込み』『インジェスト』『テーブルにして』等の意図があれば intent=''INGEST'' とし、extracted_args に {{bucket,
-      key, target_schema}} を抽出する。target_schema が明示されていなければ ''demo'' を入れる。
+      1) 発話に s3:// や『取り込み』『インジェスト』等が含まれる場合は intent=''UNKNOWN'', needs_clarification=true とし、clarification_prompt に「データ取り込みは別プロジェクト」と案内する。
 
       2) 発話に『サマリー』『まとめて』『どんな傾向』等が含まれ、対象テーブルが明示されているか代名詞 (『そのテーブル』等) が使われていれば intent=''ANALYZE_SUMMARY''。代名詞は entity_memory_read
       tool を呼んで last_table を引き当て、extracted_args.fq_table_name に埋める。
 
       3) 発話に『ダッシュボード』『可視化』『グラフを作って』等が含まれれば intent=''ANALYZE_DASHBOARD''。同様に fq_table_name を entity_memory で解決する。
 
-      4) 挨拶・ヘルプ要求・意図不明な雑談は intent=''CHITCHAT''。
+      4) Neo4j / OpenSearch / 設計書・用語・障害などナレッジ横断質問は intent=''KNOWLEDGE_RAG''。
 
-      5) 上記いずれにも当てはまらないが情報が足りない場合は intent=''UNKNOWN'' とし、needs_clarification=true, clarification_prompt に日本語で追加質問を書く。
+      5) 挨拶・ヘルプ要求・意図不明な雑談は intent=''CHITCHAT''。
+
+      6) 上記いずれにも当てはまらないが情報が足りない場合は intent=''UNKNOWN'' とし、needs_clarification=true, clarification_prompt に日本語で追加質問を書く。
 
 
       extracted_args に Knox JWT / STS / パスワード等の秘匿情報は絶対に含めない。confidence は 0.0-1.0 の float で自信度を入れる。'
@@ -53,213 +54,19 @@ crews:
     guardrail: null
   - name: dispatch_plan
     agent: dispatcher
-    description: "前段の IntentClassification を、Python 側が実行できる DispatchPlan に変換せよ。\n\n変換ルール:\n  intent=INGEST            -> child_crew='ingestion',\
-      \ inputs={{bucket, key, target_schema}}, skip_child=false\n  intent=ANALYZE_SUMMARY   -> child_crew='analytics_summary',\
+    description: "前段の IntentClassification を、Python 側が実行できる DispatchPlan に変換せよ。\n\n変換ルール:\n  intent=ANALYZE_SUMMARY   -> child_crew='analytics_summary',\
       \ inputs={{fq_table_name, question}}, skip_child=false\n  intent=ANALYZE_DASHBOARD -> child_crew='analytics_dashboard',\
-      \ inputs={{fq_table_name, question}}, skip_child=false\n  intent=CHITCHAT          -> child_crew='none', skip_child=true,\
-      \ response_markdown に日本語で短い返答を書く\n  intent=UNKNOWN or needs_clarification=true -> child_crew='none', skip_child=true,\
-      \ response_markdown に clarification_prompt を書く\n\n重要: あなたは kickoff Tool を『使ってはいけない』。実際の子 Crew 起動は Python 側 (kickoff_router)\
-      \ が行う。あなたの仕事はDispatchPlan の JSON を返すことだけ。"
+      \ inputs={{fq_table_name, question}}, skip_child=false\n  intent=KNOWLEDGE_RAG     -> child_crew='knowledge_rag', inputs={{question}},\
+      \ skip_child=false\n  intent=CHITCHAT          -> child_crew='chitchat', skip_child=false, inputs={{prompt}}\n  intent=UNKNOWN\
+      \ or needs_clarification=true -> child_crew='none', skip_child=true, response_markdown に clarification_prompt を書く\n\n\
+      重要: kickoff Tool は使わない。DispatchPlan の JSON のみ返す。"
     expected_output: DispatchPlan の JSON。intent, child_crew, inputs, response_markdown, skip_child を含む。
     output_model: DispatchPlan
-    inputs: []
+    inputs:
+    - question
+    - prompt
     context:
     - intent_classification
-    max_retries: 1
-    guardrail: null
-- name: ingestion
-  implemented: true
-  process: sequential
-  memory: false
-  agents:
-  - s3_scout
-  - format_sniffer
-  - schema_drafter
-  - iceberg_table_creator
-  - graph_loader
-  - ossie_drafter
-  - search_indexer
-  tasks:
-  - name: locate_s3_object
-    agent: s3_scout
-    description: ユーザー指示の S3 パス (bucket={bucket}, key={key}) にオブジェクトが実在するか確認し、size / content_type / last_modified を構造化して返せ。存在しなければ
-      error_code=S3_NOT_FOUND、権限エラーはS3_ACCESS_DENIED として exists=false で返す。
-    expected_output: LocateS3ObjectResult の JSON。bucket, key, size, content_type, last_modified, exists を含む。
-    output_model: LocateS3ObjectResult
-    inputs:
-    - bucket
-    - key
-    context: []
-    max_retries: 1
-    guardrail: null
-  - name: sniff_format
-    agent: format_sniffer
-    description: '前段で確定した S3 オブジェクト (bucket={bucket}, key={key}) のフォーマットを判定せよ。手順: (a) S3GetRangeTool で bucket={bucket}, key={key}
-      の先頭 1MB を取り、MagicByteTool で format を確定。 (b) csv/tsv なら CSVSnifferTool に必ず bucket={bucket}, key={key} を渡して encoding と
-      delimiter を確定 (content_b64 を LLM が改変しないよう S3 直読みを使う)。 (b2) J5 完検テキスト (VERSION/KIBAN/DATE メタ行 + 測定表) なら KankenSniffTool
-      で format=kanken, source_encoding, header_row, meta_kv を確定する (Shift-JIS 自動デコード)。 (c) xlsx/xls なら ExcelHeaderDetectTool
-      で header_row と sheet を確定。 (d) parquet なら ParquetMetaTool に bucket={bucket}, key={key} を渡してスキーマを確認。判定不能なら supported=false
-      + reason を返し、以降のタスクは実行しない。'
-    expected_output: SniffFormatResult の JSON。format, encoding, source_encoding, delimiter, sheet, header_row, meta_kv, supported,
-      reason を含む。
-    output_model: SniffFormatResult
-    inputs:
-    - bucket
-    - key
-    context:
-    - locate_s3_object
-    max_retries: 1
-    guardrail: null
-  - name: extract_data_frame
-    agent: format_sniffer
-    description: DataFramePreviewTool を使って bucket={bucket}, key={key} から先頭 200 行を DataFrame として読み込み、列ごとにサンプル値 50 個と preview_rows
-      を返せ。bucket/key に unknown や placeholder を使ってはいけない (Crew inputs の値をそのまま渡す)。SniffFormat の encoding / delimiter / sheet
-      / header_row をそのまま渡すこと。列名の空白は除去し、NaN は None に置換する。
-    expected_output: ExtractDataFrameResult の JSON。columns[{name, sample_values}], preview_rows, row_count_preview, full_row_count_hint
-      を含む。
-    output_model: ExtractDataFrameResult
-    inputs:
-    - bucket
-    - key
-    context:
-    - sniff_format
-    max_retries: 2
-    guardrail: null
-  - name: propose_schema_and_name
-    agent: schema_drafter
-    description: サンプル値から各カラムの Trino 型を TypeInferTool で推定し、NameProposerTool で英小文字 + アンダースコアのテーブル名候補を作れ。Crew inputs の proposed_table_name
-      が空でなければ、それを proposed_table_name として採用し NameProposerTool は使わない。Trino catalog は必ず Crew inputs の {catalog} (Iceberg カタログ。ossie
-      は semantic YAML 用語であり Trino catalog 名ではない) を catalog フィールドにセットする。target_schema (=Trino スキーマ) はユーザー指定の {target_schema}
-      を使う。SimilarTableSearchTool で命名衝突と類似データセットを検索し、exact_conflicts と similar_tables に積め。role (dimension/measure/time) は数値集計系を
-      measure、date/timestamp を time、それ以外を dimension として分類する。
-    expected_output: ProposeSchemaAndNameResult の JSON。catalog, target_schema, proposed_table_name, columns[{name, trino_type,
-      nullable, role}], partitioning, similar_tables, exact_conflicts を含む。
-    output_model: ProposeSchemaAndNameResult
-    inputs:
-    - catalog
-    - target_schema
-    context:
-    - locate_s3_object
-    - sniff_format
-    - extract_data_frame
-    max_retries: 1
-    guardrail: null
-  - name: conflict_and_permissions
-    agent: iceberg_table_creator
-    description: propose_schema_and_name の結果を受け、TableExistsTool で最終的な衝突チェックと、TrinoMetaTool で CREATE 権限確認を行え。両 Tool には必ず catalog
-      (= Crew inputs の {catalog} または propose の catalog。ossie カタログは使わない), schema (= propose の target_schema), table (= propose
-      の proposed_table_name) を渡すこと。schema 引数は必須 (target_schema を schema にマップして渡す)。衝突がある (かつ overwrite=false) 場合は has_conflict=true
-      とerror_code=SCHEMA_NAME_CONFLICT を、CREATE 不可なら has_create_priv=false と error_code=PERM_CREATE_DENIED を返せ。どちらも問題ないときのみ後続タスクに進める
-      (Crew.ai の guardrail)。
-    expected_output: ConflictAndPermissionsResult の JSON。has_conflict, has_create_priv, resolved_table, error_code, message
-      を含む。
-    output_model: ConflictAndPermissionsResult
-    inputs:
-    - catalog
-    context:
-    - propose_schema_and_name
-    max_retries: 0
-    guardrail: solomon.ingestion.tasks.conflict_permissions_guardrail
-  - name: create_iceberg_table
-    agent: iceberg_table_creator
-    description: check_conflict_and_permissions が通っている前提で、IcebergCreateTableTool に catalog / target_schema / resolved_table
-      / columns / partitioning を渡し、Iceberg テーブルを作成せよ。DDL は Tool 内で組み立てられるので、Agent が手で SQL を書いてはいけない。Tool が返した fq_table_name
-      / ddl / column_count を CreateIcebergTableResult JSON としてそのまま Task 出力にコピーすること (空行のみ禁止)。副作用ありのため max_retries=0。エラーはそのまま返す
-      (再試行しない)。
-    expected_output: CreateIcebergTableResult の JSON。fq_table_name, ddl, column_count を含む。
-    output_model: CreateIcebergTableResult
-    inputs: []
-    context:
-    - propose_schema_and_name
-    - conflict_and_permissions
-    max_retries: 0
-    guardrail: solomon.ingestion.tasks.create_iceberg_guardrail
-  - name: load_iceberg_data
-    agent: iceberg_table_creator
-    description: create_iceberg_table 完了後、IcebergLoadDataTool で S3 ソースの行データを作成済みテーブルへ INSERT せよ。bucket={bucket}, key={key}
-      と sniff_format の format / encoding / delimiter / header_row を渡す。propose_schema の target_schema と resolved_table (= proposed_table_name)
-      を schema / table に使う。kanken 形式では Shift-JIS デコードとメタ行スキップは Tool 内で自動処理される。副作用ありのため max_retries=0。
-    expected_output: LoadIcebergDataResult の JSON。fq_table_name, inserted_rows, column_count, source_format を含む。
-    output_model: LoadIcebergDataResult
-    inputs:
-    - bucket
-    - key
-    context:
-    - locate_s3_object
-    - sniff_format
-    - propose_schema_and_name
-    - create_iceberg_table
-    max_retries: 0
-    guardrail: null
-  - name: load_neo4j_graph
-    agent: graph_loader
-    description: load_iceberg_data 完了後、ManufacturingGraphLoadTool で bucket={bucket}, key={key} と sniff_format の format を渡し、J5
-      受領データの製造トレーサビリティグラフ (Board/AssemblyUnit/ValveBody/TestRecord/MemoryDump/Measurement) を Neo4j に MERGE せよ。同一 KIBAN のファイルは自動的に同一
-      Board ノードに接続される。NEO4J_URI 未設定時は skipped=true, reason を返し、Crew 全体は失敗させない。副作用ありのため max_retries=0。
-    expected_output: LoadNeo4jGraphResult の JSON。data_type, kiban, at_serial, system_id, system_name, test_record_id, board_id,
-      assembly_unit_id, document_ids, documents, neo4j_uri, counts, skipped, reason を含む。
-    output_model: LoadNeo4jGraphResult
-    inputs:
-    - bucket
-    - key
-    context:
-    - locate_s3_object
-    - sniff_format
-    - extract_data_frame
-    - propose_schema_and_name
-    - create_iceberg_table
-    - load_iceberg_data
-    max_retries: 0
-    guardrail: null
-  - name: draft_ossie
-    agent: ossie_drafter
-    description: '作成したテーブルのメタデータから Ossie dataset を組み立て、OssieWriteTool で semantic/datasets/<catalog>/<schema>/<table>.yaml
-      に書き出せ (commit=true)。dimensions / measures の判別は propose_schema_and_name の role をそのまま利用。 create_iceberg_table / load_iceberg_data
-      が失敗している場合は ossie_write を呼ばず DraftOssieResult を返す: git_status="skipped", skip_reason に理由、yaml_path="", commit_sha=null。
-      sample_queries は 2-3 件、日本語の自然言語質問と対応する Trino SQL を提示。ossie_write が OSSIE_YAML_INVALID を返したら 再試行せず git_status="skipped"
-      + skip_reason で終了する。副作用ありのため max_retries=0。'
-    expected_output: DraftOssieResult の JSON。git_status (committed|skipped), fq_name, yaml_path, commit_sha, skip_reason,
-      dataset を含む。
-    output_model: DraftOssieResult
-    inputs: []
-    context:
-    - locate_s3_object
-    - propose_schema_and_name
-    - create_iceberg_table
-    - load_iceberg_data
-    - extract_data_frame
-    max_retries: 0
-    guardrail: null
-  - name: index_open_search
-    agent: search_indexer
-    description: draft_ossie 完了後、OpenSearchIndexTool で Ossie dataset と Neo4j Document 相当のメタデータを外部 OpenSearch (Cloudera Semantic
-      Search) にインデックスせよ。fq_name, dataset dict, system_id, documents を前段 (load_neo4j_graph, draft_ossie) から集約して渡す。OpenSearch
-      未設定時は skipped=true で返し、Crew 全体は失敗させない。副作用ありのため max_retries=0。
-    expected_output: IndexOpenSearchResult の JSON。fq_name, index, indexed_count, skipped, reason を含む。
-    output_model: IndexOpenSearchResult
-    inputs: []
-    context:
-    - load_neo4j_graph
-    - draft_ossie
-    max_retries: 0
-    guardrail: null
-  - name: wrap_up
-    agent: ossie_drafter
-    description: これまでのタスク結果を統合し、ユーザーへの最終レポートをIngestionReport JSON として返せ。summary_markdown には作成した fq_table_name、inserted_rows、カラム数、Neo4j
-      System/Document 投入結果、OpenSearch インデックス結果、類似テーブル、Ossie YAML のパスを日本語で 5-10 行にまとめる。
-    expected_output: IngestionReport の JSON。fq_table_name, ddl, column_count, inserted_rows, ossie_yaml_path, neo4j_dataset_id,
-      neo4j_system_id, neo4j_counts, opensearch_index, opensearch_indexed_count, similar_tables, source, summary_markdown
-      を含む。
-    output_model: IngestionReport
-    inputs: []
-    context:
-    - locate_s3_object
-    - propose_schema_and_name
-    - create_iceberg_table
-    - load_iceberg_data
-    - load_neo4j_graph
-    - draft_ossie
-    - index_open_search
     max_retries: 1
     guardrail: null
 - name: analytics_summary

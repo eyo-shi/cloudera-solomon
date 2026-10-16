@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from solomon.rag.models import RetrievalPlan, RetrievalStrategy
+from solomon.rag.models import RetrievalPlan
 
 _GRAPH_PATTERNS = (
     r"呼び出",
@@ -16,6 +16,7 @@ _GRAPH_PATTERNS = (
     r"relationship",
     r"どの.*テーブル",
     r"dbテーブル",
+    r"cypher",
 )
 _SQL_PATTERNS = (
     r"最多",
@@ -28,12 +29,13 @@ _SQL_PATTERNS = (
     r"count",
     r"ranking",
     r"最も.*多",
+    r"select\s",
 )
 _KEYWORD_PATTERNS = (
     r"ccsid",
     r"文字化け",
     r"エラーコード",
-    r"[A-Z]{2,}\s*\d{3,}",  # 略語+数字 (CCSID 1399 等)
+    r"[A-Z]{2,}\s*\d{3,}",
 )
 _HYBRID_PATTERNS = (
     r"処理.*説明",
@@ -50,6 +52,7 @@ _COMPOSITE_PATTERNS = (
     r"関連する.*を",
     r"複合",
     r"横断",
+    r"レポート",
 )
 
 
@@ -68,10 +71,7 @@ def _extract_entity_hint(prompt: str) -> str | None:
 
 
 def classify_retrieval(prompt: str) -> RetrievalPlan:
-    """ヒューリスティックで RetrievalStrategy を決定する。
-
-    LLM 経路は将来追加可能。テストと決定論的ルーティングのため Python 優先。
-    """
+    """ヒューリスティックで RetrievalStrategy を決定する。"""
     text = prompt.strip()
     lower = text.lower()
 
@@ -117,7 +117,6 @@ def classify_retrieval(prompt: str) -> RetrievalPlan:
             reasoning="process/explanation keyword matched",
         )
 
-    # デフォルト: 意味検索寄りの Hybrid
     return RetrievalPlan(
         strategy="HYBRID",
         query=text,
@@ -127,47 +126,10 @@ def classify_retrieval(prompt: str) -> RetrievalPlan:
 
 
 def is_knowledge_query(prompt: str) -> bool:
-    """Router 用: 取り込み/分析/雑談以外のナレッジ探索クエリか。"""
+    """Router 用: 分析/雑談以外のナレッジ探索クエリか。"""
     text = prompt.strip()
     if not text:
         return False
-    from solomon.graph.manufacturing.trace_qa import (
-        is_manufacturing_part_lookup_prompt,
-        is_manufacturing_trace_detail_prompt,
-        is_manufacturing_trace_documents_prompt,
-        is_manufacturing_trace_bundle_report_prompt,
-        is_manufacturing_ingest_ledger_prompt,
-        is_manufacturing_kanken_measurements_prompt,
-        is_manufacturing_id_field_judge_prompt,
-        is_manufacturing_id_dump_alt_kiban_prompt,
-        is_manufacturing_dual_timing_kiban_prompt,
-        is_manufacturing_vb_ng_list_prompt,
-        is_manufacturing_trace_graph_prompt,
-        is_vb_machine_lookup_prompt,
-        is_vb_path_lookup_prompt,
-        parse_trace_id_from_prompt,
-    )
-
-    if (
-        is_manufacturing_part_lookup_prompt(text)
-        or is_manufacturing_trace_documents_prompt(text)
-        or is_manufacturing_trace_detail_prompt(text)
-        or is_manufacturing_trace_graph_prompt(text)
-        or is_manufacturing_trace_bundle_report_prompt(text)
-        or is_manufacturing_ingest_ledger_prompt(text)
-        or is_manufacturing_kanken_measurements_prompt(text)
-        or is_manufacturing_id_field_judge_prompt(text)
-        or is_manufacturing_id_dump_alt_kiban_prompt(text)
-        or is_manufacturing_dual_timing_kiban_prompt(text)
-        or is_manufacturing_vb_ng_list_prompt(text)
-        or is_vb_machine_lookup_prompt(text)
-        or is_vb_path_lookup_prompt(text)
-    ):
-        return True
-    if parse_trace_id_from_prompt(text) and re.search(
-        r"KIBAN|機番|trace", text, re.IGNORECASE
-    ):
-        return True
     knowledge_markers = (
         *_GRAPH_PATTERNS,
         *_SQL_PATTERNS,
@@ -181,6 +143,7 @@ def is_knowledge_query(prompt: str) -> bool:
         r"ドキュメント",
         r"what is",
         r"find ",
+        r"ナレッジ",
     )
     return _matches(knowledge_markers, text)
 

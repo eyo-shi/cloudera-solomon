@@ -51,13 +51,13 @@ class Neo4jConfig:
         password = self.password.strip()
         if not password:
             raise ValueError(
-                "NEO4J_PASSWORD is empty. Set it in Project Settings > Advanced > "
-                "Environment Variables (built-in default: Neo4jPass1234)."
+                "NEO4J_PASSWORD is empty. Set NEO4J_PASSWORD in .solomon/secrets.env "
+                "(built-in default: Neo4jPass1234)."
             )
         if password == "REPLACE_FROM_NEO4J_LAUNCHER":
             raise ValueError(
-                "NEO4J_PASSWORD is still the old placeholder. Update it in "
-                "Project Settings > Advanced > Environment Variables."
+                "NEO4J_PASSWORD is still the old placeholder. Update "
+                ".solomon/secrets.env or NEO4J_PASSWORD env."
             )
 
 
@@ -82,7 +82,7 @@ def _get_internal_neo4j_config() -> Neo4jConfig | None:
 
 
 def _get_external_neo4j_config() -> Neo4jConfig | None:
-    """External Neo4j: post-deploy NEO4J_URI (Project Settings > Advanced)."""
+    """External Neo4j: post-deploy NEO4J_URI."""
     return Neo4jConfig.from_env()
 
 

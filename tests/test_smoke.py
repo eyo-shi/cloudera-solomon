@@ -11,7 +11,7 @@ def test_import_solomon() -> None:
 def test_import_subpackages() -> None:
     import solomon.analytics  # noqa: F401
     import solomon.api  # noqa: F401
-    import solomon.ingestion  # noqa: F401
+    import solomon.rag  # noqa: F401
     import solomon.router  # noqa: F401
     import solomon.semantic  # noqa: F401
     import solomon.session  # noqa: F401

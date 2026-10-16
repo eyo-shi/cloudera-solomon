@@ -37,11 +37,7 @@ def build_client(config: OpenSearchConfig) -> Any:
 
 
 def ping(config: OpenSearchConfig, *, probe_index: str | None = None) -> bool:
-    """外部 OpenSearch クラスタへの接続確認。
-
-    Knox + Ranger では ``_cluster/health`` が 403 でも ``inspection-*`` の
-    read は許可されることがあるため、デモ index の ``_count`` を優先する。
-    """
+    """外部 OpenSearch クラスタへの接続確認。"""
     try:
         client = build_client(config)
         index = (probe_index or "").strip()
@@ -57,25 +53,4 @@ def ping(config: OpenSearchConfig, *, probe_index: str | None = None) -> bool:
         return False
 
 
-def ping_inspection(config: OpenSearchConfig) -> bool:
-    """Bronze ``inspection-*`` 向けの到達確認（Search タブ用）。"""
-    from solomon.opensearch.inspection_indices import inspection_index_name
-
-    if ping(config, probe_index=inspection_index_name("vb")):
-        return True
-    from solomon.opensearch.inspection_indices import inspection_index_pattern
-
-    try:
-        client = build_client(config)
-        client.count(index=inspection_index_pattern())
-        return True
-    except Exception as exc:  # noqa: BLE001
-        _logger.debug(
-            "opensearch.ping_inspection_failed",
-            error=str(exc),
-            host=config.host,
-        )
-        return False
-
-
-__all__ = ["build_client", "ping", "ping_inspection"]
+__all__ = ["build_client", "ping"]

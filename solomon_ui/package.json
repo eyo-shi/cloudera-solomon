@@ -1,7 +1,7 @@
 {
   "name": "solomon-ui",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "description": "Solomon 3-pane UI (TreePane / ResultPane / ChatPane)",
   "scripts": {

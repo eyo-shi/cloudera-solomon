@@ -5,7 +5,7 @@ description: |
 author: Cloudera
 date: "2026-09-19"
 specification_version: 1.0
-prototype_version: 0.0.1
+prototype_version: 0.1.0
 
 # ---------------------------------------------------------------------------
 # Runtime (Python 3.12)
@@ -18,8 +18,8 @@ runtimes:
 # ---------------------------------------------------------------------------
 # Deploy フォーム (AMP Configuration 画面に表示される Environment Variables)
 #
-# 方針: Deploy 時は MODE 選択と Neo4j 認証情報を設定。neo4j-launcher と Solomon
-# は同じ NEO4J_USERNAME / NEO4J_PASSWORD を共有する。Trino / S3 は
+# 方針: Deploy 時は MODE 選択のみ (Neo4j 認証は既定 neo4j / Neo4jPass1234、
+# 本番は .solomon/secrets.env の NEO4J_PASSWORD)。Trino / S3 は
 # Site Administration → Data Connections が single source of truth。
 # 接続 URI・launcher チューニング・LLM / CDV は Deploy 後に
 # Project → Settings → Advanced → Environment Variables で設定する。
@@ -27,7 +27,7 @@ runtimes:
 # --- Deploy フォームに含めない項目 (post-deploy 参照) ---
 #
 # [external Neo4j] NEO4J_MODE=external のとき:
-#   NEO4J_URI (NEO4J_USERNAME / NEO4J_PASSWORD は Deploy フォームで設定済み)
+#   NEO4J_URI、任意 NEO4J_PASSWORD (.solomon/secrets.env)
 #
 # [external OpenSearch] OPENSEARCH_MODE=external のとき:
 #   OPENSEARCH_CONNECTION_NAME または OPENSEARCH_ENDPOINT,
@@ -50,27 +50,11 @@ environment_variables:
     default: "INFO"
     description: ログレベル (DEBUG / INFO / WARNING / ERROR)。通常は変更不要。
     required: false
-  SOLOMON_ROUTER_MODE:
-    default: "heuristic"
-    description: >-
-      Chat 意図分類 (Deploy 後 Project Settings でも可)。未設定・heuristic = 規則のみ。
-      llm = Router Crew (SOLOMON_LLM_* 必須)。Application 再起動で反映。
-    required: false
   NEO4J_MODE:
     default: "internal"
     description: >-
       Neo4j 接続方式。internal = neo4j-launcher が CML 内で起動 (推奨・デフォルト)。
       external = 外部 Neo4j — Deploy 後に Project Settings で NEO4J_URI を設定。
-    required: false
-  NEO4J_USERNAME:
-    default: "neo4j"
-    description: >-
-      Neo4j 認証ユーザー。neo4j-launcher と Solomon が共有。internal / external 共通。
-    required: false
-  NEO4J_PASSWORD:
-    default: "Neo4jPass1234"
-    description: >-
-      Neo4j 認証パスワード。neo4j-launcher と Solomon が共有。本番運用時は必ず変更すること。
     required: false
   OPENSEARCH_MODE:
     default: "external"
@@ -197,7 +181,20 @@ tasks:
     cpu: 2
     memory: 4
 
-  # 8. Solomon API を Workbench Application として起動 (Knox パススルーで公開)
+  # 8. Post-deploy env テンプレ (.solomon/deploy.env) — 既存ファイルは上書きしない
+  - type: run_session
+    name: Ensure deploy env file
+    script: amp/06_ensure_deploy_env.py
+    short_summary: Create .solomon/deploy.env from deploy/deploy.env.example if missing
+    long_summary: >-
+      AMP 再 Deploy 後も手入力を避けるため、永続ディレクトリ .solomon/deploy.env
+      に post-deploy 設定を置く。初回のみ example をコピーし、以降はユーザー編集を保持。
+      Application 起動時 (amp/05) にファイルが os.environ へマージされる。
+    kernel: python3
+    cpu: 1
+    memory: 2
+
+  # 9. Solomon API を Workbench Application として起動 (Knox パススルーで公開)
   - type: start_application
     name: Solomon
     entity_label: solomon-api
@@ -210,8 +207,8 @@ tasks:
       ``app`` を localhost bind する。/api/* と SPA (/) を配信。Knox JWT は
       X-Forwarded-User /
       Cookie から抽出し、Trino / CDV / IDBroker へパススルーする。LLM / Trino /
-      CDV の env は Deploy 後に Project Settings で設定する運用 (本ファイル冒頭
-      の設定手順参照)。
+      Post-deploy env は .solomon/deploy.env を起動時に読み込む (Project Settings
+      は任意上書き)。Deploy 手順は README「Deploy 後の設定」参照。
     kernel: python3
     cpu: 2
     memory: 4

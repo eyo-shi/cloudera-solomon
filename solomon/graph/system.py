@@ -1,4 +1,4 @@
-"""System / Document inference helpers for Neo4j graph ingestion."""
+"""System name inference helpers (legacy catalog / graph metadata)."""
 
 from __future__ import annotations
 
@@ -31,7 +31,6 @@ def infer_system_name(
         if k in _SYSTEM_META_KEYS and item.get("value"):
             return str(item["value"]).strip()
 
-    # key like "system_a/incidents/2025/data.csv" -> system_a
     if len(key.split("/")) >= 2:
         first = key.split("/")[0].strip()
         if first and not first.startswith("."):
@@ -40,68 +39,7 @@ def infer_system_name(
     return schema.strip() or "default"
 
 
-def build_ingestion_documents(
-    *,
-    dataset_id: str,
-    bucket: str,
-    key: str,
-    format: str,
-    ossie_path: str | None = None,
-    meta_kv: list[dict[str, Any]] | None = None,
-):
-    """Ingestion 由来の Document ノード一覧を組み立てる。"""
-    from solomon.graph.neo4j_loader import DocumentGraphNode
-
-    docs: list[DocumentGraphNode] = []
-    filename = key.rsplit("/", 1)[-1]
-    source_path = f"s3://{bucket}/{key}"
-
-    docs.append(
-        DocumentGraphNode(
-            id=f"doc:source:{dataset_id}",
-            title=filename,
-            doc_type="source_file",
-            path=source_path,
-            content_preview=f"format={format}",
-        )
-    )
-
-    if ossie_path:
-        docs.append(
-            DocumentGraphNode(
-                id=f"doc:ossie:{dataset_id}",
-                title=f"Ossie semantic layer for {dataset_id}",
-                doc_type="semantic_layer",
-                path=ossie_path,
-                content_preview=dataset_id,
-            )
-        )
-
-    for item in meta_kv or []:
-        k = str(item.get("key", "")).strip()
-        v = str(item.get("value", "")).strip()
-        if not k:
-            continue
-        lower = k.lower()
-        if lower in _SYSTEM_META_KEYS:
-            continue
-        if any(token in lower for token in ("doc", "design", "spec", "設計", "障害", "incident")):
-            doc_id = f"doc:meta:{dataset_id}:{normalize_system_id(k)}"
-            docs.append(
-                DocumentGraphNode(
-                    id=doc_id,
-                    title=k,
-                    doc_type="design_doc" if "設計" in k or "design" in lower else "reference",
-                    path=source_path,
-                    content_preview=v[:500] if v else None,
-                )
-            )
-
-    return docs
-
-
 __all__ = [
     "normalize_system_id",
     "infer_system_name",
-    "build_ingestion_documents",
 ]

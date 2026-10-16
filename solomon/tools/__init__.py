@@ -14,23 +14,16 @@ Router / CDV / Viz)。
   DataFrame:  :class:`DataFramePreviewTool`
   Ossie:      :class:`OssieReadTool`, :class:`OssieWriteTool`, :class:`OssieSearchTool`,
               :class:`SimilarTableSearchTool`
-  Router:     :class:`EntityMemoryReadTool`, :class:`IngestionKickoffTool`,
-              :class:`AnalyticsKickoffTool`
+  Router:     :class:`EntityMemoryReadTool`, :class:`AnalyticsKickoffTool`
   CDV:        :class:`CDVStartupCheckTool`, :class:`CDVDatasetTool`,
               :class:`CDVVisualTool`, :class:`CDVDashboardTool`
   Viz:        :class:`VizHeuristicTool`
-  Neo4j:      :class:`Neo4jGraphLoadTool`, :class:`Neo4jGraphQueryTool`
-  Mfg graph:  import :class:`ManufacturingGraphLoadTool` from ``manufacturing_graph`` (not re-exported here)
+  Neo4j:      :class:`Neo4jGraphQueryTool` (読み取り専用)
   OpenSearch: :class:`OpenSearchKeywordSearchTool`, :class:`OpenSearchVectorSearchTool`,
-              :class:`OpenSearchHybridSearchTool`, :class:`OpenSearchIndexTool`,
-              :class:`OpenSearchPingTool`
+              :class:`OpenSearchHybridSearchTool`, :class:`OpenSearchPingTool`
   RAG:        :class:`Text2SQLTool`
 """
-from solomon.router.tools import (
-    AnalyticsKickoffTool,
-    EntityMemoryReadTool,
-    IngestionKickoffTool,
-)
+from solomon.router.tools import AnalyticsKickoffTool, EntityMemoryReadTool
 from solomon.tools.cdv import (
     CDVDashboardTool,
     CDVDatasetTool,
@@ -46,7 +39,6 @@ from solomon.tools.format import (
     ParquetMetaTool,
 )
 from solomon.tools.iceberg import IcebergCreateTableTool, TableExistsTool
-from solomon.tools.iceberg_load import IcebergLoadDataTool
 from solomon.tools.ossie import (
     OssieReadTool,
     OssieSearchTool,
@@ -55,11 +47,9 @@ from solomon.tools.ossie import (
 )
 from solomon.tools.s3 import S3GetRangeTool, S3HeadTool, S3ListTool
 from solomon.tools.schema import NameProposerTool, TypeInferTool
-from solomon.tools.neo4j_graph import Neo4jGraphLoadTool
 from solomon.tools.neo4j_query import Neo4jGraphQueryTool
 from solomon.tools.opensearch import (
     OpenSearchHybridSearchTool,
-    OpenSearchIndexTool,
     OpenSearchKeywordSearchTool,
     OpenSearchPingTool,
     OpenSearchVectorSearchTool,
@@ -80,7 +70,6 @@ __all__ = [
     # iceberg
     "TableExistsTool",
     "IcebergCreateTableTool",
-    "IcebergLoadDataTool",
     # format
     "MagicByteTool",
     "CSVSnifferTool",
@@ -101,7 +90,6 @@ __all__ = [
     "SimilarTableSearchTool",
     # router
     "EntityMemoryReadTool",
-    "IngestionKickoffTool",
     "AnalyticsKickoffTool",
     # cdv
     "CDVStartupCheckTool",
@@ -111,13 +99,11 @@ __all__ = [
     # viz
     "VizHeuristicTool",
     # neo4j
-    "Neo4jGraphLoadTool",
     "Neo4jGraphQueryTool",
     # opensearch (external Data Hub)
     "OpenSearchKeywordSearchTool",
     "OpenSearchVectorSearchTool",
     "OpenSearchHybridSearchTool",
-    "OpenSearchIndexTool",
     "OpenSearchPingTool",
     # rag
     "Text2SQLTool",

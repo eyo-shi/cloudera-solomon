@@ -2,7 +2,7 @@
 
 プラン (:doc:`/design plan`) では 2 タスク Sequential:
 
-  1. classify_intent_task — INGEST / ANALYZE_SUMMARY / ANALYZE_DASHBOARD /
+  1. classify_intent_task — ANALYZE_SUMMARY / ANALYZE_DASHBOARD /
      CHITCHAT / UNKNOWN の 5 分類
   2. dispatch_task        — 分類結果を DispatchPlan にはめ込む
 

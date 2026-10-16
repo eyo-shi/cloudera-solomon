@@ -12,11 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from solomon.router.tools import (
-    AnalyticsKickoffTool,
-    EntityMemoryReadTool,
-    IngestionKickoffTool,
-)
+from solomon.router.tools import AnalyticsKickoffTool, EntityMemoryReadTool
 
 try:  # crewai は本番依存。無い環境でも import は通す
     from crewai import Agent  # type: ignore
@@ -37,8 +33,10 @@ def make_intent_classifier_agent(llm: Optional[Any] = None) -> Agent:
     return Agent(
         role="Intent Classifier",
         goal=(
-            "ユーザーの発話を INGEST / ANALYZE_SUMMARY / ANALYZE_DASHBOARD / "
+            "ユーザーの発話を ANALYZE_SUMMARY / ANALYZE_DASHBOARD / "
             "KNOWLEDGE_RAG / CHITCHAT / UNKNOWN のいずれかに分類する。"
+            "S3 取り込み・Iceberg 投入依頼は UNKNOWN + needs_clarification で "
+            "別プロジェクト案内を clarification_prompt に書く。"
             "KNOWLEDGE_RAG は Neo4j グラフ探索 / OpenSearch 検索 / Lakehouse SQL "
             "などナレッジ横断質問 (設計書・障害・用語説明・複合検索)。"
             "代名詞 (『そのテーブル』『さっきのダッシュボード』等) が現れたら "
@@ -69,7 +67,6 @@ def make_dispatcher_agent(llm: Optional[Any] = None) -> Agent:
         role="Dispatcher",
         goal=(
             "IntentClassification の結果を DispatchPlan に変換する。"
-            "INGEST なら child_crew='ingestion' + inputs={bucket, key, target_schema}、"
             "ANALYZE_SUMMARY なら 'analytics_summary'、"
             "ANALYZE_DASHBOARD なら 'analytics_dashboard'、"
             "KNOWLEDGE_RAG なら 'knowledge_rag' + inputs={question}、"
@@ -84,7 +81,7 @@ def make_dispatcher_agent(llm: Optional[Any] = None) -> Agent:
             "Python 側の呼び出し口に安全にバトンを渡す。"
         ),
         # 子 Crew の kickoff は Python 側で行うので tools は補助用途 (フォールバック)。
-        tools=[IngestionKickoffTool(), AnalyticsKickoffTool()],
+        tools=[AnalyticsKickoffTool()],
         llm=llm,
         allow_delegation=False,
         verbose=False,

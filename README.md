@@ -1,6 +1,8 @@
 # Solomon
 
-Cloudera AI Agent Studio 上で動作する自然言語データ分析マルチエージェント。ユーザーが日本語 / 英語で問い合わせるだけで **S3 → Iceberg 取り込み / Neo4j グラフDBへのノード・リレーション追加 / OpenSearch インデックス投入 / テーブルサマリー生成 / Cloudera Data Visualization ダッシュボード作成 / ナレッジ横断検索 (Agentic RAG)** を一気通貫に実行する。3 ペイン Web UI (React + Vite) + FastAPI バックエンドを Cloudera AI Workbench Application として配信する。
+Cloudera AI Agent Studio 上で動作する自然言語データ分析マルチエージェント。ユーザーが日本語 / 英語で問い合わせるだけで **投入済み** Lakehouse / グラフ / Semantic Search を横断し、**テーブルサマリー生成 / Cloudera Data Visualization ダッシュボード作成 / ナレッジ横断検索 (Agentic RAG)** を実行する。3 ペイン Web UI (React + Vite) + FastAPI バックエンドを Cloudera AI Workbench Application として配信する。
+
+**S3 → Iceberg / Neo4j / OpenSearch へのデータ取り込み**は別プロジェクトの責務とし、本リポジトリには含めない。
 
 セマンティックレイヤは **Apache Ossie**（YAML 仕様）を採用し、`semantic/` 配下で Git 管理する。
 
@@ -9,8 +11,7 @@ Cloudera AI Agent Studio 上で動作する自然言語データ分析マルチ�
 ```
 solomon/           Python パッケージ (Crew + FastAPI)
   router/       Router Crew (intent 分類 / ディスパッチ)
-  ingestion/    Ingestion Crew (S3 → Iceberg → Neo4j → Ossie → OpenSearch)
-  graph/        Neo4j 接続・グラフ投入・Schema ブラウズ API
+  graph/        Neo4j 接続・Schema ブラウズ API (読み取り)
   opensearch/   外部 OpenSearch (Cloudera Semantic Search) クライアント
   rag/          Agentic RAG (分類 / オーケストレーション / 合成)
   analytics/    Analytics Crew (サマリー / ダッシュボード)
@@ -61,15 +62,9 @@ Solomon は 4 つの Knowledge Source を UI と Agent から共通利用する�
 
 RAG 実行後、Neo4j ヒットがある場合は中央ペインに Graph 可視化タブを自動で開く。
 
-## Neo4j グラフスキーマ
+## Neo4j グラフ
 
-Ingestion 時に以下のノード・リレーションが投入される。
-
-**Labels:** `System`, `Document`, `Dataset`, `Column`, `SourceFile`, `Schema`, `MetadataEntry`
-
-**Relationships:** `OWNS_DATASET`, `HAS_DOCUMENT`, `REFERENCES_DATASET`, `HAS_COLUMN`, `IN_SCHEMA`, `SOURCED_FROM`, `HAS_METADATA`
-
-Graph タブでは `CALL db.labels()` 等でスキーマを取得し、Label / Relationship / Property Key クリックで Cypher を API 側が生成・実行する (フロントエンドに Cypher をハードコードしない)。
+Graph タブでは `CALL db.labels()` 等でスキーマを取得し、Label / Relationship / Property Key クリックで Cypher を API 側が生成・実行する (フロントエンドに Cypher をハードコードしない)。グラフへのデータ投入は別パイプラインが行う前提。
 
 ## 実装ステータス
 
@@ -79,8 +74,7 @@ MVP + Knowledge Source 拡張が `main` に入っている:
 |---|---|
 | `solomon.transport` | Knox JWT / user_context / HTTP client / structlog / `BaseSolomonTool` |
 | `solomon.tools` | S3 / Trino / フォーマット判定 / Excel ヘッダー検出 / CDV / Neo4j Query / OpenSearch / Text2SQL |
-| `solomon.ingestion.IngestionCrew` | S3 → Iceberg → Neo4j → Ossie → OpenSearch の 10 タスク Sequential パイプライン |
-| `solomon.graph` | Neo4j 接続 (CML neo4j-launcher 対応)、グラフ投入、Schema ブラウズ (`browse.py`) |
+| `solomon.graph` | Neo4j 接続 (CML neo4j-launcher 対応)、Schema ブラウズ (`browse.py`) |
 | `solomon.opensearch` | 外部 OpenSearch 接続 (Data Hub Semantic Search)、keyword / vector / hybrid 検索 |
 | `solomon.rag` | Agentic RAG (classifier / orchestrator / synthesizer) |
 | `solomon.analytics.AnalyticsCrew` | Summary パス (2 タスク) + Dashboard パス (4 タスク、VizPlanner + CDV) |
@@ -135,9 +129,11 @@ Deploy 時に Configuration 画面へ表示される Environment Variables (す�
 | `SOLOMON_LOG_LEVEL` | `INFO` | ログレベル |
 | `TRINO_MODE` | `external` | Trino / Tables: CDW Trino / `internal` = warehouse-launcher |
 | `NEO4J_MODE` | `internal` | Neo4j: CML 内 launcher / 外部クラスタ |
-| `NEO4J_USERNAME` | `neo4j` | Neo4j 認証ユーザー (launcher と Solomon が共有) |
-| `NEO4J_PASSWORD` | `Neo4jPass1234` | Neo4j 認証パスワード (本番では必ず変更) |
 | `OPENSEARCH_MODE` | `external` | OpenSearch: Semantic Search / `internal` = launcher |
+
+Neo4j 認証は **Deploy フォームに出さない**。ユーザー名はコード既定 **`neo4j`**、パスワードは既定
+**`Neo4jPass1234`**（本番は **``.solomon/secrets.env``** の ``NEO4J_PASSWORD``）。
+neo4j-launcher も同ファイルを起動時に読む。
 
 launcher のメモリ・PVC 等のチューニングは Deploy フォームには出さない。
 必要な場合のみ Deploy 後に **Project → Settings → Advanced → Environment Variables**
@@ -145,10 +141,26 @@ launcher のメモリ・PVC 等のチューニングは Deploy フォームに�
 
 ## Deploy 後の設定手順 (Post-Deploy Configuration)
 
-**external** を選んだ場合は Deploy 後に **Project → Settings → Advanced →
-Environment Variables** で接続情報を設定する。Trino / S3 は **Site Administration → Data
-Connections** が single source of truth。LLM / CDV も Deploy 後に同画面で設定し、Application を
-再起動して反映する。
+Post-deploy 設定の **正本** はプロジェクト永続領域の **``.solomon/deploy.env``**
+（dotenv 形式）。AMP Deploy 時に ``amp/06_ensure_deploy_env.py`` が、無ければ
+``deploy/deploy.env.example`` から生成する。秘匿だけ **``.solomon/secrets.env``**
+（Git 除外）に分けてもよい。
+
+Application 起動時（``amp/05_start_application.py`` / ``python -m solomon.api.main``）に
+ファイルが ``os.environ`` へマージされる。**Solomon Application を Restart** すると反映される。
+
+| 優先度 | 設定源 |
+|--------|--------|
+| 高 | Project → Settings → Environment Variables（**非空**の値のみ上書き・緊急用） |
+| 中 | ``.solomon/secrets.env`` → ``.solomon/deploy.env``（後者を先に読み、secrets が上書き） |
+| 低 | AMP Configuration 画面の default |
+
+ファイルを常に優先したい場合は ``SOLOMON_DEPLOY_ENV_OVERRIDE=true`` を deploy.env に書く
+（``CDSW_*`` 等のプラットフォーム注入キーは除外）。
+
+**external** モードでは Trino / OpenSearch / Neo4j / LLM / CDV を上記ファイルに記載する。
+Trino / S3 の Data Connections は従来どおり **Site Administration** が SSOT の場合あり
+（README 各セクション参照）。ローカル開発は引き続き ``.env``（``.env.example`` 参照）でも可。
 
 未設定のまま UI で該当機能を叩くと、API は HTTP 503 + JSON (`{error_code, message,
 instruction}`) を返し、UI の **SetupGuide カード** が手順を表示する。
@@ -203,7 +215,7 @@ Deploy 時に `NEO4J_MODE` で接続方式を切り替える (デフォルト `i
 | モード | 用途 | 設定 |
 |---|---|---|
 | `internal` (デフォルト) | CML 内部 | `neo4j-launcher` が K8s 上で Neo4j を起動し、`.solomon/neo4j_endpoints.json` を Solomon と共有 |
-| `external` | 外部クラスタ | Deploy フォームで `NEO4J_USERNAME` / `NEO4J_PASSWORD` を設定。Deploy 後に `NEO4J_URI` を Project Settings で設定 |
+| `external` | 外部クラスタ | ``NEO4J_URI`` を ``.solomon/deploy.env`` に設定。パスワード変更は ``secrets.env`` |
 
 **internal (`NEO4J_MODE=internal`)**
 
@@ -214,9 +226,9 @@ Deploy 時に `NEO4J_MODE` で接続方式を切り替える (デフォルト `i
 **external (`NEO4J_MODE=external`)**
 
 - launcher は no-op。外部 Neo4j クラスタへ直接接続
-- Project Settings → Advanced → Environment Variables に接続情報を設定
+- ``.solomon/deploy.env`` に ``NEO4J_URI``、本番パスワードは ``.solomon/secrets.env``
 
-未設定時は Graph タブ・Ingestion の Neo4j 書込・Agentic RAG の graph 検索が
+未設定時は Graph タブ・Agentic RAG の graph 検索が
 `NEO4J_NOT_CONFIGURED` で停止する。
 
 ### 4. OpenSearch / Semantic Search への接続
@@ -249,9 +261,8 @@ Ingestion 完了後に Ossie dataset が OpenSearch にインデックスされ�
 
 ### 5. LLM プロバイダ (以下いずれか 1 つを選択)
 
-Router 意図分類は post-deploy の **`SOLOMON_ROUTER_MODE`** で切り替える（未設定 = **`heuristic`**）。
-`heuristic` は s3 URI / キーワードのみ。`llm` は Router Crew（要 LLM 設定）。LLM 未構築時は
-heuristic にフォールバック。Log の `router.llm_kickoff` / `router.heuristic` で確認。
+Chat の意図分類は **Router Crew (LLM)** が既定（`/api/wish` は LLM 設定必須）。Crew 失敗時のみ
+規則ベース (`heuristic`) にフォールバック。Log の `router.llm_kickoff` / `router.heuristic` で確認。
 
 | `SOLOMON_LLM_PROVIDER` | 必須 env | 任意 env |
 |---|---|---|
@@ -290,7 +301,7 @@ CDV 未設定でも取り込み・サマリー・RAG はそのまま動作する
 | `GET /api/graph/relationships?type=` | Relationship Type 指定でグラフ取得 |
 | `GET /api/graph/properties?key=` | Property Key 指定でグラフ取得 |
 | `GET /api/graph/neighborhood/{id}` | ノード起点の N-hop 探索 (depth 1–3) |
-| `GET /api/search/documents` | OpenSearch（既定 `scope=inspection` → CDE `inspection-*`） |
+| `GET /api/search/documents` | OpenSearch dataset カタログ (`solomon-datasets`、読み取り専用) |
 | `POST /api/query` | Table Preview 用 SELECT |
 
 ## ライセンス

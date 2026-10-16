@@ -8,13 +8,16 @@ Solomon は Cloudera AI Workbench の AMP として配信される。以下の 3
 
 1. **AMP Configuration 画面** (Deploy フォーム): ``SOLOMON_LOG_LEVEL``、
    ``TRINO_MODE``、``NEO4J_MODE`` / ``OPENSEARCH_MODE``、
-   ``NEO4J_USERNAME`` / ``NEO4J_PASSWORD``。
+   Neo4j 認証は既定 ``neo4j`` / ``Neo4jPass1234``（``NEO4J_PASSWORD`` は
+   ``.solomon/secrets.env`` で上書き可）。
 2. **Cloudera AI Workbench の Data Connections** (Site Administration →
    Data Connections で設定済み): S3 等は ``cml.data_v1`` 経由で取得する。
    **Trino (external)** は Application env のみ（``TRINO_URL`` 等）。
-3. **Post-deploy env** (Project → Settings → Advanced → Environment Variables):
-   LLM プロバイダ、``TRINO_*`` / CDV base URL などは AMP を Deploy
-   した後に Application を再起動する形で反映する。
+3. **Post-deploy env** — 既定はプロジェクト内 ``.solomon/deploy.env`` /
+   ``.solomon/secrets.env`` を Application 起動時に読み込む
+   (:func:`solomon.infra.deploy_env.bootstrap_deploy_env`)。Project Settings
+   の Environment Variables は **非空の値** で上書き可能 (緊急用)。
+   変更後は Application 再起動。
 
 ## 未設定時の挙動
 

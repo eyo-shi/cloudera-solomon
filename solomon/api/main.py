@@ -24,6 +24,10 @@ from solomon.transport.crewai_bootstrap import configure_crewai_runtime
 
 configure_crewai_runtime()
 
+from solomon.infra.deploy_env import bootstrap_deploy_env
+
+bootstrap_deploy_env()
+
 from pathlib import Path
 from typing import Any
 
@@ -148,9 +152,11 @@ def create_app() -> FastAPI:
     configure_logging()
     logger = get_logger("solomon.api")
 
+    from solomon import __version__
+
     app = FastAPI(
         title="Solomon API",
-        version="0.0.1",
+        version=__version__,
         description=(
             "Cloudera AI Agent Studio 上の Genie 相当マルチエージェントの "
             "FastAPI バックエンド。/api/* で Crew と各種メタデータを提供する。"
