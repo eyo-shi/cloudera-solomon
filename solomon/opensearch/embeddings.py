@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from solomon.transport.config import get_llm_config
+from solomon.transport.config import get_llm_role_config
 from solomon.transport.llm_factory import _apply_prefix
 from solomon.transport.logging import get_logger
 
@@ -23,13 +23,13 @@ def try_embed(text: str, *, model: Optional[str] = None) -> list[float] | None:
         _logger.debug("opensearch.embeddings.litellm_not_installed")
         return None
 
-    cfg = get_llm_config()
+    cfg = get_llm_role_config("embedding")
     if cfg is None:
         _logger.debug("opensearch.embeddings.llm_not_configured")
         return None
 
-    resolved = model or os.environ.get("SOLOMON_LLM_EMBEDDING_MODEL", "bge-m3").strip()
-    prefixed = _apply_prefix(cfg.provider, resolved or "bge-m3")
+    resolved = model or cfg.model
+    prefixed = _apply_prefix(cfg.provider, resolved)
 
     kwargs: dict = {"model": prefixed, "input": [text]}
     if cfg.api_base:

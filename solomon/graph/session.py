@@ -1,15 +1,12 @@
-"""Shared Neo4j read session helper (reuse existing config / URI fallback)."""
+"""PuppyGraph read session (Bolt / openCypher)."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from solomon.graph.config import get_neo4j_config
-from solomon.graph.neo4j_connect import (
-    format_neo4j_connection_help,
-    iter_neo4j_connection_uris,
-)
+from solomon.graph.bolt_driver import open_driver
+from solomon.graph.config import get_graph_config
 from solomon.transport.logging import get_logger
 
 _logger = get_logger(__name__)
@@ -17,42 +14,45 @@ _logger = get_logger(__name__)
 T = TypeVar("T")
 
 
-class Neo4jSessionError(Exception):
+class GraphSessionError(Exception):
     def __init__(self, code: str, message: str) -> None:
         self.code = code
         self.message = message
         super().__init__(message)
 
 
-def with_read_session(fn: Callable[[Any], T]) -> T:
-    """Neo4j driver/session を開き fn(session) を実行。接続 URI は既存 fallback を利用。"""
-    config = get_neo4j_config()
-    if config is None:
-        raise Neo4jSessionError("NEO4J_NOT_CONFIGURED", "NEO4J_URI is not configured.")
+def graph_connection_uris(primary_uri: str) -> list[str]:
+    return [primary_uri]
 
-    try:
-        from neo4j import GraphDatabase
-    except ImportError as exc:
-        raise Neo4jSessionError(
-            "NEO4J_CONNECT_FAILED", "neo4j driver is not installed."
-        ) from exc
+
+def with_read_session(fn: Callable[[Any], T]) -> T:
+    config = get_graph_config()
+    if config is None:
+        raise GraphSessionError(
+            "GRAPH_NOT_CONFIGURED",
+            "PUPPYGRAPH_URI is not configured. Set bolt://host:7687 in .solomon/deploy.env.",
+        )
 
     errors: list[str] = []
-    for uri in iter_neo4j_connection_uris(config.uri):
-        driver = GraphDatabase.driver(uri, auth=(config.username, config.password))
+    for uri in graph_connection_uris(config.uri):
+        try:
+            driver = open_driver(uri, username=config.username, password=config.password)
+        except ImportError as exc:
+            raise GraphSessionError("GRAPH_CONNECT_FAILED", str(exc)) from exc
         try:
             driver.verify_connectivity()
             with driver.session() as session:
                 return fn(session)
-        except Neo4jSessionError:
+        except GraphSessionError:
             raise
         except Exception as exc:  # noqa: BLE001
             errors.append(f"  {uri}: {exc}")
-            _logger.debug("neo4j_session.failed", uri=uri, error=str(exc))
+            _logger.debug("graph_session.failed", uri=uri, error=str(exc))
         finally:
             driver.close()
 
-    raise Neo4jSessionError(
-        "NEO4J_CONNECT_FAILED",
-        format_neo4j_connection_help(config.uri, errors),
+    detail = "\n".join(errors) if errors else "(no detail)"
+    raise GraphSessionError(
+        "GRAPH_CONNECT_FAILED",
+        f"Could not connect to PuppyGraph at {config.uri}.\n{detail}",
     )

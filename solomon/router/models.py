@@ -9,11 +9,11 @@ Intent は 5 分類:
 
   * ``ANALYZE_SUMMARY``   — 既存テーブルへの Markdown サマリー要求
   * ``ANALYZE_DASHBOARD`` — 既存テーブルへのダッシュボード生成要求
-  * ``KNOWLEDGE_RAG``     — Agentic RAG (Neo4j / OpenSearch / Lakehouse)
+  * ``KNOWLEDGE_RAG``     — Agentic RAG (PuppyGraph / OpenSearch / Lakehouse)
   * ``CHITCHAT``          — 挨拶・雑談・一般会話 (LLM 応答)
   * ``UNKNOWN``           — 判定不能。needs_clarification=True で聞き返す
 
-データ取り込み (S3 → Iceberg / Neo4j / OpenSearch) は別プロジェクトの責務。
+データ取り込み (S3 → Iceberg / OpenSearch) は別プロジェクトの責務。
 取り込み依頼は heuristic / clarify で案内する。
 """
 from __future__ import annotations

@@ -47,7 +47,6 @@ from solomon.router import DispatchPlan, RouterResult, kickoff_router
 from solomon.router.crew import build_chitchat_plan
 from solomon.transport.errors import ErrorCode
 from solomon.api.setup_checks import llm_not_configured_payload
-from solomon.transport.llm_factory import build_llm_pair
 from solomon.transport.logging import get_logger
 from solomon.transport.user_context import (
     UserContext,
@@ -95,8 +94,6 @@ async def post_wish(
     # LLM は毎リクエストで env 経由に再解決する (env 変更 → Application 再起動で反映)。
     # 未設定は上の 503 で弾いているのでここで None にはならない想定だが、
     # crewai / litellm のインストール失敗等でファクトリが None を返す可能性は残る。
-    llm_light, llm_strong = build_llm_pair()
-
     async def stream() -> AsyncIterator[dict]:
         artifacts_created: list[str] = []
         response_md_parts: list[str] = []
@@ -118,7 +115,7 @@ async def post_wish(
                 session_id=session.session_id,
                 entity_memory=dict(session.entity_memory),
                 target_schema_override=body.target_schema,
-                llm_light=llm_light,
+                llm_light=None,
             )
             intent = router_result.classification.intent
             yield sse_step("RouterCrew", "done", f"intent={intent}")
@@ -147,8 +144,8 @@ async def post_wish(
                     turn_id=turn_id,
                     fq_table_name=str(plan.inputs.get("fq_table_name", "")),
                     question=str(plan.inputs.get("question") or body.prompt),
-                    llm_light=llm_light,
-                    llm_strong=llm_strong,
+                    llm_light=None,
+                    llm_strong=None,
                     artifacts_created=artifacts_created,
                     response_md_parts=response_md_parts,
                     error_holder=error_holder,
@@ -162,8 +159,8 @@ async def post_wish(
                     turn_id=turn_id,
                     fq_table_name=str(plan.inputs.get("fq_table_name", "")),
                     question=str(plan.inputs.get("question") or body.prompt),
-                    llm_light=llm_light,
-                    llm_strong=llm_strong,
+                    llm_light=None,
+                    llm_strong=None,
                     artifacts_created=artifacts_created,
                     response_md_parts=response_md_parts,
                     error_holder=error_holder,
@@ -175,7 +172,6 @@ async def post_wish(
                     user_ctx=user_ctx,
                     session_id=session.session_id,
                     question=str(plan.inputs.get("question") or body.prompt),
-                    llm_strong=llm_strong,
                     artifacts_created=artifacts_created,
                     response_md_parts=response_md_parts,
                     error_holder=error_holder,
@@ -455,7 +451,6 @@ async def _handle_knowledge_rag(
     user_ctx: UserContext,
     session_id: str,
     question: str,
-    llm_strong: Optional[Any],
     artifacts_created: list[str],
     response_md_parts: list[str],
     error_holder: list[Optional[str]],
@@ -479,7 +474,6 @@ async def _handle_knowledge_rag(
         return kickoff_knowledge_rag(
             user_ctx=scoped_ctx,
             prompt=question,
-            llm_strong=llm_strong,
         )
 
     task = asyncio.create_task(asyncio.to_thread(_run))
@@ -514,8 +508,8 @@ async def _handle_knowledge_rag(
         yield sse_token(md)
 
     hits = result.get("hits") or []
-    neo4j_hits = [h for h in hits if h.get("source") == "neo4j"]
-    if neo4j_hits or strategy in ("GRAPH_QUERY", "COMPOSITE"):
+    graph_hits = [h for h in hits if h.get("source") == "graph"]
+    if graph_hits or strategy in ("GRAPH_QUERY", "COMPOSITE"):
         entity_hint = _graph_entity_hint_from_rag(result, question)
         if entity_hint is not None:
             try:
@@ -551,7 +545,7 @@ async def _handle_knowledge_rag(
 def _graph_entity_hint_from_rag(result: dict, question: str) -> str | None:
     """RAG 結果から Graph 可視化用 entity_hint を推定する。"""
     for hit in result.get("hits") or []:
-        if hit.get("source") != "neo4j":
+        if hit.get("source") != "graph":
             continue
         payload = hit.get("payload") or {}
         for record in payload.get("records") or []:

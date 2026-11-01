@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "solomon"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cloudera AI Agent Studio 上で動作する Solomon マルチエージェント (Router + Agentic RAG + Analytics) と、React + FastAPI ベースの 3 ペイン UI。"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -439,6 +439,31 @@ tools:
     - candidates
     title: ExcelHeaderValidateArgs
     type: object
+- name: graph_cypher_query
+  class_path: solomon.tools.graph_cypher_query.GraphCypherQueryTool
+  description: 'Tool Name: graph_cypher_query
+
+    Tool Arguments: {''cypher'': {''description'': ''Read-only openCypher (MATCH ... RETURN ...)'', ''type'': ''str''}, ''params'':
+    {''description'': ''Cypher parameters'', ''type'': ''dict[str, Any]''}}
+
+    Tool Description: Run read-only openCypher against PuppyGraph (Lakehouse/RDB-backed graph) for lineage and relationship
+    traversals. Mutations are rejected.'
+  requires_auth: false
+  args_schema:
+    properties:
+      cypher:
+        description: Read-only openCypher (MATCH ... RETURN ...)
+        title: Cypher
+        type: string
+      params:
+        additionalProperties: true
+        description: Cypher parameters
+        title: Params
+        type: object
+    required:
+    - cypher
+    title: GraphCypherQueryArgs
+    type: object
 - name: iceberg_create_table
   class_path: solomon.tools.iceberg.IcebergCreateTableTool
   description: 'Tool Name: iceberg_create_table
@@ -615,31 +640,6 @@ tools:
     required:
     - source_hint
     title: NameProposerArgs
-    type: object
-- name: neo4j_graph_query
-  class_path: solomon.tools.neo4j_query.Neo4jGraphQueryTool
-  description: 'Tool Name: neo4j_graph_query
-
-    Tool Arguments: {''cypher'': {''description'': ''Read-only Cypher (MATCH ... RETURN ...)'', ''type'': ''str''}, ''params'':
-    {''description'': ''Cypher parameters'', ''type'': ''dict[str, Any]''}}
-
-    Tool Description: Run a read-only Cypher query against Neo4j to explore datasets, columns, source files, and relationships
-    (lineage). Mutations are rejected.'
-  requires_auth: false
-  args_schema:
-    properties:
-      cypher:
-        description: Read-only Cypher (MATCH ... RETURN ...)
-        title: Cypher
-        type: string
-      params:
-        additionalProperties: true
-        description: Cypher parameters
-        title: Params
-        type: object
-    required:
-    - cypher
-    title: Neo4jGraphQueryArgs
     type: object
 - name: opensearch_hybrid_search
   class_path: solomon.tools.opensearch.OpenSearchHybridSearchTool

@@ -1,8 +1,4 @@
-"""Shared Neo4j Bolt endpoints written by neo4j-launcher for Solomon.
-
-CML Workbench Applications often cannot resolve in-cluster DNS. The launcher
-(has Kubernetes API access) writes ClusterIP / Pod IP here; Solomon reads it.
-"""
+"""Bolt endpoints for co-located PuppyGraph (optional internal launcher)."""
 
 from __future__ import annotations
 
@@ -13,7 +9,7 @@ from typing import Any
 
 from solomon.infra.env_compat import env_first
 
-_ENDPOINTS_REL = Path(".solomon") / "neo4j_endpoints.json"
+_ENDPOINTS_REL = Path(".solomon") / "puppygraph_endpoints.json"
 
 
 def _project_dir() -> Path:
@@ -25,14 +21,15 @@ def _project_dir() -> Path:
 
 
 def endpoints_file_path() -> Path:
-    override = (env_first("NEO4J_ENDPOINTS_FILE", "SOLOMON_NEO4J_ENDPOINTS_FILE") or "").strip()
+    override = (
+        env_first("PUPPYGRAPH_ENDPOINTS_FILE", "SOLOMON_PUPPYGRAPH_ENDPOINTS_FILE") or ""
+    ).strip()
     if override:
         return Path(override)
     return _project_dir() / _ENDPOINTS_REL
 
 
 def write_endpoints(payload: dict[str, Any]) -> Path:
-    """Persist bolt hosts for other project workloads (Solomon Application)."""
     path = endpoints_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -40,7 +37,6 @@ def write_endpoints(payload: dict[str, Any]) -> Path:
 
 
 def load_bolt_uris() -> list[str]:
-    """Return bolt:// URIs from the shared endpoints file, if present."""
     path = endpoints_file_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -60,8 +56,18 @@ def load_bolt_uris() -> list[str]:
         uris.append(text)
 
     for host in data.get("bolt_hosts") or []:
-        if isinstance(host, str) and host.strip():
-            add_uri(f"bolt://{host.strip()}:7687")
+        if not isinstance(host, str):
+            continue
+        text = host.strip()
+        if not text:
+            continue
+        if "://" in text:
+            add_uri(text)
+        elif ":" in text:
+            add_uri(f"bolt://{text}")
+        else:
+            add_uri(f"bolt://{text}:7687")
     add_uri(data.get("internal_bolt") if isinstance(data.get("internal_bolt"), str) else None)
     add_uri(data.get("external_bolt") if isinstance(data.get("external_bolt"), str) else None)
+    add_uri(data.get("bolt_uri") if isinstance(data.get("bolt_uri"), str) else None)
     return uris

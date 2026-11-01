@@ -196,10 +196,31 @@ def _verify_static_out() -> bool:
     return False
 
 
+def _skip_ui_build_requested() -> bool:
+    raw = (os.getenv("SOLOMON_SKIP_UI_BUILD") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def main() -> int:
     if not UI_DIR.exists():
         print(f"[amp:02] {UI_DIR} が見つからない", file=sys.stderr, flush=True)
         return 1
+
+    if _skip_ui_build_requested():
+        if _verify_static_out():
+            print(
+                "[amp:02] SOLOMON_SKIP_UI_BUILD=true — using existing solomon/api/static/",
+                flush=True,
+            )
+            return 0
+        print(
+            "[amp:02] SOLOMON_SKIP_UI_BUILD=true but solomon/api/static/ is missing. "
+            "Build UI in a connected zone (npm ci && npm run build) and copy static/ "
+            "into the project before AMP Deploy.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 6
 
     env = _ensure_node_env({**os.environ, "CI": "1"})
     if env is None:

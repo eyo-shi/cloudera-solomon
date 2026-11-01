@@ -42,7 +42,7 @@ def make_classify_intent_task(agent: Any) -> Task:
             "3) 発話に『ダッシュボード』『可視化』『グラフを作って』等が"
             "含まれれば intent='ANALYZE_DASHBOARD'。同様に fq_table_name "
             "を entity_memory で解決する。\n"
-            "4) Neo4j / OpenSearch / 設計書・用語・障害などナレッジ横断質問は "
+            "4) PuppyGraph / OpenSearch / 設計書・用語・障害などナレッジ横断質問は "
             "intent='KNOWLEDGE_RAG'。\n"
             "5) 挨拶・ヘルプ要求・意図不明な雑談は intent='CHITCHAT'。\n"
             "6) 上記いずれにも当てはまらないが情報が足りない場合は "

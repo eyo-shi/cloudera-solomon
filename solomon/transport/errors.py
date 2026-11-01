@@ -10,7 +10,7 @@ LLM 再試行ループを暴走させない。エラーコードは 7 プレフ�
     PERM_*    権限不足 (CREATE / SELECT など)
     CDV_*     Cloudera Data Visualization
     OSSIE_*   Apache Ossie YAML
-    NEO4J_*       Neo4j graph database
+    GRAPH_*       PuppyGraph (openCypher / Bolt)
     OPENSEARCH_*  Cloudera Semantic Search (external OpenSearch)
 
 `Dispatcher` はコード別にユーザー向け日本語メッセージに変換する。
@@ -72,12 +72,10 @@ class ErrorCode:
     HTTP_UNAVAILABLE = "HTTP_UNAVAILABLE"
     AUTH_MISSING = "AUTH_MISSING"
 
-    # Neo4j
-    #: Neo4j Launcher / NEO4J_URI が未設定。UI に SetupGuide を出させる。
-    NEO4J_NOT_CONFIGURED = "NEO4J_NOT_CONFIGURED"
-    NEO4J_CONNECT_FAILED = "NEO4J_CONNECT_FAILED"
-    NEO4J_LOAD_FAILED = "NEO4J_LOAD_FAILED"
-    NEO4J_QUERY_FAILED = "NEO4J_QUERY_FAILED"
+    # PuppyGraph (graph)
+    GRAPH_NOT_CONFIGURED = "GRAPH_NOT_CONFIGURED"
+    GRAPH_CONNECT_FAILED = "GRAPH_CONNECT_FAILED"
+    GRAPH_QUERY_FAILED = "GRAPH_QUERY_FAILED"
 
     # OpenSearch (Cloudera Semantic Search on Data Hub — external)
     #: Data Hub OpenSearch / Data Connection / env が未設定。UI に SetupGuide を出させる。

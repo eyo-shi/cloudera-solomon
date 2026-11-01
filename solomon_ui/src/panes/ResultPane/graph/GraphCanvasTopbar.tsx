@@ -1,5 +1,5 @@
 /**
- * Graph 表示エリア右上 — Search / Download / Details (Neo4j Browser 風)。
+ * Graph 表示エリア右上 — Search / Download / Details。
  */
 import { useEffect, useRef } from "react";
 import type { GraphCanvasHandle } from "./GraphCanvas";

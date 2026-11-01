@@ -24,5 +24,14 @@ Deploy 時間短縮のため、本番 Python 依存はカスタム Runtime イ�
 | `requirements-runtime.txt` | Runtime に bake する pip 依存 (pyproject.toml と同期) |
 | `Dockerfile.solomon-runtime` | Cloudera PBJ Workbench Python 3.12 ベースの拡張 Dockerfile |
 
+PuppyGraph / OpenSearch / Trino **サーバー**は Runtime に含めない。internal launcher が
+K8s 上で **別コンテナイメージ**（既定 `puppygraph/puppygraph:1.15.0` 等）を pull する。
+Air-gap では `PUPPYGRAPH_IMAGE` を private registry に向ける（[docs/airgap_amp.md](../docs/airgap_amp.md)）。
+
 ビルド後、Runtime Catalog に登録し `.project-metadata.yaml` の `edition: Solomon Edition`
 を指定する。Deploy 時 Step 1 は `pip install -e . --no-deps` のみ。
+
+### Air-gap Deploy
+
+Outbound なしで AMP を通す手順（Runtime mirror、UI static 同梱、`SOLOMON_SKIP_UI_BUILD`、
+launcher 用 `*_IMAGE`）は [docs/airgap_amp.md](../docs/airgap_amp.md) を参照。

@@ -69,8 +69,14 @@ def build_router_crew(
     :param memory: Crew.ai の Chroma 短期メモリ。Solomon は session
         ``entity_memory`` を自前管理するため default False。
     """
-    classifier = make_intent_classifier_agent(llm=llm_light)
-    dispatcher = make_dispatcher_agent(llm=llm_light)
+    from solomon.transport.llm_factory import build_llm_for_agent
+
+    classifier = make_intent_classifier_agent(
+        llm=llm_light or build_llm_for_agent("intent_classifier")
+    )
+    dispatcher = make_dispatcher_agent(
+        llm=llm_light or build_llm_for_agent("dispatcher")
+    )
 
     t_classify = make_classify_intent_task(classifier)
     t_dispatch = make_dispatch_task(dispatcher, context=[t_classify])
@@ -106,7 +112,7 @@ _TASK_KEYWORDS = _SUMMARY_KEYWORDS + _DASHBOARD_KEYWORDS
 _PRONOUN_KEYWORDS = ("その", "そのテーブル", "さっき", "先ほど", "that", "the same")
 
 _DATA_INGEST_OUT_OF_SCOPE_MSG = (
-    "データの取り込み（Storage → Iceberg / Neo4j / OpenSearch）は "
+    "データの取り込み（Storage → Iceberg / OpenSearch）は "
     "別プロジェクトで実行してください。Solomon では投入済みデータに対する "
     "ナレッジ検索・テーブル分析・ダッシュボード作成を行えます。"
 )
@@ -384,7 +390,7 @@ def kickoff_router(
     sid = session_id or user_ctx.session_id or "unknown"
     entity_memory = entity_memory or {}
 
-    if resolved_mode == "heuristic" or llm_light is None:
+    if resolved_mode == "heuristic":
         _logger.info(
             "router.heuristic",
             user=user_ctx.user_name,
@@ -399,10 +405,29 @@ def kickoff_router(
             response_markdown=plan.response_markdown,
         )
 
+    from solomon.transport.llm_factory import build_llm_for_agent
+
+    effective_llm = llm_light or build_llm_for_agent("intent_classifier")
+    if effective_llm is None:
+        _logger.info(
+            "router.heuristic",
+            user=user_ctx.user_name,
+            session_id=sid,
+            prompt_len=len(prompt),
+            reason="llm_not_configured",
+        )
+        classification = heuristic_classify(prompt, entity_memory)
+        plan = build_dispatch_plan(classification)
+        return RouterResult(
+            classification=classification,
+            plan=plan,
+            response_markdown=plan.response_markdown,
+        )
+
     # LLM 経路
     token = set_user_context(user_ctx)
     try:
-        crew = build_router_crew(llm_light=llm_light, memory=False)
+        crew = build_router_crew(llm_light=effective_llm, memory=False)
         _logger.info(
             "router.llm_kickoff",
             user=user_ctx.user_name,

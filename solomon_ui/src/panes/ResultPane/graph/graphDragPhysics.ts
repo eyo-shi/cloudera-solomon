@@ -1,5 +1,5 @@
 /**
- * ノードドラッグ時に近接ノードも連動して動く — Neo4j Browser 風の軽量 force シミュレーション。
+ * ノードドラッグ時に近接ノードも連動して動く — 軽量 force シミュレーション。
  */
 import type { Core, EventObject } from "cytoscape";
 

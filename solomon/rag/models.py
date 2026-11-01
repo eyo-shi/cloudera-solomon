@@ -33,7 +33,7 @@ class RetrievalPlan(BaseModel):
 class SourceHit(BaseModel):
     """1 つの Knowledge Source からのヒット。"""
 
-    source: Literal["neo4j", "opensearch", "lakehouse", "ossie"]
+    source: Literal["graph", "opensearch", "lakehouse", "ossie"]
     kind: str
     score: Optional[float] = None
     payload: dict[str, Any] = Field(default_factory=dict)

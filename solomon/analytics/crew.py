@@ -80,8 +80,14 @@ def build_analytics_summary_crew(
     :param llm_strong: 精度重視モデル (SummaryWriter)。
     :param memory: Crew.ai の Chroma 短期メモリ (Solomon では default False)。
     """
-    inspector = make_table_inspector_agent(llm=llm_light)
-    writer = make_summary_writer_agent(llm=llm_strong)
+    from solomon.transport.llm_factory import build_llm_for_agent
+
+    inspector = make_table_inspector_agent(
+        llm=llm_light or build_llm_for_agent("table_inspector")
+    )
+    writer = make_summary_writer_agent(
+        llm=llm_strong or build_llm_for_agent("summary_writer")
+    )
 
     t_inspect = make_inspect_table_task(inspector)
     # guardrail は crewai の Task 属性で設定 (setattr で保険)
@@ -228,9 +234,17 @@ def build_analytics_dashboard_crew(
         誤らないため強めのモデル推奨)。
     :param memory: Crew.ai の Chroma 短期メモリ (Solomon では default False)。
     """
-    inspector = make_table_inspector_agent(llm=llm_light)
-    planner = make_viz_planner_agent(llm=llm_light)
-    builder = make_dashboard_builder_agent(llm=llm_strong)
+    from solomon.transport.llm_factory import build_llm_for_agent
+
+    inspector = make_table_inspector_agent(
+        llm=llm_light or build_llm_for_agent("table_inspector")
+    )
+    planner = make_viz_planner_agent(
+        llm=llm_light or build_llm_for_agent("viz_planner")
+    )
+    builder = make_dashboard_builder_agent(
+        llm=llm_strong or build_llm_for_agent("dashboard_builder")
+    )
 
     t_inspect = make_inspect_table_task(inspector)
     setattr(t_inspect, "guardrail", inspect_table_guardrail)

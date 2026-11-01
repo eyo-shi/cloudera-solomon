@@ -27,10 +27,10 @@ def kickoff_knowledge_rag(
     """Agentic RAG パイプラインを 1 回実行する。
 
     1. Knowledge Router — 質問を RetrievalStrategy に分類
-    2. Composite Retrieval — Neo4j / OpenSearch / Lakehouse を実行
+    2. Composite Retrieval — PuppyGraph / OpenSearch / Lakehouse を実行
     3. Synthesizer — 検索結果を Markdown 回答に統合
 
-    データ投入（Iceberg / Neo4j / OpenSearch インデックス作成）は別システムが担当する。
+    データ投入（Iceberg / OpenSearch / PuppyGraph schema）は別システムが担当する。
     本パッケージは接続済み Knowledge Source への **読み取り・横断検索** のみ行う。
     """
     _ = llm_strong

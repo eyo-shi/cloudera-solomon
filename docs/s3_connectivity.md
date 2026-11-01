@@ -36,7 +36,7 @@ SOLOMON_S3_ENDPOINT_URL=https://...
 
 | シナリオ | S3 |
 |----------|-----|
-| 事前投入済み **Trino / Neo4j / OpenSearch** だけ見せる QA | **不要**（Storage・取り込みチャットを使わない） |
+| 事前投入済み **Trino / PuppyGraph / OpenSearch** だけ見せる QA | **不要**（Storage・取り込みチャットを使わない） |
 | **Storage** タブで Bronze パスを見せる | **必要**（上記 env + ユーザーに S3 読取権限） |
 | チャットから **取り込み** | **必要** |
 

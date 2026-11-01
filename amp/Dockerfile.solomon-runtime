@@ -21,7 +21,7 @@
 #
 # Apple Silicon (M1/M2/M3/M4/M5 等) Mac では --platform=linux/amd64 が必須。
 # Cloudera AI の Runtime は amd64 Linux のため、arm64 イメージは使えない。
-# エミュレーション経由のビルドは時間がかかる (30分〜1時間+) ので、
+# エミュレーション経由のビルドは時間がかかる (30分〜1時間+) のので、
 # 可能なら Linux CI / Cloudera 環境上での build を推奨。
 #
 # buildx 利用例:
@@ -35,6 +35,9 @@
 # --build-arg BASE_IMAGE=... で上書き可能。
 #
 # 登録: Site Administration → Runtime Catalog → Add Runtime → Validate
+#
+# PuppyGraph / OpenSearch / Trino サーバーは Runtime に含めない (internal launcher が
+# 別コンテナイメージを K8s pull)。Bolt クライアント neo4j は requirements-runtime.txt。
 
 # repo-assembly.json (2026.08.1-b5) — タグに -b5 サフィックスが必要
 # TARGETPLATFORM は `docker build --platform=linux/amd64` で自動設定される
@@ -68,7 +71,7 @@ RUN /bin/bash -c "echo -e '[install]\nuser = true'" > /etc/pip.conf
 ENV ML_RUNTIME_EDITION="Solomon Edition" \
     ML_RUNTIME_SHORT_VERSION="1.0" \
     ML_RUNTIME_MAINTENANCE_VERSION="1" \
-    ML_RUNTIME_DESCRIPTION="Solomon AMP: crewai, neo4j, opensearch, fastapi, nodejs 20 pre-installed"
+    ML_RUNTIME_DESCRIPTION="Solomon AMP: crewai, bolt driver, opensearch-py, fastapi, nodejs 20 pre-installed"
 
 ENV ML_RUNTIME_FULL_VERSION="${ML_RUNTIME_SHORT_VERSION}.${ML_RUNTIME_MAINTENANCE_VERSION}"
 

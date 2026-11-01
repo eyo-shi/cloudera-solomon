@@ -122,30 +122,30 @@ function guideFor(errorCode: string): GuideDetails {
           "Application を Restart",
         ],
       };
-    case "NEO4J_NOT_CONFIGURED":
+    case "GRAPH_NOT_CONFIGURED":
       return {
-        title: "Neo4j への接続情報が未設定です",
+        title: "PuppyGraph への接続情報が未設定です",
         envList: [
           {
-            name: "NEO4J_MODE",
-            hint: "internal = neo4j-launcher (CML 内部) / external = 外部 Neo4j クラスタ",
+            name: "PUPPYGRAPH_MODE",
+            hint: "internal (既定) = endpoints file / external = 外部 PuppyGraph",
           },
           {
-            name: "NEO4J_URI",
-            hint: "external モード: 外部 Bolt URI。internal で DNS 不通時は launcher Log の URI",
+            name: "PUPPYGRAPH_URI",
+            hint: "Bolt URI (7687)。Iceberg/PostgreSQL catalog と graph schema は PuppyGraph 側",
           },
           {
-            name: "NEO4J_PASSWORD",
-            hint: "任意。.solomon/secrets.env（未設定時 neo4j / Neo4jPass1234）",
+            name: "PUPPYGRAPH_USERNAME",
+            hint: "任意（既定 puppygraph）",
           },
           {
-            name: "NEO4J_EXTERNAL_URI",
-            hint: "internal モードで Internal DNS が失敗する場合の ELB URI (任意)",
+            name: "PUPPYGRAPH_PASSWORD",
+            hint: "任意。.solomon/secrets.env 推奨",
           },
         ],
         extraSteps: [
-          "internal: Applications で neo4j-launcher が Running か確認し .solomon/neo4j_endpoints.json を待つ",
-          "external: .solomon/deploy.env に NEO4J_URI、secrets.env に NEO4J_PASSWORD（任意）",
+          "internal: puppygraph-launcher が running になるまで待つ",
+          ".solomon/puppygraph_endpoints.json を確認（または deploy.env に PUPPYGRAPH_URI）",
           "Solomon Application を Restart",
         ],
       };

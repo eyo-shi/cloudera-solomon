@@ -36,7 +36,7 @@ def _heuristic_markdown(bundle: RetrievalBundle) -> str:
 
     for hit in bundle.hits[:10]:
         lines.append(f"### {hit.source} / {hit.kind}")
-        if hit.source == "neo4j":
+        if hit.source == "graph":
             for rec in hit.payload.get("records", [])[:5]:
                 lines.append(f"- `{rec}`")
         elif hit.source == "lakehouse":
@@ -66,10 +66,11 @@ def synthesize_answer(bundle: RetrievalBundle) -> KnowledgeRagResult:
     llm_out = try_json_completion(
         (
             "You are a data catalog assistant. Using ONLY the retrieval results below, "
-            "write a concise Japanese Markdown answer. Cite sources (neo4j/opensearch/lakehouse).\n\n"
+            "write a concise Japanese Markdown answer. Cite sources (graph/opensearch/lakehouse).\n\n"
             f"{context}\n\n"
             'Return JSON: {"answer_markdown": "## ..."}'
         ),
+        agent_key="rag_synthesis",
         max_tokens=1024,
         temperature=0.2,
     )

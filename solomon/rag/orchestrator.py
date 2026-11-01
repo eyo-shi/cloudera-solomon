@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from solomon.rag.models import RetrievalBundle, RetrievalPlan, SourceHit
 from solomon.semantic.store import search_datasets
-from solomon.tools.neo4j_query import (
+from solomon.tools.graph_cypher_query import (
     query_all_datasets,
     query_dataset_lineage,
     query_system_assets,
@@ -43,7 +43,7 @@ def _append_error(errors: list[dict[str, str]], source: str, message: str) -> No
     errors.append({"source": source, "message": message})
 
 
-def _run_neo4j(plan: RetrievalPlan, hits: list[SourceHit], errors: list[dict[str, str]]) -> None:
+def _run_graph(plan: RetrievalPlan, hits: list[SourceHit], errors: list[dict[str, str]]) -> None:
     hint = plan.entity_hint or plan.query
     if plan.entity_hint or "システム" in plan.query:
         result = query_system_assets(hint)
@@ -52,9 +52,9 @@ def _run_neo4j(plan: RetrievalPlan, hits: list[SourceHit], errors: list[dict[str
     else:
         result = query_dataset_lineage(hint)
     if result.get("status") == "ok":
-        _append_hit(hits, source="neo4j", kind="graph", payload=result)
+        _append_hit(hits, source="graph", kind="graph", payload=result)
     else:
-        _append_error(errors, "neo4j", result.get("message", "neo4j failed"))
+        _append_error(errors, "graph", result.get("message", "graph query failed"))
 
 
 def _run_opensearch_keyword(
@@ -153,7 +153,7 @@ def execute_retrieval(
     has_opensearch = get_opensearch_config() is not None
 
     if strategy == "GRAPH_QUERY":
-        _run_neo4j(plan, hits, errors)
+        _run_graph(plan, hits, errors)
 
     elif strategy == "SQL_ANALYTICS":
         _run_sql(plan, user_ctx, hits, errors)
@@ -171,7 +171,7 @@ def execute_retrieval(
             _run_ossie_fallback(query, hits)
 
     elif strategy == "COMPOSITE":
-        _run_neo4j(plan, hits, errors)
+        _run_graph(plan, hits, errors)
         if has_opensearch:
             _run_opensearch_hybrid(query, hits, errors)
         else:

@@ -1,5 +1,5 @@
 /**
- * Graph (Neo4j) ビュー — Database information 風スキーマブラウザ。
+ * Graph (PuppyGraph) ビュー — Database information 風スキーマブラウザ。
  */
 import { useMemo } from "react";
 import { isSetupGuideError } from "../../api/client";
@@ -71,7 +71,7 @@ export function GraphView({ filter }: GraphViewProps) {
       <div className="explorer-view explorer-view--graph">
         {sectionHead}
         <p className="explorer-placeholder">
-          Neo4j 未設定です。右ペインの設定手順を確認してください。
+          PuppyGraph 未設定です。右ペインの設定手順を確認してください。
         </p>
       </div>
     );

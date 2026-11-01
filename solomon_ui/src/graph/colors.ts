@@ -1,4 +1,4 @@
-/** Neo4j Browser 風ラベル色 — 左ペインと Graph 可視化で共有。 */
+/** Graph ラベル色 — 左ペインと Graph 可視化で共有。 */
 
 const PALETTE = [
   "#A5D6A7",

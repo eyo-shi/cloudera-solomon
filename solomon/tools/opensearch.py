@@ -173,10 +173,10 @@ class OpenSearchHybridSearchTool(BaseSolomonTool):
 class OpenSearchIndexArgs(BaseModel):
     fq_name: str = Field(..., description="catalog.schema.table")
     dataset: dict[str, Any] = Field(..., description="Ossie dataset dict")
-    system_id: Optional[str] = Field(None, description="Neo4j System id")
+    system_id: Optional[str] = Field(None, description="Graph System id")
     documents: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Neo4j Document ノード相当 (id, title, doc_type, path, content_preview)",
+        description="Graph Document ノード相当 (id, title, doc_type, path, content_preview)",
     )
 
 

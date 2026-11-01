@@ -14,8 +14,8 @@ def llm_not_configured_payload() -> dict[str, str] | None:
         "message": "LLM プロバイダが設定されていません。",
         "instruction": (
             "Project → Settings → Advanced → Environment Variables に "
-            "SOLOMON_LLM_PROVIDER (cai / anthropic / openai / bedrock) と、"
-            "選択したプロバイダに必要な API キー / エンドポイントを設定し、"
+            "SOLOMON_LLM_PROVIDER（または SOLOMON_LLM_LIGHT_PROVIDER 等の role 別指定）と、"
+            "各プロバイダに必要な API キー / エンドポイントを設定し、"
             "Application を再起動してください。"
         ),
     }

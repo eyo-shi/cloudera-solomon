@@ -81,7 +81,7 @@ def _render_status_page(info: dict) -> str:
 <title>OpenSearch Launcher</title></head>
 <body>
 <h1>OpenSearch Launcher</h1>
-<p>Internal mode runs OpenSearch plus <strong>OpenSearch Dashboards</strong> (Neo4j Browser 相当の管理 UI)。
+<p>Internal mode runs OpenSearch plus <strong>OpenSearch Dashboards</strong>（クラスタ管理 UI）。
 Status が <code>running</code> になったら <strong>Open OpenSearch Dashboards</strong> を開いてください。</p>
 <table>{''.join(table_rows)}</table>
 </body></html>"""

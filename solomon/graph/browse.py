@@ -1,4 +1,4 @@
-"""Neo4j graph browser service — schema introspection and visualization queries."""
+"""PuppyGraph graph browser — schema introspection and visualization queries."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from solomon.graph.models import (
     GraphSchemaResponse,
     GraphVisualization,
 )
-from solomon.graph.session import Neo4jSessionError, with_read_session
+from solomon.graph.session import GraphSessionError, with_read_session
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _MAX_DEPTH = 3
@@ -178,7 +178,7 @@ def _response(
 
 
 def fetch_schema() -> GraphSchemaResponse:
-    """Neo4j schema (labels / relationship types / property keys) を取得。"""
+    """Graph schema (labels / relationship types / property keys) を取得。"""
 
     def _execute(session: Any) -> GraphSchemaResponse:
         labels = [
@@ -280,7 +280,7 @@ def query_neighborhood(
     limit: int = 100,
 ) -> GraphQueryResponse:
     depth = max(1, min(depth, _MAX_DEPTH))
-    # 可変長パターンの上限は Neo4j でパラメータ化できないため、検証済み depth を直埋めする
+    # 可変長パターンの上限はパラメータ化できないため、検証済み depth を直埋めする
     cypher = f"""
     MATCH (n)
     WHERE coalesce(n.id, elementId(n)) = $node_id
@@ -338,7 +338,7 @@ def visualize_entity_hint(entity_hint: str, limit: int = 100) -> GraphQueryRespo
 
 
 __all__ = [
-    "Neo4jSessionError",
+    "GraphSessionError",
     "fetch_schema",
     "query_by_label",
     "query_by_relationship_type",

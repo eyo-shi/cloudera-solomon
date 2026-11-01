@@ -1,5 +1,5 @@
 /**
- * Graph ワークスペース — 固定クエリバー + 結果スタック (Neo4j Browser 風)。
+ * Graph ワークスペース — 固定クエリバー + 結果スタック。
  */
 import { type FormEvent, useRef, useEffect } from "react";
 import { useGraphStore } from "../../../stores/graphStore";
@@ -40,7 +40,7 @@ export function GraphTab() {
   return (
     <div className="tab-content tab-content--flush tab-content--graph tab-content--graph-workspace">
       <form className="graph-query-bar" onSubmit={onSubmit}>
-        <span className="graph-query-bar__prompt">neo4j$</span>
+        <span className="graph-query-bar__prompt">cypher$</span>
         <input
           className="graph-query-bar__input"
           value={queryInput}

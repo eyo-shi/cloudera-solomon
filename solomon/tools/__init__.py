@@ -18,7 +18,7 @@ Router / CDV / Viz)。
   CDV:        :class:`CDVStartupCheckTool`, :class:`CDVDatasetTool`,
               :class:`CDVVisualTool`, :class:`CDVDashboardTool`
   Viz:        :class:`VizHeuristicTool`
-  Neo4j:      :class:`Neo4jGraphQueryTool` (読み取り専用)
+  Graph:      :class:`GraphCypherQueryTool` (PuppyGraph 読み取り専用)
   OpenSearch: :class:`OpenSearchKeywordSearchTool`, :class:`OpenSearchVectorSearchTool`,
               :class:`OpenSearchHybridSearchTool`, :class:`OpenSearchPingTool`
   RAG:        :class:`Text2SQLTool`
@@ -47,7 +47,7 @@ from solomon.tools.ossie import (
 )
 from solomon.tools.s3 import S3GetRangeTool, S3HeadTool, S3ListTool
 from solomon.tools.schema import NameProposerTool, TypeInferTool
-from solomon.tools.neo4j_query import Neo4jGraphQueryTool
+from solomon.tools.graph_cypher_query import GraphCypherQueryTool
 from solomon.tools.opensearch import (
     OpenSearchHybridSearchTool,
     OpenSearchKeywordSearchTool,
@@ -98,8 +98,8 @@ __all__ = [
     "CDVDashboardTool",
     # viz
     "VizHeuristicTool",
-    # neo4j
-    "Neo4jGraphQueryTool",
+    # graph (PuppyGraph)
+    "GraphCypherQueryTool",
     # opensearch (external Data Hub)
     "OpenSearchKeywordSearchTool",
     "OpenSearchVectorSearchTool",

@@ -1,11 +1,11 @@
-"""Neo4j graph connectivity and browse (read-only)."""
+"""PuppyGraph connectivity and browse (read-only openCypher)."""
 
-from solomon.graph.config import Neo4jConfig, get_neo4j_config
+from solomon.graph.config import GraphBoltConfig, get_graph_config
 from solomon.graph.system import infer_system_name, normalize_system_id
 
 __all__ = [
-    "Neo4jConfig",
-    "get_neo4j_config",
+    "GraphBoltConfig",
+    "get_graph_config",
     "infer_system_name",
     "normalize_system_id",
 ]

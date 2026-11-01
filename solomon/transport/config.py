@@ -7,8 +7,8 @@ Solomon は Cloudera AI Workbench の AMP として配信される。以下の 3
 「cml.data の呼び方」も意識せずに済むようにする。
 
 1. **AMP Configuration 画面** (Deploy フォーム): ``SOLOMON_LOG_LEVEL``、
-   ``TRINO_MODE``、``NEO4J_MODE`` / ``OPENSEARCH_MODE``、
-   Neo4j 認証は既定 ``neo4j`` / ``Neo4jPass1234``（``NEO4J_PASSWORD`` は
+   ``TRINO_MODE``、``PUPPYGRAPH_*`` / ``OPENSEARCH_MODE``、
+   PuppyGraph Bolt は ``PUPPYGRAPH_URI``（``PUPPYGRAPH_PASSWORD`` は
    ``.solomon/secrets.env`` で上書き可）。
 2. **Cloudera AI Workbench の Data Connections** (Site Administration →
    Data Connections で設定済み): S3 等は ``cml.data_v1`` 経由で取得する。
@@ -112,11 +112,10 @@ class S3Config:
 
 @dataclass(frozen=True)
 class LLMConfig:
-    """LLM プロバイダ選択。
+    """後方互換用の集約 LLM 設定 (単一プロバイダ想定)。
 
-    Post-deploy に Project → Settings → Environment で設定される想定。
-    provider ごとに必要な追加 env が異なるので、``build_llm()`` はここから
-    LiteLLM の prefix を組み立てる。
+    新規コードは :class:`LLMRoleConfig` と :func:`get_llm_role_config` /
+    :func:`get_llm_agent_config` を使う。
     """
 
     provider: str  # cai | anthropic | openai | bedrock
@@ -125,8 +124,19 @@ class LLMConfig:
     api_base: Optional[str] = None
     api_key: Optional[str] = None
     aws_region: Optional[str] = None  # bedrock only
-    #: LiteLLM に渡すそのほかの kwargs (temperature 等) — 将来の拡張用
     extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class LLMRoleConfig:
+    """Role / Agent 単位で解決した LLM (provider + model + 認証)。"""
+
+    role: str
+    provider: str
+    model: str
+    api_base: Optional[str] = None
+    api_key: Optional[str] = None
+    aws_region: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -547,33 +557,86 @@ _DEFAULT_STRONG_MODEL: dict[str, str] = {
     "bedrock": "anthropic.claude-sonnet-4-20250514-v1:0",
 }
 
+_DEFAULT_EMBEDDING_MODEL: dict[str, str] = {
+    "cai": "bge-m3",
+    "anthropic": "bge-m3",
+    "openai": "text-embedding-3-small",
+    "bedrock": "amazon.titan-embed-text-v2:0",
+}
 
-def get_llm_config() -> Optional[LLMConfig]:
-    """LLM プロバイダ設定を解決する。
+_LLM_ROLE_NAMES = frozenset({"light", "strong", "embedding"})
 
-    ``SOLOMON_LLM_PROVIDER`` が未設定でも、CAI env
-    (``CAI_INFERENCE_BASE_URL`` + ``CAI_INFERENCE_API_KEY``) が両方揃っていれば
-    ``provider="cai"`` として動く (後方互換)。
+# Agent key -> 既定 role (Agent 専用 env 未設定時)
+AGENT_LLM_DEFAULT_ROLE: dict[str, str] = {
+    "intent_classifier": "light",
+    "dispatcher": "light",
+    "table_inspector": "light",
+    "viz_planner": "light",
+    "summary_writer": "strong",
+    "dashboard_builder": "strong",
+    "rag_synthesis": "strong",
+    "excel_validate": "light",
+}
 
-    provider ごとに必要な env が違うので、揃っていなければ ``None`` を返す
-    (呼び出し側で 503 に落とす)。
-    """
+
+def _resolve_default_llm_provider() -> Optional[str]:
     provider = (_env("SOLOMON_LLM_PROVIDER") or "").lower()
-    if not provider:
-        # 後方互換: CAI env が両方揃っていれば cai
-        if _env("CAI_INFERENCE_BASE_URL") and _env("CAI_INFERENCE_API_KEY"):
-            provider = "cai"
-        else:
-            _logger.debug("llm_config.provider_not_set")
+    if provider:
+        if provider not in _DEFAULT_LIGHT_MODEL:
+            _logger.warning("llm_config.unknown_provider", provider=provider)
             return None
+        return provider
+    if _env("CAI_INFERENCE_BASE_URL") and _env("CAI_INFERENCE_API_KEY"):
+        return "cai"
+    _logger.debug("llm_config.provider_not_set")
+    return None
 
-    if provider not in _DEFAULT_LIGHT_MODEL:
-        _logger.warning("llm_config.unknown_provider", provider=provider)
+
+def _provider_for_role(role: str) -> Optional[str]:
+    role_keys: tuple[str, ...]
+    if role == "light":
+        role_keys = ("SOLOMON_LLM_LIGHT_PROVIDER", "SOLOMON_LLM_ROUTER_PROVIDER")
+    elif role == "strong":
+        role_keys = ("SOLOMON_LLM_STRONG_PROVIDER", "SOLOMON_LLM_ANALYTICS_PROVIDER")
+    elif role == "embedding":
+        role_keys = ("SOLOMON_LLM_EMBEDDING_PROVIDER",)
+    else:
         return None
+    for key in role_keys:
+        raw = (_env(key) or "").lower()
+        if raw:
+            if raw not in _DEFAULT_LIGHT_MODEL:
+                _logger.warning("llm_config.unknown_provider", provider=raw, role=role)
+                return None
+            return raw
+    return _resolve_default_llm_provider()
 
-    model_light = _env("SOLOMON_LLM_ROUTER_MODEL") or _DEFAULT_LIGHT_MODEL[provider]
-    model_strong = _env("SOLOMON_LLM_ANALYTICS_MODEL") or _DEFAULT_STRONG_MODEL[provider]
 
+def _model_for_role(role: str, provider: str) -> str:
+    if role == "light":
+        return (
+            _env("SOLOMON_LLM_ROUTER_MODEL")
+            or _env("SOLOMON_LLM_LIGHT_MODEL")
+            or _DEFAULT_LIGHT_MODEL[provider]
+        )
+    if role == "strong":
+        return (
+            _env("SOLOMON_LLM_ANALYTICS_MODEL")
+            or _env("SOLOMON_LLM_STRONG_MODEL")
+            or _DEFAULT_STRONG_MODEL[provider]
+        )
+    if role == "embedding":
+        return (
+            _env("SOLOMON_LLM_EMBEDDING_MODEL")
+            or _DEFAULT_EMBEDDING_MODEL.get(provider, "bge-m3")
+        )
+    return _DEFAULT_LIGHT_MODEL[provider]
+
+
+def _credentials_for_provider(
+    provider: str,
+) -> tuple[Optional[str], Optional[str], Optional[str]] | None:
+    """Return (api_base, api_key, aws_region) or None if required env missing."""
     api_base: Optional[str] = None
     api_key: Optional[str] = None
     aws_region: Optional[str] = None
@@ -586,29 +649,106 @@ def get_llm_config() -> Optional[LLMConfig]:
             return None
     elif provider == "anthropic":
         api_key = _env("ANTHROPIC_API_KEY")
-        api_base = _env("ANTHROPIC_BASE_URL")  # optional
+        api_base = _env("ANTHROPIC_BASE_URL")
         if not api_key:
             _logger.debug("llm_config.anthropic_key_missing")
             return None
     elif provider == "openai":
         api_key = _env("OPENAI_API_KEY")
-        api_base = _env("OPENAI_BASE_URL")  # optional
+        api_base = _env("OPENAI_BASE_URL")
         if not api_key:
             _logger.debug("llm_config.openai_key_missing")
             return None
     elif provider == "bedrock":
-        aws_region = _env("AWS_REGION")
+        aws_region = _env("AWS_REGION") or _env("SOLOMON_AWS_REGION")
         if not aws_region:
             _logger.debug("llm_config.bedrock_region_missing")
             return None
+    else:
+        return None
 
-    return LLMConfig(
+    return api_base, api_key, aws_region
+
+
+def get_llm_role_config(role: str) -> Optional[LLMRoleConfig]:
+    """Role ごとの provider + model + 認証を解決する。"""
+    if role not in _LLM_ROLE_NAMES:
+        return None
+    provider = _provider_for_role(role)
+    if provider is None:
+        return None
+    creds = _credentials_for_provider(provider)
+    if creds is None:
+        return None
+    api_base, api_key, aws_region = creds
+    return LLMRoleConfig(
+        role=role,
         provider=provider,
-        model_light=model_light,
-        model_strong=model_strong,
+        model=_model_for_role(role, provider),
         api_base=api_base,
         api_key=api_key,
         aws_region=aws_region,
+    )
+
+
+def get_llm_agent_config(agent_key: str) -> Optional[LLMRoleConfig]:
+    """Crew Agent 単位の LLM 設定 (Agent env があれば role より優先)。"""
+    key = (agent_key or "").strip().lower()
+    if not key:
+        return None
+
+    env_prefix = f"SOLOMON_LLM_AGENT_{key.upper()}_"
+    provider_override = (_env(f"{env_prefix}PROVIDER") or "").lower()
+    model_override = _env(f"{env_prefix}MODEL")
+
+    default_role = AGENT_LLM_DEFAULT_ROLE.get(key, "light")
+    base = get_llm_role_config(default_role)
+    if base is None and not provider_override:
+        return None
+
+    provider = provider_override or (base.provider if base else None)
+    if not provider or provider not in _DEFAULT_LIGHT_MODEL:
+        if provider_override:
+            _logger.warning("llm_config.unknown_provider", provider=provider, agent=key)
+        return None
+
+    creds = _credentials_for_provider(provider)
+    if creds is None:
+        return None
+    api_base, api_key, aws_region = creds
+
+    if model_override:
+        model = model_override
+    elif base is not None and provider == base.provider:
+        model = base.model
+    else:
+        model = _model_for_role(default_role, provider)
+
+    return LLMRoleConfig(
+        role=f"agent:{key}",
+        provider=provider,
+        model=model,
+        api_base=api_base,
+        api_key=api_key,
+        aws_region=aws_region,
+    )
+
+
+def get_llm_config() -> Optional[LLMConfig]:
+    """後方互換: light role を基準に集約 ``LLMConfig`` を返す。"""
+    light = get_llm_role_config("light")
+    if light is None:
+        return None
+    strong = get_llm_role_config("strong")
+    if strong is None:
+        return None
+    return LLMConfig(
+        provider=light.provider,
+        model_light=light.model,
+        model_strong=strong.model,
+        api_base=light.api_base,
+        api_key=light.api_key,
+        aws_region=light.aws_region or strong.aws_region,
     )
 
 
@@ -631,11 +771,11 @@ def get_cdv_config() -> Optional[CDVConfig]:
     )
 
 
-def get_neo4j_config():
-    """Neo4j 接続設定を解決する。NEO4J_URI 未設定なら None。"""
-    from solomon.graph.config import get_neo4j_config as _get_neo4j_config
+def get_graph_config():
+    """PuppyGraph Bolt 接続設定。PUPPYGRAPH_URI 未設定なら None。"""
+    from solomon.graph.config import get_graph_config as _get_graph_config
 
-    return _get_neo4j_config()
+    return _get_graph_config()
 
 
 # ------------------------------------------------------------------ #
@@ -833,7 +973,7 @@ def _get_internal_opensearch_config(
     index_env: Optional[str],
     embedding_dim_env: Optional[str],
 ) -> Optional[OpenSearchConfig]:
-    """Internal: co-located opensearch-launcher (Neo4j launcher と同型)."""
+    """Internal: co-located opensearch-launcher."""
     from solomon.opensearch.env import opensearch_env
 
     from solomon.opensearch.env import opensearch_endpoint_url
@@ -897,8 +1037,12 @@ __all__ = [
     "OpenSearchConfig",
     "get_trino_config",
     "get_s3_config",
+    "LLMRoleConfig",
+    "AGENT_LLM_DEFAULT_ROLE",
     "get_llm_config",
+    "get_llm_role_config",
+    "get_llm_agent_config",
     "get_cdv_config",
-    "get_neo4j_config",
+    "get_graph_config",
     "get_opensearch_config",
 ]

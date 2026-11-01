@@ -1,11 +1,11 @@
 name: Solomon
 description: |
-  自然言語の対話を通して、マルチエージェントワークフローを活用し、Lakehouse (Trino + Iceberg)、Neo4j、OpenSearch、S3にまたがるデータのインタラクティブな作成および検索を可能にする Agentic RAG システム。
+  自然言語の対話を通して、マルチエージェントワークフローを活用し、Lakehouse (Trino + Iceberg)、PuppyGraph、OpenSearch、S3にまたがる読み取り専用の Agentic RAG / 分析チャットを提供する。
 
 author: Cloudera
 date: "2026-09-19"
 specification_version: 1.0
-prototype_version: 0.1.0
+prototype_version: 0.2.0
 
 # ---------------------------------------------------------------------------
 # Runtime (Python 3.12)
@@ -18,16 +18,16 @@ runtimes:
 # ---------------------------------------------------------------------------
 # Deploy フォーム (AMP Configuration 画面に表示される Environment Variables)
 #
-# 方針: Deploy 時は MODE 選択のみ (Neo4j 認証は既定 neo4j / Neo4jPass1234、
-# 本番は .solomon/secrets.env の NEO4J_PASSWORD)。Trino / S3 は
+# 方針: Deploy 時は MODE 選択のみ。PuppyGraph Bolt URI は post-deploy の
+# .solomon/deploy.env (PUPPYGRAPH_URI)。Trino / S3 は
 # Site Administration → Data Connections が single source of truth。
 # 接続 URI・launcher チューニング・LLM / CDV は Deploy 後に
 # Project → Settings → Advanced → Environment Variables で設定する。
 #
 # --- Deploy フォームに含めない項目 (post-deploy 参照) ---
 #
-# [external Neo4j] NEO4J_MODE=external のとき:
-#   NEO4J_URI、任意 NEO4J_PASSWORD (.solomon/secrets.env)
+# [PuppyGraph] post-deploy .solomon/deploy.env:
+#   PUPPYGRAPH_URI (bolt://host:7687), catalog/schema は PuppyGraph 側
 #
 # [external OpenSearch] OPENSEARCH_MODE=external のとき:
 #   OPENSEARCH_CONNECTION_NAME または OPENSEARCH_ENDPOINT,
@@ -37,11 +37,11 @@ runtimes:
 #   TRINO_URL または TRINO_HOST 等 (README 参照)
 #
 # [internal モード optional] launcher 既定値で動作。変更する場合のみ post-deploy:
-#   NEO4J_MEMORY (4Gi), NEO4J_USE_PVC (false), NEO4J_SERVICE_TYPE (LoadBalancer),
-#   NEO4J_URI / NEO4J_EXTERNAL_URI (DNS 不通時)
 #   OPENSEARCH_MEMORY (2Gi), OPENSEARCH_USE_PVC (false),
 #   OPENSEARCH_ENDPOINT (DNS 不通時)
 #   TRINO_MEMORY (2Gi), TRINO_USE_PVC (false), TRINO_ENDPOINT (DNS 不通時)
+#   PUPPYGRAPH_IMAGE (mirror), PUPPYGRAPH_MEMORY (8Gi), PUPPYGRAPH_USE_PVC (false),
+#   PUPPYGRAPH_URI (DNS 不通時)
 #
 # [その他 post-deploy] LLM, S3 上書き, CDV — README「Deploy 後の設定手順」参照
 # ---------------------------------------------------------------------------
@@ -50,11 +50,11 @@ environment_variables:
     default: "INFO"
     description: ログレベル (DEBUG / INFO / WARNING / ERROR)。通常は変更不要。
     required: false
-  NEO4J_MODE:
+  PUPPYGRAPH_MODE:
     default: "internal"
     description: >-
-      Neo4j 接続方式。internal = neo4j-launcher が CML 内で起動 (推奨・デフォルト)。
-      external = 外部 Neo4j — Deploy 後に Project Settings で NEO4J_URI を設定。
+      PuppyGraph 接続方式。internal (デフォルト) = puppygraph-launcher が CML 内で起動。
+      external = 外部 PuppyGraph — Deploy 後に .solomon/deploy.env で PUPPYGRAPH_URI を設定。
     required: false
   OPENSEARCH_MODE:
     default: "external"
@@ -87,8 +87,9 @@ tasks:
     short_summary: pip install -e . --no-deps で solomon パッケージのみ editable install
     long_summary: >-
       Solomon Edition カスタム Runtime に bake 済みの依存 (crewai, boto3, trino,
-      neo4j, FastAPI 等) を使い、solomon 本体だけ pip install -e . --no-deps する。
-      イメージ構築は amp/Dockerfile.solomon-runtime と requirements-runtime.txt 参照。
+      Bolt driver, kubernetes, FastAPI 等) を使い、solomon 本体だけ
+      pip install -e . --no-deps する。イメージ構築は amp/Dockerfile.solomon-runtime
+      と requirements-runtime.txt 参照。
     kernel: python3
     cpu: 2
     memory: 4
@@ -132,23 +133,7 @@ tasks:
     cpu: 1
     memory: 2
 
-  # 5. Neo4j Launcher を Workbench Application として起動
-  - type: start_application
-    name: Neo4j Launcher
-    entity_label: neo4j-launcher
-    subdomain: neo4j-launcher
-    script: 1_start-neo4j/start_neo4j.py
-    short_summary: Launch Neo4j on Kubernetes and expose it externally
-    long_summary: >-
-      java-code-analysis-integrated と同様に Kubernetes 上で Neo4j を起動する。
-      NEO4J_MODE=internal のとき K8s 上で Neo4j を起動し、
-      .solomon/neo4j_endpoints.json を Solomon と共有する。external モードでは
-      supervisor は no-op (外部 Neo4j へ接続)。
-    kernel: python3
-    cpu: 2
-    memory: 8
-
-  # 6. OpenSearch Launcher を Workbench Application として起動 (internal モード用)
+  # 5. OpenSearch Launcher を Workbench Application として起動 (internal モード用)
   - type: start_application
     name: OpenSearch Launcher
     entity_label: opensearch-launcher
@@ -157,7 +142,7 @@ tasks:
     short_summary: Launch OpenSearch + Dashboards on Kubernetes for internal mode
     long_summary: >-
       OPENSEARCH_MODE=internal のとき Kubernetes 上で OpenSearch (k-NN 対応) と
-      OpenSearch Dashboards (Neo4j Browser 相当の管理 UI) を起動し、Launcher URL
+      OpenSearch Dashboards を起動し、Launcher URL
       から /dashboards/ でプロキシ公開する。solomon-datasets インデックスも作成し、
       .solomon/opensearch_endpoints.json を Solomon と共有する。
       external モードでは supervisor は no-op (外部 OpenSearch を使用)。
@@ -165,7 +150,7 @@ tasks:
     cpu: 2
     memory: 6
 
-  # 7. Warehouse Launcher (Trino + DuckDB) — TRINO_MODE=internal
+  # 6. Warehouse Launcher (Trino + DuckDB) — TRINO_MODE=internal
   - type: start_application
     name: Warehouse Launcher
     entity_label: warehouse-launcher
@@ -180,6 +165,22 @@ tasks:
     kernel: python3
     cpu: 2
     memory: 4
+
+  # 7. PuppyGraph Launcher — PUPPYGRAPH_MODE=internal
+  - type: start_application
+    name: PuppyGraph Launcher
+    entity_label: puppygraph-launcher
+    subdomain: puppygraph-launcher
+    script: 1_start-puppygraph/start_puppygraph.py
+    short_summary: Launch PuppyGraph on Kubernetes for internal Graph / openCypher
+    long_summary: >-
+      PUPPYGRAPH_MODE=internal のとき Kubernetes 上で PuppyGraph コンテナ
+      (既定 puppygraph/puppygraph:1.15.0、PUPPYGRAPH_IMAGE で mirror 可) を起動し、
+      .solomon/puppygraph_endpoints.json を Solomon と共有する。external モードでは
+      supervisor は no-op (外部 Bolt を使用)。
+    kernel: python3
+    cpu: 2
+    memory: 10
 
   # 8. Post-deploy env テンプレ (.solomon/deploy.env) — 既存ファイルは上書きしない
   - type: run_session

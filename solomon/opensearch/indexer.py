@@ -157,7 +157,7 @@ def index_graph_documents(
     dataset_id: str,
     documents: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Neo4j Document ノード相当を OpenSearch にも投入する。"""
+    """Graph Document ノード相当を OpenSearch にも投入する。"""
     results: list[dict[str, Any]] = []
     for doc in documents:
         doc_id = str(doc.get("id", ""))

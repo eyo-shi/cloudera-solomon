@@ -2,7 +2,7 @@
 
 Cloudera AI Agent Studio 上で動作する自然言語データ分析マルチエージェント。ユーザーが日本語 / 英語で問い合わせるだけで **投入済み** Lakehouse / グラフ / Semantic Search を横断し、**テーブルサマリー生成 / Cloudera Data Visualization ダッシュボード作成 / ナレッジ横断検索 (Agentic RAG)** を実行する。3 ペイン Web UI (React + Vite) + FastAPI バックエンドを Cloudera AI Workbench Application として配信する。
 
-**S3 → Iceberg / Neo4j / OpenSearch へのデータ取り込み**は別プロジェクトの責務とし、本リポジトリには含めない。
+**S3 → Iceberg / OpenSearch へのデータ取り込み**および **PuppyGraph 上の graph schema 定義**は別プロジェクトの責務とし、本リポジトリには含めない。
 
 セマンティックレイヤは **Apache Ossie**（YAML 仕様）を採用し、`semantic/` 配下で Git 管理する。
 
@@ -11,14 +11,14 @@ Cloudera AI Agent Studio 上で動作する自然言語データ分析マルチ�
 ```
 solomon/           Python パッケージ (Crew + FastAPI)
   router/       Router Crew (intent 分類 / ディスパッチ)
-  graph/        Neo4j 接続・Schema ブラウズ API (読み取り)
+  graph/        PuppyGraph (Bolt/openCypher) ・Schema ブラウズ API (読み取り)
   opensearch/   外部 OpenSearch (Cloudera Semantic Search) クライアント
   rag/          Agentic RAG (分類 / オーケストレーション / 合成)
   analytics/    Analytics Crew (サマリー / ダッシュボード)
   semantic/     Ossie YAML 読み書き / 検索
   session/      セッション、リクエスト、メモリ
   transport/    Knox JWT / HTTP / ロギング共通層
-  tools/        CrewAI Tool 実装 (S3 / Trino / Neo4j / OpenSearch / Text2SQL 等)
+  tools/        CrewAI Tool 実装 (S3 / Trino / Graph Cypher / OpenSearch / Text2SQL 等)
   api/          FastAPI (SSE ストリーム、静的 SPA 配信)
   demo/         デモ用ウォームアップ
 
@@ -44,7 +44,7 @@ Solomon は 4 つの Knowledge Source を UI と Agent から共通利用する�
 |---|---|---|---|
 | **Lakehouse** | Tables | Trino / Iceberg (`/api/catalog/*`) | テーブル・カラム探索、SQL 分析 |
 | **Storage** | Storage | S3 (`/api/files/*`) | 生ファイル探索・プレビュー |
-| **Graph** | Graph | Neo4j (`/api/graph/*`) | リネージ・System/Dataset/Document 関係の探索 |
+| **Graph** | Graph | PuppyGraph (`/api/graph/*`) | リネージ・関係 traversals (openCypher) |
 | **Semantic Search** | Search | OpenSearch (`/api/search/*`) | ベクトル + キーワード検索インデックス |
 
 左ペイン (TreePane) でタブを切り替え、Tables ではテーブル選択 → 中央ペインに Table Preview、Graph では Node Label / Relationship Type / Property Key をクリック → 中央ペインに **Cytoscape** グラフ可視化、Search ではインデックス済みドキュメント一覧を表示する。
@@ -55,16 +55,16 @@ Solomon は 4 つの Knowledge Source を UI と Agent から共通利用する�
 
 | 戦略 | 主なソース |
 |---|---|
-| `GRAPH_QUERY` | Neo4j (System / Dataset / Document / リネージ) |
+| `GRAPH_QUERY` | PuppyGraph (Lakehouse/RDB 上の graph schema) |
 | `SQL_ANALYTICS` | Ossie + OpenSearch コンテキスト → Trino Text2SQL |
 | `KEYWORD` / `HYBRID` | OpenSearch (BM25 / k-NN / RRF) |
 | `COMPOSITE` | 上記の組み合わせ |
 
-RAG 実行後、Neo4j ヒットがある場合は中央ペインに Graph 可視化タブを自動で開く。
+RAG 実行後、graph ヒットがある場合は中央ペインに Graph 可視化タブを自動で開く。
 
-## Neo4j グラフ
+## PuppyGraph
 
-Graph タブでは `CALL db.labels()` 等でスキーマを取得し、Label / Relationship / Property Key クリックで Cypher を API 側が生成・実行する (フロントエンドに Cypher をハードコードしない)。グラフへのデータ投入は別パイプラインが行う前提。
+Graph タブは PuppyGraph の Bolt (7687) に接続し、`CALL db.labels()` 等でスキーマを取得する。Label / Relationship / Property Key クリックで openCypher を API 側が生成・実行する。Iceberg / PostgreSQL 等の catalog と graph schema は **PuppyGraph 側**で管理する。
 
 ## 実装ステータス
 
@@ -73,8 +73,8 @@ MVP + Knowledge Source 拡張が `main` に入っている:
 | モジュール | 内容 |
 |---|---|
 | `solomon.transport` | Knox JWT / user_context / HTTP client / structlog / `BaseSolomonTool` |
-| `solomon.tools` | S3 / Trino / フォーマット判定 / Excel ヘッダー検出 / CDV / Neo4j Query / OpenSearch / Text2SQL |
-| `solomon.graph` | Neo4j 接続 (CML neo4j-launcher 対応)、Schema ブラウズ (`browse.py`) |
+| `solomon.tools` | S3 / Trino / フォーマット判定 / Excel ヘッダー検出 / CDV / Graph Cypher / OpenSearch / Text2SQL |
+| `solomon.graph` | PuppyGraph Bolt 接続、Schema ブラウズ (`browse.py`) |
 | `solomon.opensearch` | 外部 OpenSearch 接続 (Data Hub Semantic Search)、keyword / vector / hybrid 検索 |
 | `solomon.rag` | Agentic RAG (classifier / orchestrator / synthesizer) |
 | `solomon.analytics.AnalyticsCrew` | Summary パス (2 タスク) + Dashboard パス (4 タスク、VizPlanner + CDV) |
@@ -128,16 +128,17 @@ Deploy 時に Configuration 画面へ表示される Environment Variables (す�
 |---|---|---|
 | `SOLOMON_LOG_LEVEL` | `INFO` | ログレベル |
 | `TRINO_MODE` | `external` | Trino / Tables: CDW Trino / `internal` = warehouse-launcher |
-| `NEO4J_MODE` | `internal` | Neo4j: CML 内 launcher / 外部クラスタ |
+| `PUPPYGRAPH_MODE` | `internal` | PuppyGraph: endpoints file / `external` = 外部 Bolt |
 | `OPENSEARCH_MODE` | `external` | OpenSearch: Semantic Search / `internal` = launcher |
 
-Neo4j 認証は **Deploy フォームに出さない**。ユーザー名はコード既定 **`neo4j`**、パスワードは既定
-**`Neo4jPass1234`**（本番は **``.solomon/secrets.env``** の ``NEO4J_PASSWORD``）。
-neo4j-launcher も同ファイルを起動時に読む。
+PuppyGraph の ``PUPPYGRAPH_URI`` は **Deploy フォームに出さない**（post-deploy の ``.solomon/deploy.env``）。
 
 launcher のメモリ・PVC 等のチューニングは Deploy フォームには出さない。
 必要な場合のみ Deploy 後に **Project → Settings → Advanced → Environment Variables**
 で設定する (`.env.example` の optional セクション参照)。
+
+Air-gap で AMP Deploy する場合（Runtime / UI / launcher イメージの mirror）は
+[docs/airgap_amp.md](docs/airgap_amp.md) を参照。
 
 ## Deploy 後の設定手順 (Post-Deploy Configuration)
 
@@ -158,7 +159,7 @@ Application 起動時（``amp/05_start_application.py`` / ``python -m solomon.ap
 ファイルを常に優先したい場合は ``SOLOMON_DEPLOY_ENV_OVERRIDE=true`` を deploy.env に書く
 （``CDSW_*`` 等のプラットフォーム注入キーは除外）。
 
-**external** モードでは Trino / OpenSearch / Neo4j / LLM / CDV を上記ファイルに記載する。
+**external** モードでは Trino / OpenSearch / PuppyGraph / LLM / CDV を上記ファイルに記載する。
 Trino / S3 の Data Connections は従来どおり **Site Administration** が SSOT の場合あり
 （README 各セクション参照）。ローカル開発は引き続き ``.env``（``.env.example`` 参照）でも可。
 
@@ -208,28 +209,28 @@ Post-deploy（Project → Settings → Environment Variables）に **Application
 
 トラブルシュート: ログイン後 `GET /api/files/diagnostics`。
 
-### 3. Neo4j への接続
+### 3. PuppyGraph (Graph / openCypher)
 
-Deploy 時に `NEO4J_MODE` で接続方式を切り替える (デフォルト `internal`)。
+Graph タブ・``graph_cypher_query`` Tool は **PuppyGraph Bolt (7687)** に接続する。
+
+Deploy 時に ``PUPPYGRAPH_MODE`` を選ぶ (デフォルト ``internal``)。
 
 | モード | 用途 | 設定 |
 |---|---|---|
-| `internal` (デフォルト) | CML 内部 | `neo4j-launcher` が K8s 上で Neo4j を起動し、`.solomon/neo4j_endpoints.json` を Solomon と共有 |
-| `external` | 外部クラスタ | ``NEO4J_URI`` を ``.solomon/deploy.env`` に設定。パスワード変更は ``secrets.env`` |
+| `internal` (デフォルト) | CML 内部 | `puppygraph-launcher` が K8s 上で PuppyGraph を起動し、``.solomon/puppygraph_endpoints.json`` を Solomon と共有 |
+| `external` | 外部 PuppyGraph | ``.solomon/deploy.env`` に ``PUPPYGRAPH_URI=bolt://host:7687`` |
 
-**internal (`NEO4J_MODE=internal`)**
+**internal (`PUPPYGRAPH_MODE=internal`)**
 
-- AMP Deploy で `neo4j-launcher` が起動
-- Solomon は endpoints file から Bolt URI を自動解決 (Deploy 時に `NEO4J_URI` は不要)
-- Internal DNS が通らない場合のみ `NEO4J_URI` または `NEO4J_EXTERNAL_URI` を post-deploy で設定
+- AMP Deploy で `puppygraph-launcher` が起動（K8s 上で **PuppyGraph コンテナイメージ**を pull — 既定 `puppygraph/puppygraph:1.15.0`、OpenSearch / Trino と同型）
+- Bolt ready 後に ``.solomon/puppygraph_endpoints.json`` を自動更新
+- **Solomon Application を Restart** して Graph タブ / RAG graph 検索を有効化
+- DNS が通らない場合のみ ``PUPPYGRAPH_URI=bolt://<ClusterIP>:7687`` を post-deploy で設定
+- Iceberg / Trino catalog と graph schema は **PuppyGraph Web UI**（Pod 8081 / in-cluster）で定義 — Solomon はアップロードしない
+- 認証: ``PUPPYGRAPH_USERNAME`` / ``PUPPYGRAPH_PASSWORD``（``secrets.env`` 可。launcher Pod と Solomon で一致させる）
+- ``GET /api/graph/meta`` で接続可否を確認
 
-**external (`NEO4J_MODE=external`)**
-
-- launcher は no-op。外部 Neo4j クラスタへ直接接続
-- ``.solomon/deploy.env`` に ``NEO4J_URI``、本番パスワードは ``.solomon/secrets.env``
-
-未設定時は Graph タブ・Agentic RAG の graph 検索が
-`NEO4J_NOT_CONFIGURED` で停止する。
+未設定時は Graph タブ・Agentic RAG の graph 検索が ``GRAPH_NOT_CONFIGURED`` で停止する。
 
 ### 4. OpenSearch / Semantic Search への接続
 
@@ -243,9 +244,9 @@ Solomon プロセス内では OpenSearch サーバーは起動しない。
 
 **internal (`OPENSEARCH_MODE=internal`)**
 
-- AMP Deploy で `opensearch-launcher` が起動 (Neo4j launcher と同型)
+- AMP Deploy で `opensearch-launcher` が起動
 - OpenSearch 起動後に `solomon-datasets` インデックスを自動作成 (Solomon 起動時も再試行)
-- **OpenSearch Dashboards** を同 Pod で起動し、Launcher Application URL の `/dashboards/` から利用 (Neo4j Browser 相当)
+- **OpenSearch Dashboards** を同 Pod で起動し、Launcher Application URL の `/dashboards/` から利用
 - Application Log に HTTP エンドポイントが出力される
 - DNS が通らない場合は `OPENSEARCH_ENDPOINT` を post-deploy で設定
 
@@ -259,19 +260,28 @@ Solomon プロセス内では OpenSearch サーバーは起動しない。
 Ingestion 完了後に Ossie dataset が OpenSearch にインデックスされる。
 未設定時は Search タブ・RAG の keyword/hybrid 検索が `OPENSEARCH_NOT_CONFIGURED` で停止する。
 
-### 5. LLM プロバイダ (以下いずれか 1 つを選択)
+### 5. LLM プロバイダ
 
-Chat の意図分類は **Router Crew (LLM)** が既定（`/api/wish` は LLM 設定必須）。Crew 失敗時のみ
-規則ベース (`heuristic`) にフォールバック。Log の `router.llm_kickoff` / `router.heuristic` で確認。
+**既定:** `SOLOMON_LLM_PROVIDER` で全体のデフォルト (``cai`` / ``anthropic`` / ``openai`` / ``bedrock``)。
+Crew.ai の各 Agent は **role / Agent キーごと**に provider + model を上書きできる。
 
-| `SOLOMON_LLM_PROVIDER` | 必須 env | 任意 env |
+| レイヤ | env 例 | 用途 |
 |---|---|---|
-| `cai` (default) | `CAI_INFERENCE_BASE_URL`, `CAI_INFERENCE_API_KEY` | `SOLOMON_LLM_ROUTER_MODEL` (default `llama-3-8b-instruct`), `SOLOMON_LLM_ANALYTICS_MODEL` (default `llama-3-70b-instruct`) |
-| `anthropic` | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL`, `SOLOMON_LLM_ROUTER_MODEL` (default `claude-haiku-4-5-20251001`), `SOLOMON_LLM_ANALYTICS_MODEL` (default `claude-sonnet-4-5-20250929`) |
-| `openai` | `OPENAI_API_KEY` | `OPENAI_BASE_URL`, `SOLOMON_LLM_ROUTER_MODEL` (default `gpt-4o-mini`), `SOLOMON_LLM_ANALYTICS_MODEL` (default `gpt-4o`) |
-| `bedrock` | `AWS_REGION` (or `SOLOMON_AWS_REGION`, IAM role 前提) | `SOLOMON_LLM_ROUTER_MODEL`, `SOLOMON_LLM_ANALYTICS_MODEL` |
+| デフォルト | `SOLOMON_LLM_PROVIDER` + 各 provider の API env | 未指定 role / Agent のフォールバック |
+| **Role** | `SOLOMON_LLM_LIGHT_PROVIDER`, `SOLOMON_LLM_STRONG_PROVIDER`, `SOLOMON_LLM_EMBEDDING_PROVIDER` | light = Router / Inspector 等、strong = Summary / Dashboard、embedding = OpenSearch vector |
+| **Model (role)** | `SOLOMON_LLM_ROUTER_MODEL` / `SOLOMON_LLM_ANALYTICS_MODEL`（別名 `SOLOMON_LLM_LIGHT_MODEL` / `SOLOMON_LLM_STRONG_MODEL`） | 同一 provider 内のモデル切替 |
+| **Agent** | `SOLOMON_LLM_AGENT_<KEY>_PROVIDER`, `SOLOMON_LLM_AGENT_<KEY>_MODEL` | 例: `SUMMARY_WRITER`, `INTENT_CLASSIFIER`, `RAG_SYNTHESIS`（`AGENT_LLM_DEFAULT_ROLE` 参照） |
 
-ベクトル検索用 embedding には `SOLOMON_LLM_EMBEDDING_MODEL` (default `bge-m3`) を使用する。
+| Provider | 必須 env |
+|---|---|
+| `cai` | `CAI_INFERENCE_BASE_URL`, `CAI_INFERENCE_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY`（任意 `ANTHROPIC_BASE_URL`） |
+| `openai` | `OPENAI_API_KEY`（任意 `OPENAI_BASE_URL`） |
+| `bedrock` | `AWS_REGION` または `SOLOMON_AWS_REGION`（IAM role 前提） |
+
+**例:** Router は CAI、Analytics は Anthropic — ``SOLOMON_LLM_LIGHT_PROVIDER=cai`` + CAI env、``SOLOMON_LLM_STRONG_PROVIDER=anthropic`` + ``ANTHROPIC_API_KEY``。
+
+Embedding 既定モデル: `SOLOMON_LLM_EMBEDDING_MODEL`（provider 未指定時は `SOLOMON_LLM_PROVIDER` に従う）。
 
 ### 6. Cloudera Data Visualization (Deploy 後にプロジェクト内で有効化)
 
@@ -296,7 +306,7 @@ CDV 未設定でも取り込み・サマリー・RAG はそのまま動作する
 | `POST /api/wish` | SSE ストリーム (Router → Crew 実行、artifact イベント) |
 | `GET /api/catalog/*` | Trino スキーマ / テーブル / カラム |
 | `GET /api/files/*` | S3 ブラウズ / ファイルプレビュー |
-| `GET /api/graph/schema` | Neo4j Node Labels / Relationship Types / Property Keys |
+| `GET /api/graph/schema` | Graph Node Labels / Relationship Types / Property Keys |
 | `GET /api/graph/nodes?label=` | Label 指定でグラフ取得 |
 | `GET /api/graph/relationships?type=` | Relationship Type 指定でグラフ取得 |
 | `GET /api/graph/properties?key=` | Property Key 指定でグラフ取得 |

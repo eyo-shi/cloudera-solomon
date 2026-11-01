@@ -1,4 +1,4 @@
-"""Agentic RAG tests (no live Neo4j/OpenSearch/Trino required)."""
+"""Agentic RAG tests (no live PuppyGraph/OpenSearch/Trino required)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from solomon.rag.models import RetrievalPlan
 from solomon.rag.orchestrator import execute_retrieval
 from solomon.rag.synthesizer import synthesize_answer
 from solomon.router.crew import build_dispatch_plan, heuristic_classify
-from solomon.tools.neo4j_query import validate_readonly_cypher
+from solomon.tools.graph_cypher_query import validate_readonly_cypher
 
 
 class TestRetrievalClassifier:
@@ -45,7 +45,7 @@ class TestRouterKnowledgeRag:
         assert not is_knowledge_query("s3://bucket/file.csv を取り込んで")
 
 
-class TestNeo4jQueryValidation:
+class TestGraphCypherValidation:
     def test_rejects_mutations(self) -> None:
         assert validate_readonly_cypher("CREATE (n:Node)") is not None
 

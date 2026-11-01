@@ -114,7 +114,7 @@ class TestGetTrinoConfig:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("TRINO_HOST", "trino.example.com:443")
-        monkeypatch.setenv("TRINO_PORT", "8443")
+        monkeypatch.delenv("TRINO_PORT", raising=False)
         c = cfg_mod.get_trino_config()
         assert c is not None
         assert c.host == "trino.example.com"
@@ -355,6 +355,36 @@ class TestGetLLMConfig:
         c = cfg_mod.get_llm_config()
         assert c is not None
         assert c.provider == "anthropic"
+
+    def test_per_role_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_LLM_LIGHT_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://cai.example")
+        monkeypatch.setenv("CAI_INFERENCE_API_KEY", "cai-key")
+        monkeypatch.setenv("SOLOMON_LLM_STRONG_PROVIDER", "anthropic")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+        light = cfg_mod.get_llm_role_config("light")
+        strong = cfg_mod.get_llm_role_config("strong")
+        assert light is not None
+        assert strong is not None
+        assert light.provider == "cai"
+        assert strong.provider == "anthropic"
+
+    def test_agent_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+        monkeypatch.setenv(
+            "SOLOMON_LLM_AGENT_SUMMARY_WRITER_PROVIDER", "openai"
+        )
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+        monkeypatch.setenv("SOLOMON_LLM_AGENT_SUMMARY_WRITER_MODEL", "gpt-4o")
+        agent = cfg_mod.get_llm_agent_config("summary_writer")
+        assert agent is not None
+        assert agent.provider == "openai"
+        assert agent.model == "gpt-4o"
 
 
 # ================================================================== #

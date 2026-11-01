@@ -64,7 +64,7 @@ def parse_vb_header_line(line: str) -> dict[str, str]:
 
 
 def normalize_vb_meta(meta: dict[str, str]) -> dict[str, str]:
-    """Neo4j / Graph 用に VB メタキーを正規化する。"""
+    """Graph 用に VB メタキーを正規化する。"""
     out = dict(meta)
     serial = (
         meta.get("V/B機番")

@@ -1,5 +1,5 @@
 /**
- * Neo4j Browser 風の 1 クエリ結果フレーム。
+ * 1 クエリ結果フレーム（Graph タブ）。
  * 各フレーム上部に発行クエリを表示し、その下に Graph / Table / Raw 結果を載せる。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -408,7 +408,7 @@ export function GraphResultPanel({ panel, isMaximized = false }: Props) {
     >
       <div className="graph-frame__query-bar">
         <div className="graph-frame__query-text">
-          <span className="graph-frame__prompt">neo4j$</span>
+          <span className="graph-frame__prompt">cypher$</span>
           <span className="graph-frame__cypher">{panel.cypher}</span>
         </div>
         <div className="graph-frame__query-actions">

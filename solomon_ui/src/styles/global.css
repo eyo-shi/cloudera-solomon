@@ -510,7 +510,7 @@ body,
   font-size: var(--workspace-font-size);
 }
 
-/* ---- Graph left pane (Neo4j Database information) ---- */
+/* ---- Graph left pane (schema browser) ---- */
 .graph-db-info {
   padding: 0 0.75rem 1rem;
 }
@@ -640,7 +640,7 @@ body,
   color: var(--text-muted);
   font-size: var(--workspace-font-size);
 }
-/* Neo4j Browser 風 — 1 クエリ結果フレーム */
+/* Graph — 1 クエリ結果フレーム */
 .graph-frame {
   flex: 0 0 auto;
   align-self: stretch;

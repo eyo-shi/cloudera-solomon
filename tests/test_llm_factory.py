@@ -46,10 +46,42 @@ def spy_llm(monkeypatch: pytest.MonkeyPatch) -> type[_SpyLLM]:
 
 @pytest.fixture
 def stub_config(monkeypatch: pytest.MonkeyPatch):
-    """任意の LLMConfig を返すよう get_llm_config を差し替えるファクトリ。"""
+    """任意の LLMConfig 相当を role 解決に差し替えるファクトリ。"""
 
     def _install(cfg: Optional[cfg_mod.LLMConfig]) -> None:
-        monkeypatch.setattr(llm_factory, "get_llm_config", lambda: cfg)
+        if cfg is None:
+
+            def _none(role: str) -> None:
+                return None
+
+            monkeypatch.setattr(cfg_mod, "get_llm_role_config", _none)
+            monkeypatch.setattr(cfg_mod, "get_llm_agent_config", lambda _k: None)
+            return
+
+        def _role(role: str) -> cfg_mod.LLMRoleConfig:
+            if role == "light":
+                model = cfg.model_light
+            elif role == "strong":
+                model = cfg.model_strong
+            else:
+                model = "bge-m3"
+            return cfg_mod.LLMRoleConfig(
+                role=role,
+                provider=cfg.provider,
+                model=model,
+                api_base=cfg.api_base,
+                api_key=cfg.api_key,
+                aws_region=cfg.aws_region,
+            )
+
+        monkeypatch.setattr(cfg_mod, "get_llm_role_config", _role)
+        monkeypatch.setattr(
+            cfg_mod,
+            "get_llm_agent_config",
+            lambda key: _role(
+                cfg_mod.AGENT_LLM_DEFAULT_ROLE.get(key, "light")
+            ),
+        )
 
     return _install
 

@@ -1,8 +1,4 @@
-"""Neo4j graph browser API (`/api/graph/*`).
-
-TreePane Graph タブ + ResultPane Graph 可視化 + Agent artifact 用。
-Cypher は solomon.graph.browse で生成・実行する。
-"""
+"""PuppyGraph graph browser API (`/api/graph/*`)."""
 from __future__ import annotations
 
 from typing import Annotated, Any
@@ -11,62 +7,75 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from solomon.api.auth import require_user_context
 from solomon.graph import browse
-from solomon.graph.config import get_neo4j_config
+from solomon.graph.config import get_graph_config
 from solomon.graph.models import CypherRequest, GraphQueryResponse, GraphSchemaResponse
-from solomon.graph.session import Neo4jSessionError
+from solomon.graph.puppygraph_mode import is_external_puppygraph_mode, is_internal_puppygraph_mode
+from solomon.graph.session import GraphSessionError
 from solomon.transport.user_context import UserContext
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
 
-def _require_neo4j_or_503() -> None:
-    if get_neo4j_config() is None:
-        from solomon.graph.mode import is_external_neo4j_mode, is_internal_neo4j_mode
+def _require_graph_or_503() -> None:
+    if get_graph_config() is not None:
+        return
 
-        if is_internal_neo4j_mode():
-            instruction = (
-                "NEO4J_MODE=internal です。neo4j-launcher Application "
-                "が Running であることを確認し、Application Log で "
-                ".solomon/neo4j_endpoints.json が書き込まれるまで待ってから "
-                "Solomon Application を再起動してください。"
-            )
-        elif is_external_neo4j_mode():
-            instruction = (
-                "NEO4J_MODE=external です。.solomon/deploy.env に NEO4J_URI を設定。"
-                "パスワード変更は .solomon/secrets.env の NEO4J_PASSWORD。"
-                "Solomon Application を再起動してください。"
-            )
-        else:
-            instruction = (
-                "NEO4J_MODE を確認し、.solomon/deploy.env に NEO4J_URI を設定。"
-                "Application を再起動してください。"
-            )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error_code": "NEO4J_NOT_CONFIGURED",
-                "message": "Neo4j への接続情報が設定されていません。",
-                "instruction": instruction,
-            },
+    if is_internal_puppygraph_mode():
+        instruction = (
+            "PUPPYGRAPH_MODE=internal です。puppygraph-launcher が running になるまで待ち、"
+            ".solomon/puppygraph_endpoints.json が作成されたら Solomon Application を再起動。"
+            "DNS 不通時は .solomon/deploy.env に PUPPYGRAPH_URI=bolt://host:7687 を設定。"
         )
+    elif is_external_puppygraph_mode():
+        instruction = (
+            "PUPPYGRAPH_MODE=external です。.solomon/deploy.env に "
+            "PUPPYGRAPH_URI=bolt://host:7687 を設定。"
+            "Iceberg/PostgreSQL catalog と graph schema は PuppyGraph 側で登録済みであること。"
+            "認証は PUPPYGRAPH_USERNAME / PUPPYGRAPH_PASSWORD（または secrets.env）。"
+            "Solomon Application を再起動してください。"
+        )
+    else:
+        instruction = (
+            "PUPPYGRAPH_URI を .solomon/deploy.env に設定し、Application を再起動してください。"
+        )
+
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "error_code": "GRAPH_NOT_CONFIGURED",
+            "message": "PuppyGraph への接続情報が設定されていません。",
+            "instruction": instruction,
+        },
+    )
 
 
 def _handle_browse_error(exc: Exception) -> None:
     if isinstance(exc, ValueError):
         raise HTTPException(
             status_code=400,
-            detail={"error_code": "NEO4J_BAD_REQUEST", "message": str(exc)},
+            detail={"error_code": "GRAPH_BAD_REQUEST", "message": str(exc)},
         ) from exc
-    if isinstance(exc, Neo4jSessionError):
-        status = 503 if exc.code == "NEO4J_NOT_CONFIGURED" else 502
+    if isinstance(exc, GraphSessionError):
+        status = 503 if exc.code == "GRAPH_NOT_CONFIGURED" else 502
         raise HTTPException(
             status_code=status,
             detail={"error_code": exc.code, "message": exc.message},
         ) from exc
     raise HTTPException(
         status_code=502,
-        detail={"error_code": "NEO4J_QUERY_FAILED", "message": str(exc)},
+        detail={"error_code": "GRAPH_QUERY_FAILED", "message": str(exc)},
     ) from exc
+
+
+@router.get("/meta")
+def graph_meta(
+    user_ctx: Annotated[UserContext, Depends(require_user_context)],
+) -> dict[str, Any]:
+    _ = user_ctx
+    return {
+        "backend": "puppygraph",
+        "configured": get_graph_config() is not None,
+    }
 
 
 @router.get("/schema", response_model=GraphSchemaResponse)
@@ -74,7 +83,7 @@ def graph_schema(
     user_ctx: Annotated[UserContext, Depends(require_user_context)],
 ) -> GraphSchemaResponse:
     _ = user_ctx
-    _require_neo4j_or_503()
+    _require_graph_or_503()
     try:
         return browse.fetch_schema()
     except Exception as exc:  # noqa: BLE001
@@ -88,7 +97,7 @@ def graph_nodes(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> GraphQueryResponse:
     _ = user_ctx
-    _require_neo4j_or_503()
+    _require_graph_or_503()
     try:
         return browse.query_by_label(label, limit=limit)
     except Exception as exc:  # noqa: BLE001
@@ -102,7 +111,7 @@ def graph_relationships(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> GraphQueryResponse:
     _ = user_ctx
-    _require_neo4j_or_503()
+    _require_graph_or_503()
     try:
         return browse.query_by_relationship_type(type, limit=limit)
     except Exception as exc:  # noqa: BLE001
@@ -116,7 +125,7 @@ def graph_properties(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> GraphQueryResponse:
     _ = user_ctx
-    _require_neo4j_or_503()
+    _require_graph_or_503()
     try:
         return browse.query_by_property_key(key, limit=limit)
     except Exception as exc:  # noqa: BLE001
@@ -131,7 +140,7 @@ def graph_neighborhood(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> GraphQueryResponse:
     _ = user_ctx
-    _require_neo4j_or_503()
+    _require_graph_or_503()
     try:
         return browse.query_neighborhood(node_id, depth=depth, limit=limit)
     except Exception as exc:  # noqa: BLE001
@@ -144,9 +153,8 @@ def graph_entity(
     hint: Annotated[str, Query(max_length=256)] = "",
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> GraphQueryResponse:
-    """Agent / RAG 向け: entity_hint から可視化グラフを返す。"""
     _ = user_ctx
-    _require_neo4j_or_503()
+    _require_graph_or_503()
     try:
         return browse.visualize_entity_hint(hint, limit=limit)
     except Exception as exc:  # noqa: BLE001
@@ -158,9 +166,8 @@ def graph_execute_cypher(
     body: CypherRequest,
     user_ctx: Annotated[UserContext, Depends(require_user_context)],
 ) -> GraphQueryResponse:
-    """Read-only Cypher を実行 (Graph タブのクエリ入力用)。"""
     _ = user_ctx
-    _require_neo4j_or_503()
+    _require_graph_or_503()
     try:
         return browse.execute_read_cypher(
             body.cypher, limit=body.limit, params=body.params
@@ -175,9 +182,8 @@ def graph_overview(
     q: Annotated[str, Query(max_length=256)] = "",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> dict[str, Any]:
-    """後方互換: System / Dataset 概要 (旧 GraphView 用)。"""
     _ = user_ctx
-    _require_neo4j_or_503()
+    _require_graph_or_503()
     try:
         result = browse.visualize_entity_hint(q, limit=limit)
     except Exception as exc:  # noqa: BLE001

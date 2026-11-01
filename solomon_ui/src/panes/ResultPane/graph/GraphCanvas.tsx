@@ -16,7 +16,7 @@ import { attachDragPhysics } from "./graphDragPhysics";
 type GraphLayoutMode = "force" | "hierarchical";
 
 const NODE_FONT_SIZE = 10;
-/** Neo4j Browser 風の固定ノード直径 (px)。 */
+/** 固定ノード直径 (px)。 */
 const NODE_DIAMETER = 56;
 /** 円内に収めるラベルの最大幅 (px, 10px フォント)。 */
 const NODE_LABEL_MAX_WIDTH = 44;
@@ -32,7 +32,7 @@ function measureLabelWidth(label: string): number {
   return ctx.measureText(label).width;
 }
 
-/** Neo4j Browser 同様、長い名前は 1 行で ``...`` 省略する。 */
+/** 長い名前は 1 行で ``...`` 省略する。 */
 function ellipsizeNodeLabel(label: string, maxWidth: number): string {
   const text = label.trim();
   if (!text || measureLabelWidth(text) <= maxWidth) return text;
@@ -201,7 +201,7 @@ interface LayoutGraphShape {
   edgeCount: number;
 }
 
-/** ラベル選択などエッジなし結果は Neo4j Browser 同様に円状配置する。 */
+/** ラベル選択などエッジなし結果は円状配置する。 */
 function layoutOptions(
   mode: GraphLayoutMode,
   graph: LayoutGraphShape,

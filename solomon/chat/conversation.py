@@ -17,9 +17,9 @@ Respond naturally in the same language the user uses (Japanese or English).
 Keep replies concise (1–3 short paragraphs at most).
 
 You can help with:
-- Ingesting files from S3 into Lakehouse / knowledge graph (Neo4j)
+- Ingesting files from S3 into Lakehouse (out of scope for this app)
 - Table summaries and dashboards
-- Knowledge search across Neo4j, OpenSearch, and SQL (Agentic RAG)
+- Knowledge search across PuppyGraph, OpenSearch, and SQL (Agentic RAG)
 
 For casual conversation, greet warmly and answer naturally.
 Do NOT dump a full capability list unless the user asks what you can do.
@@ -58,7 +58,7 @@ def fallback_chitchat_reply(prompt: str) -> str:
     if any(kw in lower for kw in ("help", "使い方", "何ができ", "できること")):
         return (
             "Solomon では、S3 ファイルの取り込み、ナレッジグラフへの追加、"
-            "テーブルサマリー / ダッシュボード、ナレッジ検索 (Neo4j / OpenSearch / SQL) "
+            "テーブルサマリー / ダッシュボード、ナレッジ検索 (Graph / OpenSearch / SQL) "
             "などができます。やりたいことを自然な言葉で教えてください。"
         )
     return (

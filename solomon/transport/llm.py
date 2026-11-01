@@ -18,7 +18,7 @@ import json
 import re
 from typing import Any, Optional
 
-from solomon.transport.config import get_llm_config
+from solomon.transport.config import LLMRoleConfig, get_llm_agent_config, get_llm_role_config
 from solomon.transport.llm_factory import _apply_prefix
 from solomon.transport.logging import get_logger
 
@@ -28,10 +28,36 @@ _logger = get_logger(__name__)
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.DOTALL)
 
 
+def _completion_config(
+    *,
+    role: str = "light",
+    agent_key: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Optional[LLMRoleConfig]:
+    if agent_key:
+        cfg = get_llm_agent_config(agent_key)
+    else:
+        cfg = get_llm_role_config(role)
+    if cfg is None:
+        return None
+    if model:
+        return LLMRoleConfig(
+            role=cfg.role,
+            provider=cfg.provider,
+            model=model,
+            api_base=cfg.api_base,
+            api_key=cfg.api_key,
+            aws_region=cfg.aws_region,
+        )
+    return cfg
+
+
 def try_json_completion(
     prompt: str,
     *,
     model: Optional[str] = None,
+    role: str = "light",
+    agent_key: Optional[str] = None,
     max_tokens: int = 512,
     temperature: float = 0.0,
     timeout: float = 30.0,
@@ -53,13 +79,12 @@ def try_json_completion(
         _logger.debug("llm.litellm_not_installed")
         return None
 
-    cfg = get_llm_config()
+    cfg = _completion_config(role=role, agent_key=agent_key, model=model)
     if cfg is None:
         _logger.debug("llm.config_missing")
         return None
 
-    resolved_model = model or cfg.model_light
-    prefixed = _apply_prefix(cfg.provider, resolved_model)
+    prefixed = _apply_prefix(cfg.provider, cfg.model)
 
     kwargs: dict[str, Any] = {
         "model": prefixed,
@@ -125,19 +150,20 @@ def _text_completion_kwargs(
     messages: list[dict[str, str]],
     *,
     model: Optional[str] = None,
+    role: str = "light",
+    agent_key: Optional[str] = None,
     max_tokens: int = 512,
     temperature: float = 0.7,
     timeout: float = 30.0,
     num_retries: int = 0,
 ) -> tuple[dict[str, Any], str] | None:
     """LiteLLM completion / acompletion 共通 kwargs。未設定時は ``None``。"""
-    cfg = get_llm_config()
+    cfg = _completion_config(role=role, agent_key=agent_key, model=model)
     if cfg is None:
         _logger.debug("llm.config_missing")
         return None
 
-    resolved_model = model or cfg.model_light
-    prefixed = _apply_prefix(cfg.provider, resolved_model)
+    prefixed = _apply_prefix(cfg.provider, cfg.model)
 
     kwargs: dict[str, Any] = {
         "model": prefixed,
