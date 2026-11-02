@@ -355,7 +355,8 @@ def test_ensure_cdv_running_guardrail_passes_when_running() -> None:
         CDVStartupResult(running=True, endpoint="https://cdv.example/arc")
     )
     assert ok is True
-    assert feedback and "exists" in feedback
+    assert feedback
+    assert "running" in feedback
 
 
 def test_ensure_cdv_running_guardrail_blocks_when_not_running() -> None:
@@ -378,7 +379,8 @@ def test_ensure_cdv_running_guardrail_accepts_dict_output() -> None:
         {"running": True, "endpoint": "https://cdv.example/arc"}
     )
     assert ok is True
-    assert feedback and "exists" in feedback
+    assert feedback
+    assert "running" in feedback
 
 
 def test_ensure_cdv_running_guardrail_rejects_broken_output() -> None:
@@ -458,7 +460,7 @@ def test_viz_plan_requires_at_least_one_visual() -> None:
 # VizHeuristicTool: 決定論的なルールマトリクス
 # ------------------------------------------------------------------ #
 def _run_viz(columns: list[dict]) -> dict:
-    """VizHeuristicTool を直接呼び出して payload を返す。"""
+    """VizHeuristicTool を直接呼び出して VizPlan 相当の dict を返す。"""
     tool = VizHeuristicTool()
     resp = tool.run(
         user_ctx=None,
@@ -466,7 +468,7 @@ def _run_viz(columns: list[dict]) -> dict:
         columns=columns,
     )
     assert resp["status"] == "ok"
-    return resp["payload"]
+    return {k: v for k, v in resp.items() if k != "status"}
 
 
 def test_viz_heuristic_time_x_measure_yields_line() -> None:
@@ -574,4 +576,4 @@ def test_viz_heuristic_respects_max_visuals() -> None:
         max_visuals=2,
     )
     assert resp["status"] == "ok"
-    assert len(resp["payload"]["visuals"]) == 2
+    assert len(resp["visuals"]) == 2

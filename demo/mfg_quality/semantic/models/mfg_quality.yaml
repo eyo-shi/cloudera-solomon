@@ -1,0 +1,917 @@
+version: 0.2.0.dev0
+name: mfg_quality
+description: Tier1 部品メーカー（東邦精機）の品質保証。ロット系譜・検査・出荷・市場クレーム・作業日報/保全/8D 文書。
+ai_context:
+  instructions: 結論・根拠・未確定事項を分ける。封じ込めは広げる根拠と絞る根拠の両方を示す。
+  examples:
+  - SX-5 の異音クレーム 14 件の対象ユニットのロットと製造日は？
+  - そのウォームホイールに使われた樹脂ロットは、他にどの製品・どの車種に入っている？
+  - 過去に似たような不具合はあった？
+  - 検査は全部合格なのに、なぜ不良が出た？
+  - 不良条件で作られた可能性がある部品を全部洗い出して
+  - 封じ込め対象ロット・出荷先・台数を根拠付きで確定して
+  - 北陸ケミカルから東洋ポリマーに切り替えたら、影響する部品と認可状況は？
+  - 上記をまとめて 8D の D2〜D4 ドラフトを書いて
+  - ロット系譜をグラフで見せて
+custom_extensions:
+- vendor_name: SOLOMON
+  data:
+    version: 1
+    glossary:
+    - term: ロット
+      description: 材料・成形・サブ組立・ユニットの追跡単位
+    - term: ロット系譜
+      description: lot_genealogy の親子消費関係
+    - term: 8D
+      description: 8 ディシプリン問題解決レポート
+    - term: PPAP
+      description: Production Part Approval Process
+    - term: 4M 変更
+      description: Man/Machine/Material/Method 変更届
+    - term: FMEA
+      description: 故障モード影響解析
+    - term: バックラッシ
+      description: 歯車の歯隙
+    - term: 封じ込め
+      description: 影響範囲の特定と流出防止
+    - term: 横展開
+      description: 類似品目・ラインへの展開
+    tool_hints:
+      table: 数量・一覧・集計・検査値
+      graph: ロット系譜の多段トレース、部品から車種・OEM まで
+      search: 作業日報・保全・8D・クレーム文書の自由記述
+    graph_examples:
+    - question: 材料ロットから搭載車種まで
+      cypher: MATCH (r:Lot {lot_id:$lot_id})-[:CONSUMED_BY*1..6]->(u:Lot {lot_type:'UNIT'})-[:SHIPPED_AS]->(:Shipment)-[:FOR_MODEL]->(m:VehicleModel)
+        RETURN m.model_name, count(DISTINCT u) AS units
+      notes: 可変長 CONSUMED_BY
+    search:
+      expansion_instructions: 班長の口語・略称・擬音語、保全員の型番、品証の技術用語、ディーラーの利用者語が混在する。
+      use_synonyms: false
+    verified_queries:
+    - question: SX-5 異音クレームのユニットロットと製造日
+      sql: SELECT u.lot_id, u.prod_date FROM iceberg.mfg_quality.field_claims c JOIN
+        iceberg.mfg_quality.unit_lots u ON c.unit_lot_id = u.lot_id WHERE c.model_code
+        = 'SX-5' AND c.claim_date >= DATE '2026-10-01' GROUP BY u.lot_id, u.prod_date
+      notes: Q1 相当
+datasets:
+- name: suppliers
+  source: iceberg.mfg_quality.suppliers
+  description: テーブル suppliers
+  fields:
+  - name: supplier_id
+    datatype: String
+    description: サプライヤ ID
+  - name: name
+    datatype: String
+    description: 名称
+  - name: tier
+    datatype: Int32
+    description: Tier 1/2/3
+  - name: country
+    datatype: String
+    description: 国
+  - name: plant
+    datatype: String
+    description: 拠点
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        vertex:
+          label: Supplier
+          id_field: supplier_id
+          property_fields:
+          - name
+          - tier
+- name: supplier_alternatives
+  source: iceberg.mfg_quality.supplier_alternatives
+  description: テーブル supplier_alternatives
+  fields:
+  - name: material_part_no
+    datatype: String
+    description: 材料品番
+  - name: supplier_id
+    datatype: String
+    description: 主サプライヤ
+  - name: alt_supplier_id
+    datatype: String
+    description: 代替サプライヤ
+  - name: ppap_status
+    datatype: String
+    description: PPAP 状態
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+- name: parts
+  source: iceberg.mfg_quality.parts
+  description: テーブル parts
+  fields:
+  - name: part_no
+    datatype: String
+    description: 品番
+  - name: name
+    datatype: String
+    description: 品名
+  - name: category
+    datatype: String
+    description: 材料/成形品/サブ組立/ユニット
+  - name: material_spec
+    datatype: String
+    description: 材料規格
+  - name: supplier_id
+    datatype: String
+    description: 主サプライヤ
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        vertex:
+          label: MfgPart
+          id_field: part_no
+          property_fields:
+          - name
+          - category
+        edges:
+        - label: PART_SUPPLIED_BY
+          from_label: MfgPart
+          to_label: Supplier
+          from_field: part_no
+          to_field: supplier_id
+- name: bom
+  source: iceberg.mfg_quality.bom
+  description: テーブル bom
+  fields:
+  - name: parent_part_no
+    datatype: String
+    description: 親品番
+  - name: child_part_no
+    datatype: String
+    description: 子品番
+  - name: qty_per
+    datatype: Decimal
+    description: 員数
+  - name: valid_from
+    datatype: Date
+    description: 有効開始
+  - name: valid_to
+    datatype: Date
+    description: 有効終了
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        edges:
+        - label: HAS_CHILD
+          from_label: MfgPart
+          to_label: MfgPart
+          from_field: parent_part_no
+          to_field: child_part_no
+- name: equipment
+  source: iceberg.mfg_quality.equipment
+  description: テーブル equipment
+  fields:
+  - name: equipment_id
+    datatype: String
+    description: 設備 ID
+  - name: name
+    datatype: String
+    description: 設備名
+  - name: type
+    datatype: String
+    description: 成形機/乾燥機/組立ライン
+  - name: plant
+    datatype: String
+    description: 工場
+  - name: parent_equipment_id
+    datatype: String
+    description: 親設備
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        vertex:
+          label: Equipment
+          id_field: equipment_id
+          property_fields:
+          - name
+          - type
+          - plant
+- name: material_lots
+  source: iceberg.mfg_quality.material_lots
+  description: テーブル material_lots
+  fields:
+  - name: lot_id
+    datatype: String
+    description: 材料ロット HC-yyMM-nnn
+  - name: part_no
+    datatype: String
+    description: 材料品番
+  - name: supplier_id
+    datatype: String
+    description: サプライヤ
+  - name: receipt_date
+    datatype: Date
+    description: 入荷日
+    dimension:
+      is_time: true
+  - name: qty_kg
+    datatype: Decimal
+    description: 数量 kg
+  - name: coa_moisture_pct
+    datatype: Decimal
+    description: CoA 水分率
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        edges:
+        - label: LOT_SUPPLIED_BY
+          from_label: Lot
+          to_label: Supplier
+          from_field: lot_id
+          to_field: supplier_id
+- name: production_runs
+  source: iceberg.mfg_quality.production_runs
+  description: テーブル production_runs
+  fields:
+  - name: run_id
+    datatype: String
+    description: 作業 ID
+  - name: equipment_id
+    datatype: String
+    description: 設備
+  - name: output_lot_id
+    datatype: String
+    description: 出力ロット
+  - name: part_no
+    datatype: String
+    description: 品番
+  - name: start_ts
+    datatype: Timestamp
+    description: 開始
+    dimension:
+      is_time: true
+  - name: end_ts
+    datatype: Timestamp
+    description: 終了
+    dimension:
+      is_time: true
+  - name: qty
+    datatype: Int32
+    description: 数量
+  - name: operator_id
+    datatype: String
+    description: 作業者
+  - name: shift
+    datatype: String
+    description: シフト
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        edges:
+        - label: PRODUCED_ON
+          from_label: Lot
+          to_label: Equipment
+          from_field: output_lot_id
+          to_field: equipment_id
+          id_field: run_id
+- name: lot_genealogy
+  source: iceberg.mfg_quality.lot_genealogy
+  description: 1 行 = 親子 1 段の消費関係（child が parent を消費）。材料からユニットまで品目により 3〜5 段。
+  fields:
+  - name: edge_id
+    datatype: String
+    description: 辺 ID
+  - name: child_lot_id
+    datatype: String
+    description: 消費されたロット
+  - name: parent_lot_id
+    datatype: String
+    description: 生成されたロット
+  - name: qty_used
+    datatype: Decimal
+    description: 使用量
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        edges:
+        - label: CONSUMED_BY
+          from_label: Lot
+          to_label: Lot
+          from_field: child_lot_id
+          to_field: parent_lot_id
+          id_field: edge_id
+- name: inspection_results
+  source: iceberg.mfg_quality.inspection_results
+  description: テーブル inspection_results
+  fields:
+  - name: insp_id
+    datatype: String
+    description: 検査 ID
+  - name: lot_id
+    datatype: String
+    description: ロット
+  - name: item
+    datatype: String
+    description: 検査項目
+  - name: value
+    datatype: Decimal
+    description: 測定値
+  - name: lsl
+    datatype: Decimal
+    description: 下限
+  - name: usl
+    datatype: Decimal
+    description: 上限
+  - name: judgment
+    datatype: String
+    description: 判定
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+- name: unit_lots
+  source: iceberg.mfg_quality.unit_lots
+  description: テーブル unit_lots
+  fields:
+  - name: lot_id
+    datatype: String
+    description: ユニットロット U-xxxx-yymmdd-nn
+  - name: part_no
+    datatype: String
+    description: 品番
+  - name: plant
+    datatype: String
+    description: 工場
+  - name: prod_date
+    datatype: Date
+    description: 製造日
+    dimension:
+      is_time: true
+  - name: qty
+    datatype: Int32
+    description: 数量
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+- name: shipments
+  source: iceberg.mfg_quality.shipments
+  description: テーブル shipments
+  fields:
+  - name: shipment_id
+    datatype: String
+    description: 出荷 ID
+  - name: unit_lot_id
+    datatype: String
+    description: ユニットロット
+  - name: oem_id
+    datatype: String
+    description: OEM
+  - name: model_code
+    datatype: String
+    description: 車種コード
+  - name: ship_date
+    datatype: Date
+    description: 出荷日
+    dimension:
+      is_time: true
+  - name: qty
+    datatype: Int32
+    description: 台数
+  - name: vin_from
+    datatype: String
+    description: VIN 始
+  - name: vin_to
+    datatype: String
+    description: VIN 終
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        vertex:
+          label: Shipment
+          id_field: shipment_id
+          property_fields:
+          - ship_date
+          - qty
+        edges:
+        - label: SHIPPED_AS
+          from_label: Lot
+          to_label: Shipment
+          from_field: unit_lot_id
+          to_field: shipment_id
+        - label: FOR_MODEL
+          from_label: Shipment
+          to_label: VehicleModel
+          from_field: shipment_id
+          to_field: model_code
+- name: vehicle_models
+  source: iceberg.mfg_quality.vehicle_models
+  description: テーブル vehicle_models
+  fields:
+  - name: model_code
+    datatype: String
+    description: 車種コード
+  - name: model_name
+    datatype: String
+    description: 車種名
+  - name: oem_id
+    datatype: String
+    description: OEM
+  - name: sop_date
+    datatype: Date
+    description: SOP
+    dimension:
+      is_time: true
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        vertex:
+          label: VehicleModel
+          id_field: model_code
+          property_fields:
+          - model_name
+        edges:
+        - label: OF_OEM
+          from_label: VehicleModel
+          to_label: OEM
+          from_field: model_code
+          to_field: oem_id
+- name: oem_customers
+  source: iceberg.mfg_quality.oem_customers
+  description: テーブル oem_customers
+  fields:
+  - name: oem_id
+    datatype: String
+    description: OEM ID
+  - name: name
+    datatype: String
+    description: OEM 名
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        vertex:
+          label: OEM
+          id_field: oem_id
+          property_fields:
+          - name
+- name: field_claims
+  source: iceberg.mfg_quality.field_claims
+  description: テーブル field_claims
+  fields:
+  - name: claim_id
+    datatype: String
+    description: クレーム ID
+  - name: oem_id
+    datatype: String
+    description: OEM
+  - name: model_code
+    datatype: String
+    description: 車種
+  - name: vin
+    datatype: String
+    description: VIN
+  - name: unit_lot_id
+    datatype: String
+    description: ユニットロット
+  - name: claim_date
+    datatype: Date
+    description: 受付日
+    dimension:
+      is_time: true
+  - name: symptom_code
+    datatype: String
+    description: 症状コード
+  - name: symptom_text
+    datatype: String
+    description: 症状記述
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+- name: defects
+  source: iceberg.mfg_quality.defects
+  description: テーブル defects
+  fields:
+  - name: defect_id
+    datatype: String
+    description: 不良 ID
+  - name: lot_id
+    datatype: String
+    description: ロット
+  - name: defect_code
+    datatype: String
+    description: 不良コード
+  - name: qty
+    datatype: Int32
+    description: 数量
+  - name: note
+    datatype: String
+    description: 備考
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+- name: doc_index
+  source: iceberg.mfg_quality.doc_index
+  description: テーブル doc_index
+  fields:
+  - name: doc_id
+    datatype: String
+    description: 文書 ID
+  - name: doc_type
+    datatype: String
+    description: 種別
+  - name: doc_date
+    datatype: Date
+    description: 日付
+    dimension:
+      is_time: true
+  - name: plant
+    datatype: String
+    description: 工場
+    custom_extensions:
+    - vendor_name: SOLOMON
+      data:
+        version: 1
+        filterable: true
+  - name: equipment_id
+    datatype: String
+    description: 設備
+    custom_extensions:
+    - vendor_name: SOLOMON
+      data:
+        version: 1
+        filterable: true
+  - name: part_no
+    datatype: String
+    description: 品番
+    custom_extensions:
+    - vendor_name: SOLOMON
+      data:
+        version: 1
+        filterable: true
+  - name: lot_ids
+    datatype: Opaque
+    description: 関連ロット配列
+    custom_extensions:
+    - vendor_name: SOLOMON
+      data:
+        version: 1
+        physical_type: array(varchar)
+  - name: title
+    datatype: String
+    description: タイトル
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: document_index
+      queryable: false
+      document_index:
+        index: solomon-docs
+        id_field: doc_id
+        title_field: title
+        text_field: body
+        type_field: doc_type
+        date_field: doc_date
+        doc_types:
+        - id: daily_report
+          label: 作業日報
+          description: 現場班長の日次記録
+        - id: maintenance
+          label: 設備保全記録
+          description: 保全作業・部品交換
+        - id: 8d
+          label: 8D レポート
+          description: 8 ディシプリン報告
+        - id: defect_report
+          label: 不具合報告書
+          description: 工程内不具合
+        - id: oem_claim
+          label: OEM クレーム文
+          description: 市場クレーム
+        - id: fmea
+          label: FMEA
+          description: 故障モード解析
+        - id: change_notice
+          label: 4M 変更届
+          description: 変更・PPAP
+- name: lots
+  source: iceberg.mfg_quality.lots
+  description: テーブル lots
+  fields:
+  - name: lot_id
+    datatype: String
+    description: ロット ID
+  - name: lot_type
+    datatype: String
+    description: MATERIAL/MOLD/SUBASSY/UNIT
+  - name: part_no
+    datatype: String
+    description: 品番
+  - name: plant
+    datatype: String
+    description: 工場
+  - name: prod_date
+    datatype: Date
+    description: 製造日
+    dimension:
+      is_time: true
+  - name: equipment_id
+    datatype: String
+    description: 設備
+  - name: qty
+    datatype: Int32
+    description: 数量
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
+      graph:
+        vertex:
+          label: Lot
+          id_field: lot_id
+          property_fields:
+          - lot_type
+          - part_no
+          - prod_date
+          - plant
+          description: 全階層ロット統合頂点
+- name: doc_mentions_lot
+  source: iceberg.mfg_quality.doc_mentions_lot
+  description: テーブル doc_mentions_lot
+  fields:
+  - name: doc_id
+    datatype: String
+    description: 文書
+  - name: entity_id
+    datatype: String
+    description: ロット ID
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: graph_only
+      queryable: false
+- name: doc_mentions_equipment
+  source: iceberg.mfg_quality.doc_mentions_equipment
+  description: テーブル doc_mentions_equipment
+  fields:
+  - name: doc_id
+    datatype: String
+    description: 文書
+  - name: entity_id
+    datatype: String
+    description: 設備 ID
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: graph_only
+      queryable: false
+- name: doc_mentions_part
+  source: iceberg.mfg_quality.doc_mentions_part
+  description: テーブル doc_mentions_part
+  fields:
+  - name: doc_id
+    datatype: String
+    description: 文書
+  - name: entity_id
+    datatype: String
+    description: 品番
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: graph_only
+      queryable: false
+- name: equipment_links
+  source: iceberg.mfg_quality.equipment_links
+  description: テーブル equipment_links
+  fields:
+  - name: edge_id
+    datatype: String
+    description: 辺 ID
+  - name: equipment_id
+    datatype: String
+    description: 設備
+  - name: parent_equipment_id
+    datatype: String
+    description: 親設備
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: graph_only
+      queryable: false
+      graph:
+        edges:
+        - label: ATTACHED_TO
+          from_label: Equipment
+          to_label: Equipment
+          from_field: equipment_id
+          to_field: parent_equipment_id
+          id_field: edge_id
+relationships:
+- name: shipments_unit
+  from: shipments
+  to: unit_lots
+  from_columns:
+  - unit_lot_id
+  to_columns:
+  - lot_id
+- name: claims_unit
+  from: field_claims
+  to: unit_lots
+  from_columns:
+  - unit_lot_id
+  to_columns:
+  - lot_id
+- name: genealogy_child
+  from: lot_genealogy
+  to: lots
+  from_columns:
+  - child_lot_id
+  to_columns:
+  - lot_id
+- name: genealogy_parent
+  from: lot_genealogy
+  to: lots
+  from_columns:
+  - parent_lot_id
+  to_columns:
+  - lot_id
+- name: material_lot_part
+  from: material_lots
+  to: parts
+  from_columns:
+  - part_no
+  to_columns:
+  - part_no
+- name: unit_lot_part
+  from: unit_lots
+  to: parts
+  from_columns:
+  - part_no
+  to_columns:
+  - part_no
+- name: shipments_model
+  from: shipments
+  to: vehicle_models
+  from_columns:
+  - model_code
+  to_columns:
+  - model_code
+- name: shipments_oem
+  from: shipments
+  to: oem_customers
+  from_columns:
+  - oem_id
+  to_columns:
+  - oem_id
+- name: models_oem
+  from: vehicle_models
+  to: oem_customers
+  from_columns:
+  - oem_id
+  to_columns:
+  - oem_id
+- name: parts_supplier
+  from: parts
+  to: suppliers
+  from_columns:
+  - supplier_id
+  to_columns:
+  - supplier_id
+- name: runs_equipment
+  from: production_runs
+  to: equipment
+  from_columns:
+  - equipment_id
+  to_columns:
+  - equipment_id
+- name: runs_output_lot
+  from: production_runs
+  to: lots
+  from_columns:
+  - output_lot_id
+  to_columns:
+  - lot_id
+- name: defects_lot
+  from: defects
+  to: lots
+  from_columns:
+  - lot_id
+  to_columns:
+  - lot_id
+- name: insp_lot
+  from: inspection_results
+  to: lots
+  from_columns:
+  - lot_id
+  to_columns:
+  - lot_id
+- name: bom_parent
+  from: bom
+  to: parts
+  from_columns:
+  - parent_part_no
+  to_columns:
+  - part_no
+- name: bom_child
+  from: bom
+  to: parts
+  from_columns:
+  - child_part_no
+  to_columns:
+  - part_no
+- name: doc_mentions_lot_doc
+  from: doc_mentions_lot
+  to: doc_index
+  from_columns:
+  - doc_id
+  to_columns:
+  - doc_id
+- name: doc_mentions_eq_doc
+  from: doc_mentions_equipment
+  to: doc_index
+  from_columns:
+  - doc_id
+  to_columns:
+  - doc_id
+- name: doc_mentions_part_doc
+  from: doc_mentions_part
+  to: doc_index
+  from_columns:
+  - doc_id
+  to_columns:
+  - doc_id
+- name: equipment_parent
+  from: equipment
+  to: equipment
+  from_columns:
+  - parent_equipment_id
+  to_columns:
+  - equipment_id
+metrics:
+- name: backlash_usl_ratio
+  expression: AVG(value / usl)
+  description: バックラッシ測定値の上限比（item=バックラッシ）
+- name: shipped_units
+  expression: SUM(qty)
+  description: 出荷台数
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      dataset: shipments

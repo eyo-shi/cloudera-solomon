@@ -26,7 +26,9 @@ export function TablePreviewTab({ tab }: Props) {
     return (
       <div className="tab-error">
         <strong>Table Preview 取得に失敗</strong>
-        <pre>{String((error as any).message ?? error)}</pre>
+        <pre>
+          {error instanceof Error ? error.message : String(error)}
+        </pre>
       </div>
     );
   }

@@ -10,6 +10,7 @@ from solomon.opensearch.client import build_client, ping
 from solomon.opensearch.env import opensearch_username
 from solomon.opensearch.indexer import ensure_index
 from solomon.opensearch.scope import search_tab_scope
+from solomon.opensearch.docs_search import get_document_chunks, search_documents
 from solomon.opensearch.search import keyword_search
 from solomon.transport.config import get_opensearch_config
 from solomon.transport.logging import get_logger
@@ -99,9 +100,18 @@ def search_diagnostics(
 @router.get("/document")
 def get_document(
     _user_ctx: Annotated[UserContext, Depends(require_user_context)],
-    object_key: Annotated[str, Query(min_length=1, max_length=2048)],
+    object_key: Annotated[str | None, Query(max_length=2048)] = None,
+    doc_id: Annotated[str | None, Query(max_length=512)] = None,
 ) -> dict[str, Any]:
-    """Chat 深リンク用: ``fq_name`` またはキーワードで dataset doc を検索。"""
+    """Chat 深リンク用: ``object_key``（dataset）または ``doc_id``（業務文書）。"""
+    if not object_key and not doc_id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "BAD_REQUEST",
+                "message": "object_key or doc_id is required",
+            },
+        )
     config = get_opensearch_config()
     _require_opensearch_or_503()
     assert config is not None
@@ -113,6 +123,21 @@ def get_document(
                 "message": "OpenSearch へ接続できません。",
             },
         )
+    if doc_id:
+        from solomon.opensearch.document_payload import business_document_entry
+
+        entry = business_document_entry(config, doc_id.strip())
+        if not entry:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_code": "SEARCH_DOCUMENT_NOT_FOUND",
+                    "message": f"document not found: {doc_id}",
+                },
+            )
+        return {"document": entry}
+
+    assert object_key is not None
     docs = keyword_search(config, object_key, top_k=1)
     if not docs:
         raise HTTPException(
@@ -130,8 +155,9 @@ def list_documents(
     user_ctx: Annotated[UserContext, Depends(require_user_context)],
     q: Annotated[str, Query(max_length=512)] = "",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    scope: Annotated[str, Query(max_length=16)] = "",
 ) -> dict[str, Any]:
-    """OpenSearch ``solomon-datasets`` インデックスの読み取り専用一覧。"""
+    """OpenSearch 読み取り専用一覧（datasets / docs）。"""
     _ = user_ctx
     config = get_opensearch_config()
     _require_opensearch_or_503()
@@ -146,8 +172,53 @@ def list_documents(
             },
         )
 
+    effective_scope = (scope or search_tab_scope()).lower()
+    if effective_scope not in ("datasets", "docs", "both"):
+        effective_scope = search_tab_scope()
+
     try:
-        documents = _list_dataset_documents(config, q.strip(), limit)
+        if effective_scope == "docs":
+            if not q.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error_code": "BAD_REQUEST",
+                        "message": "docs scope requires non-empty q",
+                    },
+                )
+            result = search_documents(config, q.strip(), top_k=limit)
+            if result.get("status") == "error":
+                raise HTTPException(
+                    status_code=404
+                    if result.get("error_code") == "OPENSEARCH_DOCS_INDEX_MISSING"
+                    else 502,
+                    detail={
+                        "error_code": result.get("error_code"),
+                        "message": result.get("message"),
+                    },
+                )
+            documents = result.get("documents") or []
+            index_name = config.docs_index_name
+        elif effective_scope == "both" and q.strip():
+            ds_docs = _list_dataset_documents(config, q.strip(), limit)
+            doc_result = search_documents(config, q.strip(), top_k=limit)
+            documents = {
+                "datasets": ds_docs,
+                "docs": doc_result.get("documents") or [],
+            }
+            index_name = f"{config.index_name},{config.docs_index_name}"
+            return {
+                "index": index_name,
+                "namespace": config.namespace,
+                "scope": effective_scope,
+                "query": q,
+                "documents": documents,
+            }
+        else:
+            documents = _list_dataset_documents(config, q.strip(), limit)
+            index_name = config.index_name
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         _logger.warning("search.documents_failed", error=str(exc))
         raise HTTPException(
@@ -159,9 +230,41 @@ def list_documents(
         ) from exc
 
     return {
-        "index": config.index_name,
+        "index": index_name,
         "namespace": config.namespace,
-        "scope": search_tab_scope(),
+        "scope": effective_scope,
         "query": q,
         "documents": documents,
+    }
+
+
+@router.get("/doc")
+def get_business_document(
+    _user_ctx: Annotated[UserContext, Depends(require_user_context)],
+    doc_id: Annotated[str, Query(min_length=1, max_length=512)],
+) -> dict[str, Any]:
+    """文書全体（チャンク連結）。"""
+    config = get_opensearch_config()
+    _require_opensearch_or_503()
+    assert config is not None
+    chunks = get_document_chunks(config, doc_id)
+    if not chunks:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "SEARCH_DOCUMENT_NOT_FOUND",
+                "message": f"document not found: {doc_id}",
+            },
+        )
+    meta = chunks[0]
+    full_text = "\n\n".join(str(c.get("text") or "") for c in chunks)
+    return {
+        "doc_id": doc_id,
+        "title": meta.get("title"),
+        "doc_type": meta.get("doc_type"),
+        "doc_type_label": meta.get("doc_type_label"),
+        "metadata": meta.get("metadata"),
+        "chunk_count": len(chunks),
+        "text": full_text[:50000],
+        "chunks": chunks,
     }

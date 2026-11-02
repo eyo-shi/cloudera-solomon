@@ -95,8 +95,8 @@ def make_summary_writer_agent(llm: Optional[Any] = None) -> Agent:
             "見出しレベルは ## から。"
             "分布・トレンド・外れ値・データ品質の 4 観点をカバーし、"
             "根拠のない断定は避ける (統計が None のカラムは 'ヒント不足' と明示)。"
-            "Ossie が存在するテーブルは、Ossie の description / dimensions / "
-            "measures をそのまま踏まえた上で追加情報を書く。"
+            "Ossie が存在するテーブルは、Ossie の description / fields (dimension) / "
+            "metrics / ai_context.examples を踏まえた上で追加情報を書く。"
             "最後に「次に見ると良さそうな SQL」を 2-3 件、"
             "question と sql の組で提案する (Text2SQL の Few-shot に使う想定)。"
         ),
@@ -124,14 +124,14 @@ def make_viz_planner_agent(llm: Optional[Any] = None) -> Agent:
       (時系列 line / カテゴリ bar / KPI など)。
     * その後 LLM が候補の名前を日本語化 (「revenue の推移」→「月次売上の推移」)
       し、意味の薄い Visual を落として最大 4-5 個に絞る。
-    * Ossie に ``sample_queries`` があれば、その意図に沿うように優先順位を調整。
+    * Ossie の ``ai_context.examples`` があれば、その意図に沿うように優先順位を調整。
     """
     return Agent(
         role="Viz Planner",
         goal=(
             "TableInspectionResult のカラム情報から、ダッシュボードで見せる "
             "Visual の集合 (VizPlan) を提案する。まず viz_heuristic を呼んで "
-            "候補を得て、その後 Ossie の description と sample_queries を "
+            "候補を得て、その後 Ossie の description と ai_context.examples を "
             "踏まえて Visual 名を日本語化し、意味の薄いものを落として 3-5 個に絞る。"
             "破壊系のカラム操作は行わない (SELECT / 集計のみ)。"
         ),

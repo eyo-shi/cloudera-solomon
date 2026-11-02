@@ -55,7 +55,7 @@ def make_inspect_table_task(agent: Any) -> Task:
             "  テーブル未存在なら error_code=TRINO_TABLE_NOT_FOUND を返し、"
             "  それ以外のフィールドは空/None で構わない。"
             "(c) ossie_read で fq_name={fq_table_name} を読み、"
-            "  存在すれば description / dimensions / measures を取り出す "
+            "  存在すれば description / fields (dimension 付き列) / metrics / ai_context.examples を取り出す "
             "  (無くても error にせず、ossie_yaml_path=None で継続する)。"
             "(d) trino_query で 'SELECT * FROM {fq_table_name} LIMIT 20' を実行し、"
             "  sample_rows に詰める。0 行でも error にはしない。"
@@ -68,7 +68,7 @@ def make_inspect_table_task(agent: Any) -> Task:
             "table, exists, has_select_priv, error_code, message, columns "
             "(name/trino_type/nullable/null_ratio/distinct_count/low_value/"
             "high_value/role), row_count_estimate, ossie_yaml_path, "
-            "ossie_description, ossie_dimensions, ossie_measures, sample_rows "
+            "ossie_description, ossie_dimension_fields, ossie_metrics, sample_rows "
             "を含む。"
         ),
         agent=agent,
@@ -168,7 +168,7 @@ def make_plan_viz_task(agent: Any, context: list[Task]) -> Task:
             "  (name / trino_type / role / distinct_count / null_ratio) を渡し、"
             "  最大 6 個の Visual 候補を得る。"
             "(b) ossie_read で fq_name={fq_table_name} を読み、"
-            "  存在すれば description / sample_queries を参照する。"
+            "  存在すれば description / ai_context.examples を参照する。"
             "(c) 候補のうち意味の薄いもの (低カーディナリティ dim × 別 dim など) "
             "  を落として 3-5 個に絞り、各 Visual の name を日本語に整える "
             "  (例: 'revenue の推移' → '月次売上の推移')。"

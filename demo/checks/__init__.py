@@ -1,0 +1,1 @@
+"""Demo environment preflight checks."""

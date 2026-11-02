@@ -82,13 +82,13 @@ crews:
     description: '対象テーブル fq_table_name={fq_table_name} を調査せよ。以下の順で必ず実行する: (a) fq_table_name を catalog / schema / table にパースする
       (3 セグメント想定、''iceberg.demo.sales_2024'' → catalog=''iceberg'', schema=''demo'', table=''sales_2024'')。(b) trino_meta
       で columns と SHOW STATS を取る。  権限不足なら error_code=PERM_SELECT_DENIED、  テーブル未存在なら error_code=TRINO_TABLE_NOT_FOUND を返し、  それ以外のフィールドは空/None
-      で構わない。(c) ossie_read で fq_name={fq_table_name} を読み、  存在すれば description / dimensions / measures を取り出す   (無くても error にせず、ossie_yaml_path=None
-      で継続する)。(d) trino_query で ''SELECT * FROM {fq_table_name} LIMIT 20'' を実行し、  sample_rows に詰める。0 行でも error にはしない。(e) 各カラムの
-      role は Ossie に一致名があればそれを、  無ければ trino_type から ''measure'' (数値系) / ''time'' (date/timestamp) /   ''dimension'' (それ以外)
-      を選ぶ。'
+      で構わない。(c) ossie_read で fq_name={fq_table_name} を読み、  存在すれば description / fields (dimension 付き列) / metrics / ai_context.examples
+      を取り出す   (無くても error にせず、ossie_yaml_path=None で継続する)。(d) trino_query で ''SELECT * FROM {fq_table_name} LIMIT 20'' を実行し、  sample_rows
+      に詰める。0 行でも error にはしない。(e) 各カラムの role は Ossie に一致名があればそれを、  無ければ trino_type から ''measure'' (数値系) / ''time'' (date/timestamp)
+      /   ''dimension'' (それ以外) を選ぶ。'
     expected_output: TableInspectionResult の JSON。fq_table_name, catalog, schema, table, exists, has_select_priv, error_code,
       message, columns (name/trino_type/nullable/null_ratio/distinct_count/low_value/high_value/role), row_count_estimate,
-      ossie_yaml_path, ossie_description, ossie_dimensions, ossie_measures, sample_rows を含む。
+      ossie_yaml_path, ossie_description, ossie_dimension_fields, ossie_metrics, sample_rows を含む。
     output_model: TableInspectionResult
     inputs:
     - fq_table_name
@@ -126,13 +126,13 @@ crews:
     description: '対象テーブル fq_table_name={fq_table_name} を調査せよ。以下の順で必ず実行する: (a) fq_table_name を catalog / schema / table にパースする
       (3 セグメント想定、''iceberg.demo.sales_2024'' → catalog=''iceberg'', schema=''demo'', table=''sales_2024'')。(b) trino_meta
       で columns と SHOW STATS を取る。  権限不足なら error_code=PERM_SELECT_DENIED、  テーブル未存在なら error_code=TRINO_TABLE_NOT_FOUND を返し、  それ以外のフィールドは空/None
-      で構わない。(c) ossie_read で fq_name={fq_table_name} を読み、  存在すれば description / dimensions / measures を取り出す   (無くても error にせず、ossie_yaml_path=None
-      で継続する)。(d) trino_query で ''SELECT * FROM {fq_table_name} LIMIT 20'' を実行し、  sample_rows に詰める。0 行でも error にはしない。(e) 各カラムの
-      role は Ossie に一致名があればそれを、  無ければ trino_type から ''measure'' (数値系) / ''time'' (date/timestamp) /   ''dimension'' (それ以外)
-      を選ぶ。'
+      で構わない。(c) ossie_read で fq_name={fq_table_name} を読み、  存在すれば description / fields (dimension 付き列) / metrics / ai_context.examples
+      を取り出す   (無くても error にせず、ossie_yaml_path=None で継続する)。(d) trino_query で ''SELECT * FROM {fq_table_name} LIMIT 20'' を実行し、  sample_rows
+      に詰める。0 行でも error にはしない。(e) 各カラムの role は Ossie に一致名があればそれを、  無ければ trino_type から ''measure'' (数値系) / ''time'' (date/timestamp)
+      /   ''dimension'' (それ以外) を選ぶ。'
     expected_output: TableInspectionResult の JSON。fq_table_name, catalog, schema, table, exists, has_select_priv, error_code,
       message, columns (name/trino_type/nullable/null_ratio/distinct_count/low_value/high_value/role), row_count_estimate,
-      ossie_yaml_path, ossie_description, ossie_dimensions, ossie_measures, sample_rows を含む。
+      ossie_yaml_path, ossie_description, ossie_dimension_fields, ossie_metrics, sample_rows を含む。
     output_model: TableInspectionResult
     inputs:
     - fq_table_name
@@ -143,7 +143,7 @@ crews:
     agent: viz_planner
     description: '前タスクの TableInspectionResult のカラム情報から、以下の手順でダッシュボード構成 (VizPlan) を作れ: (a) viz_heuristic に fq_table_name と
       columns   (name / trino_type / role / distinct_count / null_ratio) を渡し、  最大 6 個の Visual 候補を得る。(b) ossie_read で fq_name={fq_table_name}
-      を読み、  存在すれば description / sample_queries を参照する。(c) 候補のうち意味の薄いもの (低カーディナリティ dim × 別 dim など)   を落として 3-5 個に絞り、各 Visual
+      を読み、  存在すれば description / ai_context.examples を参照する。(c) 候補のうち意味の薄いもの (低カーディナリティ dim × 別 dim など)   を落として 3-5 個に絞り、各 Visual
       の name を日本語に整える   (例: ''revenue の推移'' → ''月次売上の推移'')。(d) title は ''このテーブルは何のダッシュボードか'' が伝わる短い日本語に。破壊系のカラム操作は絶対に含めず、SELECT
       / 集計に限定する。'
     expected_output: VizPlan の JSON。fq_table_name, title, visuals ([{name, viz_type, x, y, aggregation, group_by, description}])

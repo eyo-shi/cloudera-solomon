@@ -16,12 +16,13 @@ LLM 構築失敗時は heuristic にフォールバックする。
 from __future__ import annotations
 
 import asyncio
+import queue
 import uuid
-from typing import Annotated, Any, AsyncIterator, Optional
+from typing import Annotated, Any, AsyncIterator, Literal, Optional
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 from solomon.analytics.crew import (
@@ -58,6 +59,9 @@ router = APIRouter(prefix="/api", tags=["wish"])
 _logger = get_logger(__name__)
 
 
+RagSourceName = Literal["table", "graph", "search"]
+
+
 class WishRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=8192)
     session_id: Optional[str] = None
@@ -66,6 +70,19 @@ class WishRequest(BaseModel):
         max_length=128,
         description="互換用 (取り込みは別プロジェクト)。現行 Router では未使用。",
     )
+    sources: Optional[list[RagSourceName]] = Field(
+        None,
+        description="Knowledge RAG の有効ソース。省略時は SOLOMON_RAG_SOURCES 既定。",
+    )
+
+    @field_validator("sources")
+    @classmethod
+    def sources_non_empty(
+        cls, value: Optional[list[RagSourceName]]
+    ) -> Optional[list[RagSourceName]]:
+        if value is not None and len(value) == 0:
+            raise ValueError("sources must not be empty")
+        return value
 
 
 @router.post("/wish")
@@ -172,6 +189,7 @@ async def post_wish(
                     user_ctx=user_ctx,
                     session_id=session.session_id,
                     question=str(plan.inputs.get("question") or body.prompt),
+                    sources=body.sources,
                     artifacts_created=artifacts_created,
                     response_md_parts=response_md_parts,
                     error_holder=error_holder,
@@ -445,21 +463,71 @@ async def _handle_summary(
 # ------------------------------------------------------------------ #
 # Analytics Dashboard path
 # ------------------------------------------------------------------ #
+def _sse_activity_for_tool(name: str) -> str:
+    return {
+        "sql_query": "Querying lakehouse",
+        "graph_query": "Querying graph",
+        "doc_search": "Searching documents",
+    }.get(name, "Running tool")
+
+
+def _doc_search_expansion_narrative(
+    original: str,
+    expanded: list[str],
+) -> str | None:
+    if not expanded:
+        return None
+    parts = [str(x).strip() for x in expanded if str(x).strip()][:4]
+    if not parts:
+        return None
+    joined = "」「".join(parts)
+    orig = (original or "").strip()[:80]
+    return f"「{orig}」を「{joined}」でも検索しました"
+
+
+def _format_tool_start_message(name: str, args: dict[str, Any]) -> str:
+    if name == "graph_query" and args.get("cypher"):
+        cypher = str(args["cypher"]).strip().replace("\n", " ")
+        if len(cypher) > 120:
+            cypher = cypher[:117] + "..."
+        return f"graph_query: {cypher}"
+    if name == "sql_query":
+        if args.get("sql"):
+            sql = str(args["sql"]).strip().replace("\n", " ")
+            if len(sql) > 120:
+                sql = sql[:117] + "..."
+            return f"sql_query: {sql}"
+        q = str(args.get("question") or "")[:100]
+        return f"sql_query: {q}"
+    if name == "doc_search":
+        return f"doc_search: {str(args.get('query') or '')[:100]}"
+    return name
+
+
 async def _handle_knowledge_rag(
     *,
     request: Request,
     user_ctx: UserContext,
     session_id: str,
     question: str,
+    sources: Optional[list[RagSourceName]] = None,
     artifacts_created: list[str],
     response_md_parts: list[str],
     error_holder: list[Optional[str]],
 ) -> AsyncIterator[dict]:
-    """Agentic RAG (Knowledge Router + Multi-Source Retrieval) を実行する。"""
+    """Agentic RAG (heuristic または Knowledge ツールエージェント) を実行する。"""
+    from solomon.rag.sources import format_sources_status_message, resolve_rag_sources
+    from solomon.transport.config import get_rag_default_sources
+
+    enabled, _disabled = resolve_rag_sources(
+        sources, default=get_rag_default_sources()
+    )
+    sources_msg = format_sources_status_message(enabled)
+
     yield sse_step(
-        "KnowledgeRagCrew",
+        "KnowledgeAgent",
         "running",
-        "ナレッジソースを横断検索しています...",
+        sources_msg,
     )
 
     scoped_ctx = UserContext(
@@ -470,22 +538,100 @@ async def _handle_knowledge_rag(
         session_id=session_id,
     )
 
+    events: queue.Queue[dict[str, Any]] = queue.Queue()
+
+    def _on_event(ev: dict[str, Any]) -> None:
+        events.put(ev)
+
     def _run() -> dict:
         return kickoff_knowledge_rag(
             user_ctx=scoped_ctx,
             prompt=question,
+            on_event=_on_event,
+            sources=list(sources) if sources is not None else None,
         )
 
     task = asyncio.create_task(asyncio.to_thread(_run))
 
     while not task.done():
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+            await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
         except asyncio.TimeoutError:
             if await request.is_disconnected():
                 task.cancel()
                 return
-            yield sse_step("KnowledgeRagCrew", "running", "検索・統合中...")
+            while True:
+                try:
+                    ev = events.get_nowait()
+                except queue.Empty:
+                    break
+                if ev.get("type") == "thought" and ev.get("text"):
+                    yield sse_narrative(str(ev["text"])[:300])
+                elif ev.get("type") == "tool_start":
+                    name = str(ev.get("name") or "tool")
+                    args = ev.get("args") if isinstance(ev.get("args"), dict) else {}
+                    yield sse_step(
+                        "KnowledgeAgent",
+                        "running",
+                        _format_tool_start_message(name, args),
+                        activity=_sse_activity_for_tool(name),
+                    )
+                elif ev.get("type") == "tool_end":
+                    name = str(ev.get("name") or "tool")
+                    if name == "doc_search":
+                        exp = ev.get("expanded_queries")
+                        if isinstance(exp, list) and exp:
+                            narr = _doc_search_expansion_narrative(
+                                str(ev.get("query") or ""),
+                                exp,
+                            )
+                            if narr:
+                                yield sse_narrative(narr)
+                    if ev.get("cached"):
+                        yield sse_step(
+                            "KnowledgeAgent",
+                            "done",
+                            f"{name}: cached",
+                            activity=_sse_activity_for_tool(name),
+                        )
+                    else:
+                        cnt = ev.get("count", 0)
+                        ms = ev.get("duration_ms", 0)
+                        st = "done" if ev.get("ok") else "error"
+                        yield sse_step(
+                            "KnowledgeAgent",
+                            st,
+                            f"{name}: {cnt} hits, {ms}ms",
+                            activity=_sse_activity_for_tool(name),
+                        )
+
+    while True:
+        try:
+            ev = events.get_nowait()
+        except queue.Empty:
+            break
+        if ev.get("type") == "thought" and ev.get("text"):
+            yield sse_narrative(str(ev["text"])[:300])
+        elif ev.get("type") == "tool_end" and not ev.get("cached"):
+            name = str(ev.get("name") or "tool")
+            if name == "doc_search":
+                exp = ev.get("expanded_queries")
+                if isinstance(exp, list) and exp:
+                    narr = _doc_search_expansion_narrative(
+                        str(ev.get("query") or ""),
+                        exp,
+                    )
+                    if narr:
+                        yield sse_narrative(narr)
+            cnt = ev.get("count", 0)
+            ms = ev.get("duration_ms", 0)
+            st = "done" if ev.get("ok") else "error"
+            yield sse_step(
+                "KnowledgeAgent",
+                st,
+                f"{name}: {cnt} hits, {ms}ms",
+                activity=_sse_activity_for_tool(name),
+            )
 
     result = await task
     if result.get("status") != "ok":
@@ -495,11 +641,13 @@ async def _handle_knowledge_rag(
         yield sse_error(code, msg)
         return
 
-    strategy = result.get("strategy", "")
+    engine = result.get("engine", "heuristic")
+    steps = result.get("steps", 0)
+    hit_count = result.get("hit_count", 0)
     yield sse_step(
-        "KnowledgeRagCrew",
+        "KnowledgeAgent",
         "done",
-        f"strategy={strategy}, hits={result.get('hit_count', 0)}",
+        f"engine={engine}, steps={steps}, hits={hit_count}",
     )
 
     md = result.get("answer_markdown") or ""
@@ -507,7 +655,40 @@ async def _handle_knowledge_rag(
         response_md_parts.append(md)
         yield sse_token(md)
 
+    if "graph" not in enabled:
+        return
+
     hits = result.get("hits") or []
+    strategy = result.get("strategy", "")
+
+    if engine == "agent":
+        last_cypher = _last_successful_graph_cypher(result.get("tool_calls") or [])
+        if last_cypher:
+            store = get_store()
+            title = "Graph query"
+            art = store.register_artifact(
+                "graph",
+                ref={
+                    "query_type": "cypher",
+                    "cypher": last_cypher["cypher"],
+                    "params": last_cypher.get("params") or {},
+                    "title": title,
+                },
+                session_id=session_id,
+            )
+            artifacts_created.append(art.artifact_id)
+            yield sse_artifact(
+                art.artifact_id,
+                "graph",
+                ref={
+                    "query_type": "cypher",
+                    "cypher": last_cypher["cypher"],
+                    "params": last_cypher.get("params") or {},
+                    "title": title,
+                },
+            )
+        return
+
     graph_hits = [h for h in hits if h.get("source") == "graph"]
     if graph_hits or strategy in ("GRAPH_QUERY", "COMPOSITE"):
         entity_hint = _graph_entity_hint_from_rag(result, question)
@@ -540,6 +721,26 @@ async def _handle_knowledge_rag(
                     )
             except Exception as exc:  # noqa: BLE001
                 _logger.debug("knowledge_rag.graph_artifact_skipped", error=str(exc))
+
+
+def _last_successful_graph_cypher(
+    tool_calls: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Agent セッション内の最後の成功 graph_query（Cypher + params）。"""
+    last: dict[str, Any] | None = None
+    for tc in tool_calls:
+        if tc.get("name") != "graph_query" or not tc.get("ok"):
+            continue
+        args = tc.get("args") if isinstance(tc.get("args"), dict) else {}
+        cypher = str(args.get("cypher") or "").strip()
+        if not cypher:
+            continue
+        params = args.get("params")
+        last = {
+            "cypher": cypher,
+            "params": params if isinstance(params, dict) else {},
+        }
+    return last
 
 
 def _graph_entity_hint_from_rag(result: dict, question: str) -> str | None:

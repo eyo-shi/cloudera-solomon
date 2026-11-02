@@ -24,10 +24,13 @@ export interface WishStreamHandlers {
   signal?: AbortSignal;
 }
 
+export type RagSourceName = "table" | "graph" | "search";
+
 export interface WishRequestBody {
   prompt: string;
   session_id?: string | null;
   target_schema?: string;
+  sources?: RagSourceName[];
 }
 
 /**

@@ -1,0 +1,33 @@
+version: "0.2"
+name: demo_validate
+description: Neutral validation fixture.
+ai_context:
+  examples:
+    - ナレッジベースで主要エンティティの ID を教えて
+datasets:
+  - name: entities
+    source: iceberg.demo_schema.entities
+    primary_key: [entity_id]
+    fields:
+      - name: entity_id
+        datatype: String
+      - name: name
+        datatype: String
+    custom_extensions:
+      - vendor_name: SOLOMON
+        data:
+          version: 1
+          kind: table
+  - name: links
+    source: iceberg.demo_schema.links
+    fields:
+      - name: from_id
+        datatype: String
+      - name: to_id
+        datatype: String
+relationships:
+  - name: link_entity
+    from: links
+    to: entities
+    from_columns: [from_id]
+    to_columns: [entity_id]

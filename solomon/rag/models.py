@@ -12,6 +12,7 @@ RetrievalStrategy = Literal[
     "KEYWORD",
     "HYBRID",
     "COMPOSITE",
+    "AGENT",
 ]
 
 
@@ -45,6 +46,7 @@ class RetrievalBundle(BaseModel):
     plan: RetrievalPlan
     hits: list[SourceHit] = Field(default_factory=list)
     errors: list[dict[str, str]] = Field(default_factory=list)
+    disabled_sources: list[str] = Field(default_factory=list)
 
 
 class KnowledgeRagResult(BaseModel):
@@ -54,3 +56,4 @@ class KnowledgeRagResult(BaseModel):
     bundle: RetrievalBundle
     answer_markdown: str = ""
     sql_executed: Optional[str] = None
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)

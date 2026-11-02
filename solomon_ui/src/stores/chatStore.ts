@@ -6,6 +6,11 @@
  */
 import { create } from "zustand";
 import type { SetupGuideError } from "../api/client";
+import type { RagSourcesPreset } from "../panes/ChatPane/ragSources";
+import {
+  loadRagSourcesPreset,
+  saveRagSourcesPreset,
+} from "../panes/ChatPane/ragSources";
 
 export interface ChatAttachment {
   name: string;
@@ -23,6 +28,8 @@ export interface ChatMessage {
   /** エラーコード (Solomon 側) */
   errorCode?: string;
   errorMessage?: string;
+  /** Knowledge RAG 送信時のソース構成プリセット */
+  ragSourcesPreset?: RagSourcesPreset;
   /** このターンの Router / Crew 実行ログ (SSE step) */
   activitySteps?: StepEntry[];
   /** Cursor 風 Thinking 内の短文ログ (SSE narrative) */
@@ -49,9 +56,18 @@ interface ChatState {
   pendingPrompt: string | null;
   /** Deploy 後の設定不足 (LLM / Trino / CDV 等) — ユーザーが ✕ するまで保持。 */
   setupErrors: SetupGuideError[];
+  ragSourcesPreset: RagSourcesPreset;
+  setRagSourcesPreset: (preset: RagSourcesPreset) => void;
   setPendingPrompt: (t: string | null) => void;
   appendUser: (text: string, attachments?: ChatAttachment[]) => string;
-  appendSolomon: (text: string, opts?: { artifactIds?: string[]; errorCode?: string }) => string;
+  appendSolomon: (
+    text: string,
+    opts?: {
+      artifactIds?: string[];
+      errorCode?: string;
+      ragSourcesPreset?: RagSourcesPreset;
+    },
+  ) => string;
   appendToLastSolomon: (delta: string) => void;
   removeLastEmptySolomon: () => void;
   addStep: (step: StepEntry) => void;
@@ -79,6 +95,11 @@ export const useChatStore = create<ChatState>((set) => ({
   streaming: false,
   pendingPrompt: null,
   setupErrors: [],
+  ragSourcesPreset: loadRagSourcesPreset(),
+  setRagSourcesPreset: (preset) => {
+    saveRagSourcesPreset(preset);
+    set({ ragSourcesPreset: preset });
+  },
   setPendingPrompt: (t) => set({ pendingPrompt: t }),
   addSetupError: (e) =>
     set((s) => {
@@ -116,6 +137,7 @@ export const useChatStore = create<ChatState>((set) => ({
           text,
           artifactIds: opts?.artifactIds ?? [],
           errorCode: opts?.errorCode,
+          ragSourcesPreset: opts?.ragSourcesPreset,
           createdAt: Date.now(),
         },
       ],

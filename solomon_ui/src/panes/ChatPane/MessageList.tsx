@@ -6,6 +6,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { useTabStore } from "../../stores/tabStore";
 import { ActivityTimeline } from "./ActivityTimeline";
+import { presetBadgeLabel } from "./ragSources";
 
 export function MessageList() {
   const messages = useChatStore((s) => s.messages);
@@ -63,6 +64,11 @@ export function MessageList() {
           >
             {m.role === "solomon" ? (
               <div className="chat-turn__assistant">
+                {m.ragSourcesPreset && (
+                  <span className="chat-rag-badge" title="Knowledge RAG ソース構成">
+                    {presetBadgeLabel(m.ragSourcesPreset)}
+                  </span>
+                )}
                 {showTimeline && (
                   <ActivityTimeline
                     steps={steps}

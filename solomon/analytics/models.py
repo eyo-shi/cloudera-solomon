@@ -79,8 +79,8 @@ class TableInspectionResult(BaseModel):
     # Ossie 情報 (無ければ None のまま — Summary は LLM に「無い」と教える)
     ossie_yaml_path: Optional[str] = None
     ossie_description: Optional[str] = None
-    ossie_dimensions: list[str] = Field(default_factory=list)
-    ossie_measures: list[str] = Field(default_factory=list)
+    ossie_dimension_fields: list[str] = Field(default_factory=list)
+    ossie_metrics: list[str] = Field(default_factory=list)
 
     # LLM が具体例を出せるように 5-20 行の生サンプルを付ける
     sample_rows: list[dict[str, Any]] = Field(default_factory=list)

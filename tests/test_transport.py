@@ -302,8 +302,8 @@ class TestBaseSolomonTool:
         from solomon.transport.tool_base import BaseSolomonTool
 
         class MyTool(BaseSolomonTool):
-            name = "my_tool"
-            description = "test"
+            name: str = "my_tool"
+            description: str = "test"
 
             def run(self, user_ctx, **kwargs):
                 return ok({"echo": kwargs})
@@ -316,8 +316,8 @@ class TestBaseSolomonTool:
         from solomon.transport.tool_base import BaseSolomonTool
 
         class EchoTool(BaseSolomonTool):
-            name = "echo"
-            description = "echo"
+            name: str = "echo"
+            description: str = "echo"
 
             def run(self, user_ctx, **kwargs):
                 return ok({"who": user_ctx.user_name, "args": kwargs})
@@ -333,8 +333,8 @@ class TestBaseSolomonTool:
         from solomon.transport.tool_base import BaseSolomonTool
 
         class BoomTool(BaseSolomonTool):
-            name = "boom"
-            description = "raises"
+            name: str = "boom"
+            description: str = "raises"
 
             def run(self, user_ctx, **kwargs):
                 raise RuntimeError("kaboom")
@@ -351,8 +351,8 @@ class TestBaseSolomonTool:
         from solomon.transport.tool_base import BaseSolomonTool
 
         class BadTool(BaseSolomonTool):
-            name = "bad"
-            description = "returns wrong shape"
+            name: str = "bad"
+            description: str = "returns wrong shape"
 
             def run(self, user_ctx, **kwargs):
                 return "not a dict"  # type: ignore[return-value]
@@ -369,9 +369,9 @@ class TestBaseSolomonTool:
         from solomon.transport.tool_base import BaseSolomonTool
 
         class OpenTool(BaseSolomonTool):
-            name = "open"
-            description = "no auth needed"
-            requires_auth = False
+            name: str = "open"
+            description: str = "no auth needed"
+            requires_auth: bool = False
 
             def run(self, user_ctx, **kwargs):
                 return ok({"user": user_ctx.user_name if user_ctx else None})

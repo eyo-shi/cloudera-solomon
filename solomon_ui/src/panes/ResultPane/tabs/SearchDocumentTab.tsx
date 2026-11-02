@@ -1,6 +1,7 @@
 /**
- * OpenSearch inspection / dataset ドキュメントの詳細（Bronze payload 等）。
+ * OpenSearch inspection / dataset / business 文書の詳細。
  */
+import { useEffect, useRef } from "react";
 import type { SearchDocumentEntry, TabDescriptor } from "../../../types";
 import type { useTabStore } from "../../../stores/tabStore";
 
@@ -24,10 +25,79 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
   );
 }
 
-export function SearchDocumentTab({ tab }: Props) {
-  const doc = asDocument(tab.ref);
-  if (!doc) return <p className="placeholder">ドキュメント参照がありません</p>;
+function BusinessDocumentBody({ doc }: { doc: SearchDocumentEntry }) {
+  const highlightRef = useRef<HTMLElement | null>(null);
+  const targetChunk = doc.chunk_id?.trim() || null;
+  const labels = doc.metadata_labels ?? {};
+  const metadata = doc.metadata ?? {};
 
+  useEffect(() => {
+    highlightRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [doc.doc_id, targetChunk]);
+
+  const metaEntries = Object.entries(metadata).filter(
+    ([, v]) => v !== null && v !== undefined && String(v).trim() !== "",
+  );
+
+  const chunks =
+    doc.chunks && doc.chunks.length > 0
+      ? doc.chunks
+      : doc.text
+        ? [{ chunk_id: null, section: null, text: doc.text }]
+        : [];
+
+  return (
+    <>
+      <div className="tab-meta search-doc-meta">
+        {doc.doc_type_label && (
+          <div className="search-doc-meta__row search-doc-meta__row--primary">
+            <span className="search-doc-meta__value">{doc.doc_type_label}</span>
+          </div>
+        )}
+        {doc.doc_date && (
+          <div className="search-doc-meta__row">
+            <span className="search-doc-meta__value">{doc.doc_date}</span>
+          </div>
+        )}
+        {doc.index && <MetaRow label="Index" value={doc.index} />}
+      </div>
+      {metaEntries.length > 0 && (
+        <div className="search-doc-meta search-doc-meta--grid">
+          {metaEntries.map(([key, val]) => (
+            <MetaRow
+              key={key}
+              label={labels[key] ?? key}
+              value={String(val)}
+            />
+          ))}
+        </div>
+      )}
+      <div className="search-doc-sections">
+        {chunks.map((chunk, i) => {
+          const cid = chunk.chunk_id?.trim() || null;
+          const isTarget = targetChunk && cid === targetChunk;
+          const sectionTitle = chunk.section?.trim() || (cid ? `Section ${cid}` : `Part ${i + 1}`);
+          return (
+            <section
+              key={cid ?? `part-${i}`}
+              ref={isTarget ? highlightRef : undefined}
+              className={
+                isTarget
+                  ? "search-doc-section search-doc-section--highlight"
+                  : "search-doc-section"
+              }
+            >
+              <h4 className="search-doc-section__title">{sectionTitle}</h4>
+              <pre className="search-doc-section__text">{chunk.text ?? ""}</pre>
+            </section>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function LegacyDocumentBody({ doc }: { doc: SearchDocumentEntry }) {
   const payload = doc.payload ?? doc.dataset;
   const payloadJson =
     payload !== undefined && payload !== null
@@ -35,7 +105,7 @@ export function SearchDocumentTab({ tab }: Props) {
       : null;
 
   return (
-    <div className="tab-content tab-content--search-document">
+    <>
       <div className="tab-meta search-doc-meta">
         <MetaRow label="Index" value={doc.index ?? undefined} />
         <MetaRow label="Format" value={doc.format ?? undefined} />
@@ -52,11 +122,29 @@ export function SearchDocumentTab({ tab }: Props) {
       ) : (
         <p className="placeholder">payload がありません</p>
       )}
+    </>
+  );
+}
+
+export function SearchDocumentTab({ tab }: Props) {
+  const doc = asDocument(tab.ref);
+  if (!doc) return <p className="placeholder">ドキュメント参照がありません</p>;
+
+  return (
+    <div className="tab-content tab-content--search-document">
+      {doc.document_type === "doc" ? (
+        <BusinessDocumentBody doc={doc} />
+      ) : (
+        <LegacyDocumentBody doc={doc} />
+      )}
     </div>
   );
 }
 
 export function searchDocumentDedupeKey(doc: SearchDocumentEntry): string {
+  if (doc.doc_id) {
+    return `search:doc:${doc.doc_id}`;
+  }
   const id =
     doc.object_key ??
     doc.fq_name ??

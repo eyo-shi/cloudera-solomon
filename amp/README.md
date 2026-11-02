@@ -8,7 +8,7 @@ Cloudera AI Workbench の AMP カタログから 1 クリックで Solomon を�
 |---|---|---|
 | 1 | `01_install_python_deps.py` | `pip install -e . --no-deps`（依存は Solomon Edition Runtime に bake 済み） |
 | 2 | `02_build_ui.py` | nvm で Node.js 20 を自動導入 → `npm ci` / `npm run build` → `solomon/api/static/` |
-| 3 | `03_seed_semantic.py` | `semantic/{datasets,metrics,...}` を用意し、Git 初期化 (既存 repo は no-op) |
+| 3 | `03_seed_semantic.py` | `semantic/models/` を用意し、Git 初期化 (既存 repo は no-op) |
 | 4 | `04_verify_manifest.py` | `python -m solomon.manifest --check` で Python ⇄ YAML drift を検出 |
 | 5 | `05_start_application.py` | env 正規化 → `CDSW_APP_PORT` 待機 → uvicorn 起動 |
 

@@ -49,7 +49,9 @@ export function FilePreviewTab({ tab }: Props) {
     return (
       <div className="tab-error">
         <strong>File Preview 失敗</strong>
-        <pre>{String((error as any).message ?? error)}</pre>
+        <pre>
+          {error instanceof Error ? error.message : String(error)}
+        </pre>
       </div>
     );
   }

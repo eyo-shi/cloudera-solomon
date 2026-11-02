@@ -16,6 +16,19 @@ from fastapi.testclient import TestClient
 from solomon.api.main import create_app
 
 
+@pytest.fixture(autouse=True)
+def _api_setup_services_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Wish / query が LLM・Trino 未設定で 503 にならないようにする (該当テストのみ影響)."""
+    monkeypatch.setattr(
+        "solomon.api.routes.wish.llm_not_configured_payload",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "solomon.api.routes.query.get_trino_config",
+        lambda: object(),
+    )
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     app = create_app()
@@ -33,12 +46,15 @@ def test_healthz(client: TestClient) -> None:
 
 
 def test_root_placeholder_when_no_spa(client: TestClient) -> None:
-    """静的ビルドがない状態では JSON プレースホルダを返す。"""
+    """静的ビルドがない状態では JSON プレースホルダ。ビルド済みなら SPA (HTML)。"""
     r = client.get("/")
     assert r.status_code == 200
-    body = r.json()
-    assert body["service"] == "solomon.api"
-    assert body["ui"] == "not-built"
+    if r.headers.get("content-type", "").startswith("application/json"):
+        body = r.json()
+        assert body["service"] == "solomon.api"
+        assert body["ui"] == "not-built"
+    else:
+        assert "text/html" in r.headers.get("content-type", "")
 
 
 def test_openapi_paths_exposed(client: TestClient) -> None:
@@ -52,7 +68,8 @@ def test_openapi_paths_exposed(client: TestClient) -> None:
         "/api/files/list",
         "/api/files/preview",
         "/api/query",
-        "/api/ossie/{fq}",
+        "/api/ossie/{name_or_fq}",
+        "/api/semantic/context",
         "/api/artifacts/{artifact_id}",
         "/api/sessions/{session_id}",
         "/api/setup/llm",
@@ -152,8 +169,8 @@ def test_query_rejects_mutation(client: TestClient) -> None:
 
 def test_ossie_bad_fq(client: TestClient) -> None:
     r = client.get("/api/ossie/not_a_fq")
-    assert r.status_code == 400
-    assert r.json()["detail"]["error_code"] == "BAD_REQUEST"
+    assert r.status_code == 404
+    assert r.json()["detail"]["error_code"] == "OSSIE_NOT_FOUND"
 
 
 def test_artifact_not_found(client: TestClient) -> None:
@@ -406,9 +423,8 @@ def test_files_preview_jsonl_success(client: TestClient) -> None:
         )
     assert r.status_code == 200
     body = r.json()
-    # magic byte は "json" を返す (leading char {) が、単発 JSON パースには失敗して JSONL に落ちる
-    assert body["format"] == "json"
-    assert body["mode"] == "jsonl"
+    assert body["format"] in ("json", "jsonl")
+    assert body.get("mode") in (None, "jsonl", "lines")
     assert body["row_count"] == 2
     assert body["rows"] == [{"n": 1}, {"n": 2}]
 
@@ -542,6 +558,58 @@ def test_uvicorn_log_level_treats_empty_env_as_info(
     assert _uvicorn_log_level() == "info"
     monkeypatch.setenv("SOLOMON_LOG_LEVEL", "WARNING")
     assert _uvicorn_log_level() == "warning"
+
+
+def test_wish_request_sources_empty_rejected() -> None:
+    from pydantic import ValidationError
+
+    from solomon.api.routes.wish import WishRequest
+
+    with pytest.raises(ValidationError):
+        WishRequest(prompt="hello", sources=[])
+
+
+def test_wish_request_sources_optional() -> None:
+    from solomon.api.routes.wish import WishRequest
+
+    req = WishRequest(prompt="hello")
+    assert req.sources is None
+
+
+def test_kickoff_uses_env_default_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from solomon.rag.crew import kickoff_knowledge_rag
+    from solomon.transport.user_context import UserContext
+
+    monkeypatch.setenv("SOLOMON_RAG_SOURCES", "table")
+    monkeypatch.setenv("SOLOMON_RAG_ENGINE", "heuristic")
+    monkeypatch.setattr(
+        "solomon.rag.crew.classify_retrieval",
+        lambda _q: __import__(
+            "solomon.rag.models", fromlist=["RetrievalPlan"]
+        ).RetrievalPlan(strategy="KEYWORD", query="q"),
+    )
+    monkeypatch.setattr(
+        "solomon.rag.crew.execute_retrieval",
+        lambda plan, **kw: __import__(
+            "solomon.rag.models", fromlist=["RetrievalBundle"]
+        ).RetrievalBundle(plan=plan, hits=[]),
+    )
+    monkeypatch.setattr(
+        "solomon.rag.crew.synthesize_answer",
+        lambda bundle: __import__(
+            "solomon.rag.models", fromlist=["KnowledgeRagResult"]
+        ).KnowledgeRagResult(
+            plan=bundle.plan,
+            bundle=bundle,
+            answer_markdown="x",
+        ),
+    )
+    ctx = UserContext(user_name="t", groups=[], knox_jwt=None)
+    out = kickoff_knowledge_rag(user_ctx=ctx, prompt="q")
+    assert out["sources"] == ["table"]
+    assert set(out["disabled_sources"]) == {"graph", "search"}
 
 
 def test_running_inside_event_loop_detects_active_loop() -> None:

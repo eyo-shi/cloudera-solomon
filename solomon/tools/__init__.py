@@ -12,8 +12,7 @@ Router / CDV / Viz)。
   Excel:      :class:`ExcelHeaderDetectTool`, :class:`ExcelHeaderValidateTool`
   Schema:     :class:`TypeInferTool`, :class:`NameProposerTool`
   DataFrame:  :class:`DataFramePreviewTool`
-  Ossie:      :class:`OssieReadTool`, :class:`OssieWriteTool`, :class:`OssieSearchTool`,
-              :class:`SimilarTableSearchTool`
+  Ossie:      :class:`OssieReadTool`, :class:`OssieSearchTool`
   Router:     :class:`EntityMemoryReadTool`, :class:`AnalyticsKickoffTool`
   CDV:        :class:`CDVStartupCheckTool`, :class:`CDVDatasetTool`,
               :class:`CDVVisualTool`, :class:`CDVDashboardTool`
@@ -39,16 +38,12 @@ from solomon.tools.format import (
     ParquetMetaTool,
 )
 from solomon.tools.iceberg import IcebergCreateTableTool, TableExistsTool
-from solomon.tools.ossie import (
-    OssieReadTool,
-    OssieSearchTool,
-    OssieWriteTool,
-    SimilarTableSearchTool,
-)
+from solomon.tools.ossie import OssieReadTool, OssieSearchTool
 from solomon.tools.s3 import S3GetRangeTool, S3HeadTool, S3ListTool
 from solomon.tools.schema import NameProposerTool, TypeInferTool
 from solomon.tools.graph_cypher_query import GraphCypherQueryTool
 from solomon.tools.opensearch import (
+    DocumentSearchTool,
     OpenSearchHybridSearchTool,
     OpenSearchKeywordSearchTool,
     OpenSearchPingTool,
@@ -85,9 +80,7 @@ __all__ = [
     "DataFramePreviewTool",
     # ossie
     "OssieReadTool",
-    "OssieWriteTool",
     "OssieSearchTool",
-    "SimilarTableSearchTool",
     # router
     "EntityMemoryReadTool",
     "AnalyticsKickoffTool",
@@ -105,6 +98,7 @@ __all__ = [
     "OpenSearchVectorSearchTool",
     "OpenSearchHybridSearchTool",
     "OpenSearchPingTool",
+    "DocumentSearchTool",
     # rag
     "Text2SQLTool",
 ]

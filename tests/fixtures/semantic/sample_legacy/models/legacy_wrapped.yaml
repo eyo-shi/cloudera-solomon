@@ -1,0 +1,15 @@
+semantic_model:
+  - version: "0.1"
+    name: legacy_sample
+    description: Ossie 0.1.x wrapped format fixture.
+    datasets:
+      - name: products
+        source: demo_catalog.demo_schema.products
+        description: Product catalog.
+        fields:
+          - name: product_id
+            datatype: String
+          - name: product_name
+            datatype: String
+            dimension:
+              is_time: false

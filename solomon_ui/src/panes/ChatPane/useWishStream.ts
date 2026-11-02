@@ -17,6 +17,7 @@ import {
 } from "../../api/explorerRefresh";
 import { streamWish } from "../../api/wish";
 import { useChatStore, type ChatAttachment } from "../../stores/chatStore";
+import { presetToSources } from "./ragSources";
 import { useSessionStore } from "../../stores/sessionStore";
 import { ensureGraphTab, useGraphStore } from "../../stores/graphStore";
 import { useTabStore } from "../../stores/tabStore";
@@ -51,6 +52,7 @@ export function useWishStream(): UseWishStream {
   const openTab = useTabStore((s) => s.openTab);
   const sessionId = useSessionStore((s) => s.sessionId);
   const setSessionId = useSessionStore((s) => s.setSessionId);
+  const ragSourcesPreset = useChatStore((s) => s.ragSourcesPreset);
 
   const cancel = useCallback(() => {
     userCancelledRef.current = true;
@@ -96,10 +98,16 @@ export function useWishStream(): UseWishStream {
 
       const finalPrompt = buildPromptWithAttachments(trimmed, uploaded);
       appendUser(trimmed || "(ファイル添付)", uploaded);
-      appendSolomon("");
+      appendSolomon("", { ragSourcesPreset });
+
+      const sources = presetToSources(ragSourcesPreset);
 
       await streamWish(
-        { prompt: finalPrompt, session_id: sessionId ?? undefined },
+        {
+          prompt: finalPrompt,
+          session_id: sessionId ?? undefined,
+          sources,
+        },
         {
           signal: controller.signal,
           onEvent: (evt: WishEvent) => {
@@ -123,15 +131,30 @@ export function useWishStream(): UseWishStream {
                 addArtifactToLastSolomon(evt.data.id);
                 refreshExplorerForArtifact(evt.data.type);
                 if (evt.data.type === "graph") {
-                  const hint = String(
-                    evt.data.ref.entity_hint ??
-                      evt.data.ref.title ??
-                      "",
-                  );
-                  if (hint) {
-                    useGraphStore.getState().appendEntityQuery(hint);
-                  } else {
+                  const ref = evt.data.ref;
+                  const cypher =
+                    typeof ref.cypher === "string" ? ref.cypher.trim() : "";
+                  if (cypher) {
+                    const rawParams = ref.params;
+                    const params =
+                      rawParams &&
+                      typeof rawParams === "object" &&
+                      !Array.isArray(rawParams)
+                        ? (rawParams as Record<string, string | number | boolean>)
+                        : {};
+                    useGraphStore
+                      .getState()
+                      .appendCypherQuery(cypher, params);
                     ensureGraphTab();
+                  } else {
+                    const hint = String(
+                      ref.entity_hint ?? ref.title ?? "",
+                    );
+                    if (hint) {
+                      useGraphStore.getState().appendEntityQuery(hint);
+                    } else {
+                      ensureGraphTab();
+                    }
                   }
                 } else {
                   openTab({
@@ -220,6 +243,7 @@ export function useWishStream(): UseWishStream {
       sessionId,
       setSessionId,
       openTab,
+      ragSourcesPreset,
     ],
   );
 

@@ -1,37 +1,36 @@
-# semantic/ — Apache Ossie セマンティックレイヤ
+# Semantic layer (Apache Ossie)
 
-Solomon が Text-to-SQL / ダッシュボード / サマリー生成に用いる **Apache Ossie** の YAML 定義を Git 管理するディレクトリ。Cloudera AI Workbench プロジェクトから同期する想定。
+Solomon reads **official Ossie semantic models** from this directory. Place one model per file:
 
-## 構造
-
-| ディレクトリ | 用途 |
-|---|---|
-| `datasets/<catalog>/<schema>/<table>.yaml` | 1 テーブル = 1 ファイル。Ingestion Crew が自動ドラフトし、レビュー後にマージ。 |
-| `metrics/<domain>.yaml` | 横断メトリクス定義。 |
-| `relationships/<domain>.yaml` | テーブル間結合定義。 |
-| `prompts/few_shot_examples.yaml` | Text-to-SQL の Few-shot サンプル。 |
-| `index/embeddings.parquet` | dataset YAML のベクター化キャッシュ (自動生成、Git LFS または `.gitignore` 対象を検討)。 |
-
-## Ossie YAML 最小テンプレート
-
-```yaml
-version: 1
-dataset:
-  name: <table>
-  fq_name: <catalog>.<schema>.<table>
-  description: "<自然言語>"
-  owner: <user>
-  source:
-    type: s3
-    path: s3://.../<file>
-  dimensions:
-    - { name: region, type: string }
-  measures:
-    - { name: revenue, type: decimal(18,2), default_aggregation: sum }
-  relationships: []
-  sample_queries:
-    - question: "地域別月次売上"
-      sql: "SELECT ..."
+```
+semantic/
+  models/
+    my_domain.yaml
 ```
 
-自動生成のロジックは `solomon.ingestion.tasks.draft_ossie_task`、読み書きは `solomon.semantic` にある。
+Configure the root with `SOLOMON_SEMANTIC_ROOT` (default: `./semantic`). Limit loaded models with `SOLOMON_SEMANTIC_MODELS=model_a,model_b`.
+
+## Format
+
+Use the Ossie core semantic model (single root object or legacy `semantic_model` array wrapper). Each model includes:
+
+- `name`, `description`, `ai_context`
+- `datasets[]` with `fields[]`, `metrics[]`, `source` (`catalog.schema.table` when applicable)
+- `relationships[]`, model-level `metrics[]`
+- `custom_extensions[]` for vendor-specific metadata
+
+Solomon-specific hints live under `custom_extensions` with `vendor_name: SOLOMON` (graph notes, document index mapping, tool hints, verified SQL, glossary). See `solomon/semantic/solomon_extension.py`.
+
+## CLI
+
+```bash
+SOLOMON_SEMANTIC_ROOT=./semantic python -m solomon.semantic validate
+SOLOMON_SEMANTIC_ROOT=./semantic python -m solomon.semantic show
+python -m solomon.semantic normalize --root ./semantic
+```
+
+## Tests
+
+Neutral fixtures live under `tests/fixtures/semantic/`. Point `SOLOMON_SEMANTIC_ROOT` there for local verification.
+
+Industry-specific models belong in separate demo directories (for example `demo/<domain>/semantic/models/`), not in the core Solomon package.

@@ -1,8 +1,7 @@
-"""Text-to-SQL Tool — Ossie / OpenSearch コンテキスト + Trino 実行。"""
+"""Text-to-SQL Tool — Ossie スキーマ文脈 + Trino 実行（1 回自己修正）。"""
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any, Optional
 
@@ -10,6 +9,8 @@ from pydantic import BaseModel, Field
 
 from solomon.semantic.store import search_datasets
 from solomon.tools.opensearch import OpenSearchKeywordSearchTool
+from solomon.tools.schema_context import build_schema_context
+from solomon.tools.sql_guard import validate_readonly_sql
 from solomon.tools.trino import TrinoQueryTool
 from solomon.transport.config import get_opensearch_config, get_trino_config
 from solomon.transport.errors import ErrorCode, err, ok
@@ -20,6 +21,17 @@ from solomon.transport.user_context import UserContext
 _MUTATION = re.compile(
     r"^\s*(CREATE|DROP|ALTER|INSERT|UPDATE|DELETE|TRUNCATE|MERGE|GRANT|REVOKE)\b",
     re.IGNORECASE,
+)
+
+_PROMPT_RULES = (
+    "Generate Trino SQL for the question below.\n"
+    "Rules:\n"
+    "- Use Trino SQL dialect.\n"
+    "- Start with SELECT or WITH only (read-only).\n"
+    "- Use column and metric names only from the schema context.\n"
+    "- Date literals: DATE 'YYYY-MM-DD'.\n"
+    "- Include a reasonable LIMIT.\n"
+    "- When the question uses synonyms, map them to the matching columns or metric expressions.\n"
 )
 
 
@@ -35,8 +47,13 @@ class Text2SQLArgs(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-def _gather_rag_context(question: str, fq_hint: Optional[str]) -> list[dict[str, Any]]:
-    """Ossie TF-IDF + (設定済みなら) OpenSearch から関連データセットを集める。"""
+def _gather_rag_context(
+    question: str,
+    fq_hint: Optional[str],
+    *,
+    use_search_context: bool = True,
+) -> list[dict[str, Any]]:
+    """Ossie 検索 + (設定済みなら) OpenSearch から関連データセットを集める。"""
     contexts: list[dict[str, Any]] = []
     if fq_hint:
         contexts.append({"fq_name": fq_hint, "source": "hint"})
@@ -44,7 +61,7 @@ def _gather_rag_context(question: str, fq_hint: Optional[str]) -> list[dict[str,
     for hit in search_datasets(question, top_k=3):
         contexts.append({"source": "ossie", **hit})
 
-    if get_opensearch_config() is not None:
+    if use_search_context and get_opensearch_config() is not None:
         os_tool = OpenSearchKeywordSearchTool()
         os_result = os_tool.run(user_ctx=None, query=question, top_k=3)
         if os_result.get("status") == "ok":
@@ -53,34 +70,157 @@ def _gather_rag_context(question: str, fq_hint: Optional[str]) -> list[dict[str,
     return contexts
 
 
-def _build_sql_prompt(question: str, contexts: list[dict[str, Any]], catalog: str, schema: str | None) -> str:
-    ctx_lines = []
-    for c in contexts[:5]:
-        ds = c.get("dataset") or c
-        fq = c.get("fq_name") or ds.get("fq_name", "")
-        desc = ds.get("description", "") if isinstance(ds, dict) else ""
-        dims = ds.get("dimensions", []) if isinstance(ds, dict) else []
-        measures = ds.get("measures", []) if isinstance(ds, dict) else []
-        col_names = [d.get("name") for d in dims + measures if isinstance(d, dict)]
-        ctx_lines.append(f"- {fq}: {desc} columns={col_names[:12]}")
+def _build_sql_prompt(
+    question: str,
+    schema_block: str,
+    catalog: str,
+    schema: str,
+    *,
+    correction: dict[str, str] | None = None,
+) -> str:
+    parts = [
+        _PROMPT_RULES,
+        f"Catalog: {catalog}, default schema: {schema}\n",
+        schema_block,
+        f"\nQuestion: {question}\n",
+    ]
+    if correction:
+        parts.append(
+            "The previous SQL failed on Trino. Fix it using the same rules and schema.\n"
+            f"Previous SQL:\n{correction.get('sql', '')}\n"
+            f"Trino error:\n{correction.get('error', '')}\n"
+        )
+    parts.append('Return JSON only: {"sql": "SELECT ...", "reasoning": "..."}')
+    return "\n".join(parts)
 
-    schema_hint = schema or "demo"
-    return (
-        f"Generate a Trino SELECT query for this question.\n"
-        f"Catalog: {catalog}, default schema: {schema_hint}\n"
-        f"Question: {question}\n\n"
-        f"Relevant datasets:\n" + "\n".join(ctx_lines) + "\n\n"
-        'Return JSON: {"sql": "SELECT ...", "fq_table": "catalog.schema.table", "reasoning": "..."}'
+
+def _llm_sql(
+    prompt: str,
+) -> tuple[str | None, str]:
+    parsed = try_json_completion(
+        prompt,
+        agent_key="text2sql",
+        max_tokens=2048,
     )
+    if not parsed or not isinstance(parsed.get("sql"), str):
+        return None, ""
+    sql = parsed["sql"].strip()
+    reasoning = str(parsed.get("reasoning", ""))
+    return sql, reasoning
+
+
+def execute_readonly_sql_with_retry(
+    user_ctx: Optional[UserContext],
+    *,
+    question: str,
+    catalog: str,
+    schema: str,
+    max_rows: int,
+    sql: str | None = None,
+    schema_block: str | None = None,
+) -> dict[str, Any]:
+    """SQL 生成（省略可）+ Trino 実行。失敗時 1 回だけ LLM 再生成。"""
+    attempts: list[dict[str, str]] = []
+    reasoning = ""
+    current_sql = (sql or "").strip()
+
+    if not current_sql:
+        block = schema_block or build_schema_context(
+            question,
+            catalog=catalog,
+            schema=schema,
+            user_ctx=user_ctx,
+        )
+        current_sql, reasoning = _llm_sql(
+            _build_sql_prompt(question, block, catalog, schema),
+        )
+        if not current_sql:
+            return {
+                "status": "error",
+                "message": "Could not generate SQL from LLM.",
+                "attempts": attempts,
+            }
+
+    trino = TrinoQueryTool()
+    for attempt_idx in range(2):
+        guard = validate_readonly_sql(current_sql)
+        if guard:
+            if sql and attempt_idx == 0:
+                return {"status": "error", "message": guard, "attempts": attempts}
+            if attempt_idx == 0 and not sql:
+                attempts.append({"sql": current_sql, "error": guard})
+            else:
+                return {"status": "error", "message": guard, "attempts": attempts}
+
+        if _MUTATION.match(current_sql):
+            return {
+                "status": "error",
+                "message": "Generated SQL is not read-only.",
+                "attempts": attempts,
+            }
+
+        exec_result = trino.run(
+            user_ctx=user_ctx,
+            sql=current_sql,
+            catalog=catalog,
+            schema=schema,
+            max_rows=max_rows,
+        )
+        if exec_result.get("status") == "ok":
+            return {
+                "status": "ok",
+                "sql": current_sql,
+                "reasoning": reasoning,
+                "attempts": attempts,
+                "columns": exec_result.get("columns"),
+                "rows": exec_result.get("rows"),
+                "row_count": exec_result.get("row_count"),
+            }
+
+        err_msg = str(exec_result.get("message") or "Trino query failed")
+        attempts.append({"sql": current_sql, "error": err_msg})
+        if attempt_idx == 1:
+            return {
+                "status": "error",
+                "message": err_msg,
+                "error_code": exec_result.get("error_code"),
+                "sql": current_sql,
+                "attempts": attempts,
+            }
+
+        block = schema_block or build_schema_context(
+            question,
+            catalog=catalog,
+            schema=schema,
+            user_ctx=user_ctx,
+        )
+        current_sql, reasoning = _llm_sql(
+            _build_sql_prompt(
+                question,
+                block,
+                catalog,
+                schema,
+                correction={"sql": current_sql, "error": err_msg},
+            ),
+        )
+        if not current_sql:
+            return {
+                "status": "error",
+                "message": err_msg,
+                "error_code": exec_result.get("error_code"),
+                "attempts": attempts,
+            }
+
+    return {"status": "error", "message": "SQL execution failed.", "attempts": attempts}
 
 
 class Text2SQLTool(BaseSolomonTool):
-    """RAG コンテキストから SQL を生成し Trino で実行する (Lakehouse SQL)。"""
+    """Ossie スキーマ文脈から SQL を生成し Trino で実行する (Lakehouse SQL)。"""
 
     name: str = "text2sql"
     description: str = (
-        "Answer analytics questions by retrieving relevant dataset context (Ossie/OpenSearch), "
-        "generating a read-only Trino SELECT, and executing it."
+        "Answer analytics questions using Ossie semantic schema context, "
+        "generate a read-only Trino SELECT, and execute it (one retry on Trino error)."
     )
     args_schema: type[BaseModel] = Text2SQLArgs
 
@@ -88,72 +228,90 @@ class Text2SQLTool(BaseSolomonTool):
         self,
         user_ctx: Optional[UserContext],
         question: str,
-        catalog: str = "iceberg",
+        catalog: str | None = None,
         schema: Optional[str] = None,
         fq_table_hint: Optional[str] = None,
         max_rows: int = 100,
+        use_search_context: bool = True,
         **_: Any,
     ) -> dict[str, Any]:
-        if get_trino_config() is None:
+        trino_cfg = get_trino_config()
+        if trino_cfg is None:
             return err(
                 ErrorCode.TRINO_NOT_CONFIGURED,
                 "Trino is not configured.",
             )
 
-        contexts = _gather_rag_context(question, fq_table_hint)
-        llm_result = try_json_completion(
-            _build_sql_prompt(question, contexts, catalog, schema),
-            max_tokens=512,
+        catalog = catalog or trino_cfg.catalog
+        schema = schema or trino_cfg.schema
+
+        contexts = _gather_rag_context(
+            question, fq_table_hint, use_search_context=use_search_context
+        )
+        schema_block = build_schema_context(
+            question,
+            catalog=catalog,
+            schema=schema,
+            user_ctx=user_ctx,
         )
 
-        sql: str | None = None
-        reasoning = ""
-        if llm_result and isinstance(llm_result.get("sql"), str):
-            sql = llm_result["sql"].strip()
-            reasoning = str(llm_result.get("reasoning", ""))
-
-        if not sql:
-            # Heuristic fallback: 最初のコンテキストテーブルから COUNT
-            fq = fq_table_hint
-            if not fq:
-                for c in contexts:
-                    fq = c.get("fq_name")
-                    if fq:
-                        break
-            if fq:
-                sql = f"SELECT COUNT(*) AS row_count FROM {fq}"
-                reasoning = "LLM unavailable; fallback COUNT(*)"
-            else:
-                return err(
-                    ErrorCode.TRINO_QUERY_FAILED,
-                    "Could not generate SQL: no dataset context and LLM unavailable.",
-                )
-
-        if _MUTATION.match(sql):
-            return err(ErrorCode.TRINO_QUERY_FAILED, "Generated SQL is not read-only.")
-
-        trino = TrinoQueryTool()
-        exec_result = trino.run(
-            user_ctx=user_ctx,
-            sql=sql,
+        pipeline = execute_readonly_sql_with_retry(
+            user_ctx,
+            question=question,
             catalog=catalog,
             schema=schema,
             max_rows=max_rows,
+            schema_block=schema_block,
         )
-        if exec_result.get("status") != "ok":
-            return exec_result
+
+        if pipeline.get("status") != "ok":
+            msg = str(pipeline.get("message") or "")
+            if "Could not generate SQL" in msg:
+                fq = fq_table_hint
+                if not fq:
+                    for c in contexts:
+                        fq = c.get("fq_name")
+                        if fq:
+                            break
+                if fq:
+                    pipeline = execute_readonly_sql_with_retry(
+                        user_ctx,
+                        question=question,
+                        catalog=catalog,
+                        schema=schema,
+                        max_rows=max_rows,
+                        sql=f"SELECT COUNT(*) AS row_count FROM {fq} LIMIT 10",
+                        schema_block=schema_block,
+                    )
+                    if pipeline.get("status") == "ok":
+                        pipeline["reasoning"] = (
+                            pipeline.get("reasoning") or "LLM unavailable; fallback COUNT(*)"
+                        )
+            if pipeline.get("status") != "ok":
+                if not contexts and "Could not generate" in msg:
+                    return err(
+                        ErrorCode.TRINO_QUERY_FAILED,
+                        "Could not generate SQL: no dataset context and LLM unavailable.",
+                    )
+                return err(
+                    pipeline.get("error_code", ErrorCode.TRINO_QUERY_FAILED),
+                    str(pipeline.get("message", "text2sql failed")),
+                    sql=pipeline.get("sql"),
+                    attempts=pipeline.get("attempts"),
+                )
 
         return ok(
             {
                 "question": question,
-                "sql": sql,
-                "reasoning": reasoning,
+                "sql": pipeline.get("sql"),
+                "reasoning": pipeline.get("reasoning"),
+                "attempts": pipeline.get("attempts") or [],
                 "rag_contexts": [
                     {"fq_name": c.get("fq_name"), "source": c.get("source")}
                     for c in contexts[:5]
                 ],
-                "columns": exec_result.get("columns"),
-                "rows": exec_result.get("rows"),
-                "row_count": exec_result.get("row_count"),
+                "columns": pipeline.get("columns"),
+                "rows": pipeline.get("rows"),
+                "row_count": pipeline.get("row_count"),
             }
         )

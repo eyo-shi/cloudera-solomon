@@ -388,6 +388,25 @@ class TestGetLLMConfig:
 
 
 # ================================================================== #
+# get_rag_default_sources
+# ================================================================== #
+class TestGetRagDefaultSources:
+    def test_default_all_three(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("SOLOMON_RAG_SOURCES", raising=False)
+        assert cfg_mod.get_rag_default_sources() == frozenset(
+            {"table", "graph", "search"}
+        )
+
+    def test_table_only_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_SOURCES", "table")
+        assert cfg_mod.get_rag_default_sources() == frozenset({"table"})
+
+    def test_ignores_invalid_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_SOURCES", "table,bogus,graph")
+        assert cfg_mod.get_rag_default_sources() == frozenset({"table", "graph"})
+
+
+# ================================================================== #
 # get_cdv_config
 # ================================================================== #
 class TestGetCDVConfig:

@@ -735,15 +735,16 @@ tools:
   class_path: solomon.tools.ossie.OssieReadTool
   description: 'Tool Name: ossie_read
 
-    Tool Arguments: {''fq_name'': {''description'': ''読み出したいデータセットの fq_name'', ''type'': ''str''}}
+    Tool Arguments: {''fq_name'': {''description'': ''Dataset fq_name (catalog.schema.table) or model.dataset name'', ''type'':
+    ''str''}}
 
-    Tool Description: Read one Ossie dataset YAML by its fully-qualified name (catalog.schema.table). Returns the dataset
-    as a dict.'
+    Tool Description: Read one Ossie semantic dataset by fq_name or model.dataset. Returns official-format fields, metrics,
+    ai_context, and related relationships.'
   requires_auth: false
   args_schema:
     properties:
       fq_name:
-        description: 読み出したいデータセットの fq_name
+        description: Dataset fq_name (catalog.schema.table) or model.dataset name
         title: Fq Name
         type: string
     required:
@@ -754,15 +755,15 @@ tools:
   class_path: solomon.tools.ossie.OssieSearchTool
   description: 'Tool Name: ossie_search
 
-    Tool Arguments: {''query'': {''description'': ''自然言語のクエリ (Text2SQL 用)'', ''type'': ''str''}, ''top_k'': {''description'':
-    None, ''type'': ''int''}}
+    Tool Arguments: {''query'': {''description'': ''Natural-language query (Text2SQL RAG)'', ''type'': ''str''}, ''top_k'':
+    {''description'': None, ''type'': ''int''}}
 
-    Tool Description: Find the top-k Ossie datasets most relevant to a natural-language query. Used by Text-to-SQL RAG.'
+    Tool Description: Find top-k Ossie datasets relevant to a natural-language query (supports Japanese and English tokenization).'
   requires_auth: false
   args_schema:
     properties:
       query:
-        description: 自然言語のクエリ (Text2SQL 用)
+        description: Natural-language query (Text2SQL RAG)
         title: Query
         type: string
       top_k:
@@ -774,32 +775,6 @@ tools:
     required:
     - query
     title: OssieSearchArgs
-    type: object
-- name: ossie_write
-  class_path: solomon.tools.ossie.OssieWriteTool
-  description: 'Tool Name: ossie_write
-
-    Tool Arguments: {''dataset'': {''description'': ''Ossie dataset (name, fq_name, source, dimensions, measures, ...) の dict'',
-    ''type'': ''dict[str, Any]''}, ''commit'': {''description'': ''Git add + commit まで行う場合 True。push はしない。'', ''type'': ''bool''}}
-
-    Tool Description: Persist an Ossie dataset YAML under SOLOMON_SEMANTIC_ROOT/datasets/<catalog>/<schema>/<table>.yaml.
-    If commit=true, git-add and commit the file.'
-  requires_auth: true
-  args_schema:
-    properties:
-      dataset:
-        additionalProperties: true
-        description: Ossie dataset (name, fq_name, source, dimensions, measures, ...) の dict
-        title: Dataset
-        type: object
-      commit:
-        default: false
-        description: Git add + commit まで行う場合 True。push はしない。
-        title: Commit
-        type: boolean
-    required:
-    - dataset
-    title: OssieWriteArgs
     type: object
 - name: parquet_meta
   class_path: solomon.tools.format.ParquetMetaTool
@@ -924,33 +899,6 @@ tools:
     required:
     - bucket
     title: S3ListArgs
-    type: object
-- name: similar_table_search
-  class_path: solomon.tools.ossie.SimilarTableSearchTool
-  description: 'Tool Name: similar_table_search
-
-    Tool Arguments: {''proposed_name'': {''description'': ''これから作ろうとしているテーブル名'', ''type'': ''str''}, ''top_k'': {''description'':
-    None, ''type'': ''int''}}
-
-    Tool Description: List existing Ossie semantic datasets whose table name is identical or similar to the proposed name.
-    fq_name values look like iceberg.schema.table (Trino catalog), not ''ossie''. Use only for naming hints before CREATE
-    TABLE.'
-  requires_auth: false
-  args_schema:
-    properties:
-      proposed_name:
-        description: これから作ろうとしているテーブル名
-        title: Proposed Name
-        type: string
-      top_k:
-        default: 5
-        maximum: 20
-        minimum: 1
-        title: Top K
-        type: integer
-    required:
-    - proposed_name
-    title: SimilarTableSearchArgs
     type: object
 - name: table_exists
   class_path: solomon.tools.iceberg.TableExistsTool

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from solomon.rag.models import RetrievalBundle, RetrievalPlan, SourceHit
+from solomon.rag.sources import RAG_SOURCES_ALL
 from solomon.semantic.store import search_datasets
 from solomon.tools.graph_cypher_query import (
     query_all_datasets,
@@ -127,12 +128,15 @@ def _run_sql(
     user_ctx: Optional[UserContext],
     hits: list[SourceHit],
     errors: list[dict[str, str]],
+    *,
+    use_search_context: bool,
 ) -> None:
     tool = Text2SQLTool()
     result = tool.run(
         user_ctx=user_ctx,
         question=plan.query,
         fq_table_hint=plan.fq_table_hint,
+        use_search_context=use_search_context,
     )
     if result.get("status") == "ok":
         _append_hit(hits, source="lakehouse", kind="sql", payload=result)
@@ -144,41 +148,67 @@ def execute_retrieval(
     plan: RetrievalPlan,
     *,
     user_ctx: Optional[UserContext] = None,
+    enabled_sources: frozenset[str] | None = None,
 ) -> RetrievalBundle:
     """RetrievalStrategy に応じて Knowledge Source を実行する。"""
+    enabled = enabled_sources or frozenset({"table", "graph", "search"})
+    disabled_sources = [s for s in RAG_SOURCES_ALL if s not in enabled]
+
     hits: list[SourceHit] = []
     errors: list[dict[str, str]] = []
     strategy = plan.strategy
     query = plan.query
     has_opensearch = get_opensearch_config() is not None
+    use_search_in_sql = "search" in enabled
 
     if strategy == "GRAPH_QUERY":
-        _run_graph(plan, hits, errors)
+        if "graph" in enabled:
+            _run_graph(plan, hits, errors)
 
     elif strategy == "SQL_ANALYTICS":
-        _run_sql(plan, user_ctx, hits, errors)
+        if "table" in enabled:
+            _run_sql(
+                plan,
+                user_ctx,
+                hits,
+                errors,
+                use_search_context=use_search_in_sql,
+            )
 
     elif strategy == "KEYWORD":
-        if has_opensearch:
+        if "search" in enabled and has_opensearch:
             _run_opensearch_keyword(query, hits, errors)
-        else:
+        elif "table" in enabled:
             _run_ossie_fallback(query, hits)
 
     elif strategy == "HYBRID":
-        if has_opensearch:
+        if "search" in enabled and has_opensearch:
             _run_opensearch_hybrid(query, hits, errors)
-        else:
+        elif "table" in enabled:
             _run_ossie_fallback(query, hits)
 
     elif strategy == "COMPOSITE":
-        _run_graph(plan, hits, errors)
-        if has_opensearch:
+        if "graph" in enabled:
+            _run_graph(plan, hits, errors)
+        if "search" in enabled and has_opensearch:
             _run_opensearch_hybrid(query, hits, errors)
-        else:
+        elif "table" in enabled:
             _run_ossie_fallback(query, hits)
-        _run_sql(plan, user_ctx, hits, errors)
+        if "table" in enabled:
+            _run_sql(
+                plan,
+                user_ctx,
+                hits,
+                errors,
+                use_search_context=use_search_in_sql,
+            )
 
-    return RetrievalBundle(plan=plan, hits=hits, errors=errors)
+    return RetrievalBundle(
+        plan=plan,
+        hits=hits,
+        errors=errors,
+        disabled_sources=disabled_sources,
+    )
 
 
 __all__ = ["execute_retrieval"]

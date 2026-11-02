@@ -1,6 +1,6 @@
 """AMP セットアップ Step 3: Ossie 用 semantic/ を Git 初期化する。
 
-semantic/{datasets,metrics,relationships,prompts,index} を用意し、Git 管理下に
+semantic/models/ を用意し、Git 管理下に
 置く (既に .git があれば no-op)。Ossie Drafter が PR ベースで YAML を積める
 状態にすることが目的。
 
@@ -35,7 +35,7 @@ def _repo_root() -> Path:
 
 REPO_ROOT = _repo_root()
 SEMANTIC = REPO_ROOT / "semantic"
-SUBDIRS = ["datasets", "metrics", "relationships", "prompts", "index"]
+SUBDIRS = ["models"]
 
 
 def _run(cmd: list[str], cwd: Path) -> int:

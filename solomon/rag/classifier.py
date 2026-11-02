@@ -75,6 +75,26 @@ def classify_retrieval(prompt: str) -> RetrievalPlan:
     text = prompt.strip()
     lower = text.lower()
 
+    from solomon.router.semantic_hints import (
+        _knowledge_threshold,
+        knowledge_relevance,
+        load_router_semantic_bundle,
+        matched_source_kinds,
+    )
+
+    ctx, catalog = load_router_semantic_bundle()
+    if ctx.models:
+        score, _ = knowledge_relevance(text, ctx, catalog)
+        kinds = matched_source_kinds(text, ctx, catalog)
+        if score >= _knowledge_threshold() and len(kinds) >= 2:
+            return RetrievalPlan(
+                strategy="COMPOSITE",
+                query=text,
+                confidence=0.88,
+                reasoning="semantic multi-source relevance",
+                entity_hint=_extract_entity_hint(text),
+            )
+
     if _matches(_COMPOSITE_PATTERNS, text):
         return RetrievalPlan(
             strategy="COMPOSITE",

@@ -1,261 +1,198 @@
-"""Ossie YAML のファイルシステム永続化 + 検索。
+"""Ossie 本家形式モデルの読込 (<root>/models/*.yaml)。"""
 
-配置は AI Workbench プロジェクト内の Git 管理ディレクトリ ``SOLOMON_SEMANTIC_ROOT``
-(既定: ``./semantic/``) の直下:
-
-    <root>/datasets/<catalog>/<schema>/<table>.yaml
-    <root>/metrics/<domain>.yaml
-    <root>/relationships/<domain>.yaml
-    <root>/prompts/few_shot_examples.yaml
-
-Git コミットはオプション: :func:`write_dataset` で ``commit=True`` を渡すと
-GitPython 経由で add + commit を行う (push はしない。CI で push させる)。
-
-検索 (:func:`search_datasets`) は最初は BM25 相当の単純な TF-IDF スコアで、
-将来 embedding に置き換える余地を残す。
-"""
 from __future__ import annotations
 
-import math
 import os
-import re
-from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
 import yaml
 from pydantic import ValidationError
 
-from solomon.semantic.models import OssieDataset, OssieDocument
+from solomon.semantic.models import (
+    OssieDataset,
+    OssieSemanticModel,
+    dataset_fq_name,
+    parse_models_from_yaml,
+)
+from solomon.semantic.search import dataset_search_terms, rank_datasets
 from solomon.transport.errors import ErrorCode, err, ok
 from solomon.transport.logging import get_logger
 
 _logger = get_logger(__name__)
 
+_cache_mtime: float = 0.0
+_cache_models: list[OssieSemanticModel] = []
+_cache_index: dict[str, tuple[OssieSemanticModel, OssieDataset, str]] = {}
+
 
 def semantic_root() -> Path:
-    """``SOLOMON_SEMANTIC_ROOT`` 環境変数からルートを解決する。"""
     root = os.environ.get("SOLOMON_SEMANTIC_ROOT", "./semantic")
     return Path(root).expanduser().resolve()
 
 
-def _dataset_path(root: Path, fq_name: str) -> Path:
-    """``iceberg.demo.sales_2024`` → ``<root>/datasets/iceberg/demo/sales_2024.yaml``"""
-    parts = fq_name.split(".")
-    if len(parts) != 3:
-        raise ValueError(
-            f"fq_name must be 'catalog.schema.table', got {fq_name!r}"
-        )
-    catalog, schema, table = parts
-    return root / "datasets" / catalog / schema / f"{table}.yaml"
+def _models_dir(root: Path) -> Path:
+    return root / "models"
 
 
-# ------------------------------------------------------------------ #
-# read
-# ------------------------------------------------------------------ #
+def _allowed_model_names() -> Optional[frozenset[str]]:
+    raw = os.environ.get("SOLOMON_SEMANTIC_MODELS", "").strip()
+    if not raw:
+        return None
+    names = {p.strip() for p in raw.split(",") if p.strip()}
+    return frozenset(names) if names else None
 
-def read_dataset(fq_name: str) -> dict[str, Any]:
-    """1 データセットの YAML を読み、Pydantic 検証して dict で返す。"""
+
+def _latest_mtime(root: Path) -> float:
+    models_dir = _models_dir(root)
+    if not models_dir.is_dir():
+        return 0.0
+    latest = 0.0
+    for path in models_dir.glob("*.yaml"):
+        try:
+            latest = max(latest, path.stat().st_mtime)
+        except OSError:
+            continue
+    for path in models_dir.glob("*.yml"):
+        try:
+            latest = max(latest, path.stat().st_mtime)
+        except OSError:
+            continue
+    return latest
+
+
+def _rebuild_index(models: list[OssieSemanticModel]) -> dict[str, tuple[OssieSemanticModel, OssieDataset, str]]:
+    index: dict[str, tuple[OssieSemanticModel, OssieDataset, str]] = {}
+    for model in models:
+        for ds in model.datasets:
+            fq = dataset_fq_name(model.name, ds)
+            index[fq.lower()] = (model, ds, fq)
+            index[f"{model.name}.{ds.name}".lower()] = (model, ds, fq)
+            index[ds.name.lower()] = (model, ds, fq)
+    return index
+
+
+def load_models(*, force: bool = False) -> list[OssieSemanticModel]:
+    global _cache_mtime, _cache_models, _cache_index
     root = semantic_root()
-    path = _dataset_path(root, fq_name)
-    if not path.exists():
-        return err(ErrorCode.OSSIE_NOT_FOUND, f"Ossie dataset not found: {fq_name}")
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            raw = yaml.safe_load(fh)
-    except yaml.YAMLError as e:
-        return err(ErrorCode.OSSIE_YAML_INVALID, f"YAML parse failed: {e}")
-    try:
-        doc = OssieDocument.model_validate(raw)
-    except ValidationError as e:
-        return err(ErrorCode.OSSIE_YAML_INVALID, f"Ossie schema invalid: {e}")
-    return ok(
-        {
-            "fq_name": fq_name,
-            "path": str(path.relative_to(root)),
-            "dataset": doc.dataset.model_dump(by_alias=True, exclude_none=True),
-        }
-    )
+    mtime = _latest_mtime(root)
+    if not force and mtime == _cache_mtime and _cache_models:
+        return _cache_models
+
+    allowed = _allowed_model_names()
+    models: list[OssieSemanticModel] = []
+    models_dir = _models_dir(root)
+    if models_dir.is_dir():
+        paths = sorted(list(models_dir.glob("*.yaml")) + list(models_dir.glob("*.yml")))
+        for path in paths:
+            try:
+                with path.open("r", encoding="utf-8") as fh:
+                    raw = yaml.safe_load(fh)
+                for model in parse_models_from_yaml(raw):
+                    if allowed is not None and model.name not in allowed:
+                        continue
+                    models.append(model)
+            except (yaml.YAMLError, ValidationError, ValueError) as exc:
+                _logger.warning("semantic.load_failed", path=str(path), error=str(exc))
+
+    _cache_mtime = mtime
+    _cache_models = models
+    _cache_index = _rebuild_index(models)
+    return models
 
 
 def list_datasets() -> list[dict[str, str]]:
-    """データセットの一覧 (fq_name / path) を返す。"""
-    root = semantic_root()
-    datasets_dir = root / "datasets"
-    if not datasets_dir.exists():
-        return []
     out: list[dict[str, str]] = []
-    for yaml_path in datasets_dir.rglob("*.yaml"):
-        rel = yaml_path.relative_to(datasets_dir)
-        parts = rel.with_suffix("").parts
-        if len(parts) != 3:
-            continue
-        out.append(
-            {
-                "fq_name": ".".join(parts),
-                "path": str(yaml_path.relative_to(root)),
-            }
-        )
+    root = semantic_root()
+    for model in load_models():
+        for ds in model.datasets:
+            fq = dataset_fq_name(model.name, ds)
+            out.append(
+                {
+                    "model": model.name,
+                    "name": ds.name,
+                    "fq_name": fq,
+                    "description": (ds.description or "")[:500],
+                    "path": f"models/{model.name}.yaml",
+                }
+            )
     out.sort(key=lambda x: x["fq_name"])
     return out
 
 
-# ------------------------------------------------------------------ #
-# write
-# ------------------------------------------------------------------ #
+def _relationships_for_dataset(
+    model: OssieSemanticModel, dataset: OssieDataset
+) -> list[dict[str, Any]]:
+    rels: list[dict[str, Any]] = []
+    ds_name = dataset.name
+    for rel in model.relationships:
+        from_name = rel.from_ or ""
+        to_name = rel.to or ""
+        if from_name == ds_name or to_name == ds_name:
+            rels.append(rel.model_dump(by_alias=True, exclude_none=True))
+    return rels
 
-def write_dataset(
-    dataset: OssieDataset,
-    *,
-    author_user: Optional[str] = None,
-    commit: bool = False,
-) -> dict[str, Any]:
-    """データセット YAML を書き出す。``commit=True`` なら Git add + commit も行う。
 
-    Git 競合や push 失敗は fatal にしない: ``git.status = "skipped"`` として
-    メタ情報だけ返し、上位で通知する。
-    """
-    root = semantic_root()
-    try:
-        path = _dataset_path(root, dataset.fq_name)
-    except ValueError as e:
-        return err(ErrorCode.OSSIE_YAML_INVALID, str(e))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    doc = OssieDocument(version=1, dataset=dataset)
-    payload = doc.model_dump(by_alias=True, exclude_none=True)
-    with path.open("w", encoding="utf-8") as fh:
-        yaml.safe_dump(payload, fh, allow_unicode=True, sort_keys=False)
-
-    git_info: dict[str, Any] = {"status": "skipped"}
-    if commit:
-        git_info = _git_commit(root, path, author_user, dataset.fq_name)
-
+def read_dataset(name_or_fq: str) -> dict[str, Any]:
+    key = (name_or_fq or "").strip().lower()
+    if not key:
+        return err(ErrorCode.OSSIE_NOT_FOUND, "dataset key is empty")
+    load_models()
+    hit = _cache_index.get(key)
+    if hit is None and key.count(".") == 2:
+        hit = _cache_index.get(key)
+    if hit is None:
+        return err(ErrorCode.OSSIE_NOT_FOUND, f"Ossie dataset not found: {name_or_fq}")
+    model, ds, fq = hit
     return ok(
         {
-            "fq_name": dataset.fq_name,
-            "path": str(path.relative_to(root)),
-            "abs_path": str(path),
-            "git": git_info,
+            "model": model.name,
+            "fq_name": fq,
+            "dataset": ds.model_dump(by_alias=True, exclude_none=True),
+            "relationships": _relationships_for_dataset(model, ds),
+            "model_description": model.description,
         }
     )
 
 
-def _git_commit(
-    root: Path, path: Path, author_user: Optional[str], fq_name: str
-) -> dict[str, Any]:
-    """path を Git ワーキングツリーに add + commit する。"""
-    try:
-        from git import Repo  # type: ignore
-        from git.exc import InvalidGitRepositoryError, GitCommandError  # type: ignore
-    except ImportError:
-        return {"status": "skipped", "reason": "GitPython is not installed"}
-    try:
-        repo = Repo(str(root), search_parent_directories=True)
-    except InvalidGitRepositoryError:
-        return {"status": "skipped", "reason": "not a git repository"}
-    try:
-        repo.index.add([str(path)])
-        author_str = author_user or "solomon-ingestion"
-        commit_msg = f"chore(semantic): add/update {fq_name}\n\nBy: {author_str}"
-        commit = repo.index.commit(commit_msg)
-    except GitCommandError as e:
-        return {"status": "skipped", "reason": f"git command failed: {e}"}
-    return {
-        "status": "committed",
-        "commit_sha": commit.hexsha,
-        "branch": repo.active_branch.name if not repo.head.is_detached else "(detached)",
-    }
-
-
-# ------------------------------------------------------------------ #
-# search — 単純 TF-IDF (BM25 のような正規化はしない)
-# ------------------------------------------------------------------ #
-
-_TOKEN_RE = re.compile(r"[a-z0-9_]+")
-
-
-def _tokenize(text: str) -> list[str]:
-    return _TOKEN_RE.findall(text.lower())
-
-
-def _dataset_terms(ds: dict[str, Any]) -> list[str]:
-    """検索対象文字列群を tokenize してフラット化する。"""
-    parts: list[str] = []
-    for key in ("name", "fq_name", "description"):
-        v = ds.get(key)
-        if isinstance(v, str):
-            parts.extend(_tokenize(v))
-    for col in ds.get("dimensions", []) + ds.get("measures", []):
-        for key in ("name", "description"):
-            v = col.get(key)
-            if isinstance(v, str):
-                parts.extend(_tokenize(v))
-    for sq in ds.get("sample_queries", []):
-        v = sq.get("question")
-        if isinstance(v, str):
-            parts.extend(_tokenize(v))
-    return parts
-
-
 def search_datasets(query: str, top_k: int = 3) -> list[dict[str, Any]]:
-    """クエリと関連度の高いデータセットを返す (単純 TF スコア)。
-
-    完全に空でも安全に動く。ヒットしなければ [] を返す。
-    """
-    q_terms = _tokenize(query)
-    if not q_terms:
-        return []
-    q_counter = Counter(q_terms)
-    listed = list_datasets()
-    if not listed:
-        return []
-
-    # 各データセットの TF を計算
-    corpus: list[tuple[dict[str, str], Counter, list[str]]] = []
-    for entry in listed:
-        r = read_dataset(entry["fq_name"])
-        if r.get("status") != "ok":
-            continue
-        ds = r["dataset"]
-        terms = _dataset_terms(ds)
-        corpus.append((entry, Counter(terms), terms))
-
-    if not corpus:
-        return []
-
-    # 逆文書頻度
-    N = len(corpus)
-    df: Counter[str] = Counter()
-    for _, tf, _ in corpus:
-        for term in tf:
-            df[term] += 1
-
-    def _score(tf: Counter, terms: list[str]) -> float:
-        s = 0.0
-        length = max(len(terms), 1)
-        for term, qc in q_counter.items():
-            if term not in tf:
-                continue
-            idf = math.log((N + 1) / (df[term] + 1)) + 1.0
-            s += qc * (tf[term] / length) * idf
-        return s
-
-    scored: list[tuple[float, dict[str, str]]] = []
-    for entry, tf, terms in corpus:
-        score = _score(tf, terms)
-        if score > 0:
-            scored.append((score, entry))
-    scored.sort(key=lambda x: x[0], reverse=True)
+    entries: list[tuple[dict[str, Any], list[str]]] = []
+    for model in load_models():
+        for ds in model.datasets:
+            fq = dataset_fq_name(model.name, ds)
+            meta = {
+                "model": model.name,
+                "name": ds.name,
+                "fq_name": fq,
+            }
+            entries.append((meta, dataset_search_terms(model, ds)))
+    ranked = rank_datasets(query, entries, top_k=top_k)
     out: list[dict[str, Any]] = []
-    for score, entry in scored[:top_k]:
-        r = read_dataset(entry["fq_name"])
-        if r.get("status") == "ok":
-            out.append(
-                {
-                    "fq_name": entry["fq_name"],
-                    "path": entry["path"],
-                    "score": round(score, 4),
-                    "dataset": r["dataset"],
-                }
-            )
+    for score, meta in ranked:
+        full = read_dataset(meta["fq_name"])
+        if full.get("status") != "ok":
+            continue
+        out.append(
+            {
+                **meta,
+                "score": round(score, 4),
+                "dataset": full["dataset"],
+                "relationships": full.get("relationships", []),
+            }
+        )
     return out
+
+
+def semantic_generation() -> float:
+    """モデルファイルの最新 mtime (キャッシュ無効化用)。"""
+    return _latest_mtime(semantic_root())
+
+
+__all__ = [
+    "load_models",
+    "list_datasets",
+    "read_dataset",
+    "search_datasets",
+    "semantic_root",
+    "semantic_generation",
+]

@@ -1,0 +1,114 @@
+# PuppyGraph / Iceberg 製造トレーサビリティ用スキーマ説明（Knowledge Agent 向け）
+# 後続 PR で投入スクリプトから自動生成に置き換える予定。
+
+summary: |
+  PuppyGraph は Iceberg テーブルを頂点・辺として参照する。
+  辺の始点・終点ラベルが固定のため、材料〜ユニットまでの全階層ロットを 1 つの Lot 頂点にまとめている。
+
+vertices:
+  - label: Supplier
+    id: supplier_id
+    properties: [name, tier]
+    description: 部品・材料の供給元
+  - label: Part
+    id: part_no
+    properties: [name, category]
+    description: 部品マスタ
+  - label: Lot
+    id: lot_id
+    properties: [lot_type, part_no, plant, prod_date, equipment_id]
+    notes: "lot_type は MATERIAL | MOLD | SUBASSY | UNIT のいずれか"
+    description: ロット（材料・成形・サブ組立・ユニットを同一ラベルで表現）
+  - label: Equipment
+    id: equipment_id
+    properties: [name, type, plant]
+    notes: "type 例: 成形機, 乾燥機, 組立ライン"
+    description: 製造設備
+  - label: Shipment
+    id: shipment_id
+    properties: [ship_date, qty, oem_id]
+    description: 出荷単位
+  - label: VehicleModel
+    id: model_code
+    properties: [model_name]
+    description: 車種
+  - label: OEM
+    id: oem_id
+    properties: [name]
+    description: 完成車メーカー
+  - label: Document
+    id: doc_id
+    properties: [doc_type, doc_date, title]
+    description: 品質・設備・ロットに言及する文書
+
+edges:
+  - label: CONSUMED_BY
+    from: Lot
+    to: Lot
+    description: 子ロットが親ロットの製造に消費された（材料→成形→サブ組立→ユニットと多段。段数は品目ごとに異なる）
+  - label: LOT_OF
+    from: Lot
+    to: Part
+    description: ロットがどの部品か
+  - label: HAS_CHILD
+    from: Part
+    to: Part
+    description: BOM（部品構成）
+  - label: PRODUCED_ON
+    from: Lot
+    to: Equipment
+    description: ロットがどの設備で製造されたか
+  - label: ATTACHED_TO
+    from: Equipment
+    to: Equipment
+    description: 付帯関係（例: 乾燥機→成形機）
+  - label: LOT_SUPPLIED_BY
+    from: Lot
+    to: Supplier
+    description: ロットの供給元
+  - label: PART_SUPPLIED_BY
+    from: Part
+    to: Supplier
+    description: 部品の供給元
+  - label: ALTERNATIVE_OF
+    from: Supplier
+    to: Supplier
+    description: 代替供給元
+  - label: SHIPPED_AS
+    from: Lot
+    to: Shipment
+    notes: 通常 lot_type=UNIT の Lot から
+    description: ユニットロットの出荷
+  - label: FOR_MODEL
+    from: Shipment
+    to: VehicleModel
+    description: 出荷先車種
+  - label: OF_OEM
+    from: VehicleModel
+    to: OEM
+    description: 車種の OEM
+  - label: MENTIONS_LOT
+    from: Document
+    to: Lot
+    description: 文書がロットに言及
+  - label: MENTIONS_EQUIPMENT
+    from: Document
+    to: Equipment
+    description: 文書が設備に言及
+  - label: MENTIONS_PART
+    from: Document
+    to: Part
+    description: 文書が部品に言及
+
+example_queries:
+  - name: 材料ロットから車種までの可変長展開
+    cypher: |
+      MATCH (r:Lot {lot_id:$lot})-[:CONSUMED_BY*1..6]->(u:Lot {lot_type:'UNIT'})
+            -[:SHIPPED_AS]->(:Shipment)-[:FOR_MODEL]->(m:VehicleModel)
+      RETURN m.model_name, count(DISTINCT u) AS unit_count
+      LIMIT 50
+
+cautions:
+  - 起点は必ず 1 件に絞る（lot_id 等でフィルタ）
+  - 可変長パスは *1..6 程度に上限を付ける（エージェント側は最大 *1..8）
+  - 必ず LIMIT を付ける

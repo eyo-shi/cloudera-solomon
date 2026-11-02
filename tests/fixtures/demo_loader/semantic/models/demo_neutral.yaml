@@ -1,0 +1,78 @@
+version: "0.2"
+name: demo_neutral
+description: Neutral loader test model.
+datasets:
+  - name: entities
+    source: iceberg.demo_schema.entities
+    primary_key: [entity_id]
+    fields:
+      - name: entity_id
+        datatype: String
+      - name: name
+        datatype: String
+    custom_extensions:
+      - vendor_name: SOLOMON
+        data:
+          version: 1
+          kind: table
+          graph:
+            vertex:
+              label: Entity
+              id_field: entity_id
+              property_fields: [name]
+  - name: links
+    source: iceberg.demo_schema.links
+    fields:
+      - name: link_id
+        datatype: String
+      - name: from_id
+        datatype: String
+      - name: to_id
+        datatype: String
+    custom_extensions:
+      - vendor_name: SOLOMON
+        data:
+          version: 1
+          kind: graph_only
+          graph:
+            edges:
+              - label: LINKS_TO
+                from_label: Entity
+                to_label: Entity
+                from_field: from_id
+                to_field: to_id
+                id_field: link_id
+  - name: doc_index
+    source: iceberg.demo_schema.doc_index
+    fields:
+      - name: doc_id
+        datatype: String
+      - name: doc_type
+        datatype: String
+      - name: doc_date
+        datatype: Date
+      - name: title
+        datatype: String
+      - name: note_type
+        datatype: String
+        custom_extensions:
+          - vendor_name: SOLOMON
+            data:
+              version: 1
+              filterable: true
+    custom_extensions:
+      - vendor_name: SOLOMON
+        data:
+          version: 1
+          kind: document_index
+          document_index:
+            index: test-docs
+            id_field: doc_id
+            title_field: title
+            text_field: body
+            type_field: doc_type
+            date_field: doc_date
+            doc_types:
+              - id: memo
+                label: Memo
+                description: test

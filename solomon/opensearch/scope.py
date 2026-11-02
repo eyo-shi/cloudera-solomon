@@ -1,14 +1,18 @@
-"""Search UI scope — generic Solomon uses dataset catalog index only."""
+"""Search UI scope — dataset catalog vs business documents."""
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
-SearchScope = Literal["datasets"]
+SearchScope = Literal["datasets", "docs", "both"]
 
 
 def search_tab_scope() -> SearchScope:
-    """TreePane Search タブの既定スコープ（外部パイプラインが投入済みの ``solomon-datasets``）。"""
+    """TreePane Search タブのスコープ（``OPENSEARCH_SEARCH_SCOPE``）。"""
+    raw = (os.environ.get("OPENSEARCH_SEARCH_SCOPE") or "datasets").strip().lower()
+    if raw in ("docs", "both"):
+        return raw  # type: ignore[return-value]
     return "datasets"
 
 

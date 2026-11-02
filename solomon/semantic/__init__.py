@@ -1,44 +1,50 @@
-"""Semantic layer: Apache Ossie YAML の読み書き / 検索。
+"""Apache Ossie 本家形式セマンティックレイヤ。"""
 
-物理的な YAML ファイルは AI Workbench プロジェクト内の ``SOLOMON_SEMANTIC_ROOT``
-(既定: ``./semantic/``) 配下に Git 管理される想定 (solomon パッケージ外)。
-
-再エクスポート:
-  models: :class:`OssieDataset`, :class:`OssieDimension`, :class:`OssieMeasure`, ...
-  store:  :func:`read_dataset`, :func:`write_dataset`, :func:`search_datasets`
-"""
-from solomon.semantic.models import (
-    OssieDataset,
-    OssieDimension,
-    OssieDocument,
-    OssieMeasure,
-    OssieRelationship,
-    OssieSampleQuery,
-    OssieSource,
-    classify_column,
-    trino_to_ossie_type,
+from solomon.semantic.context import (
+    SemanticContext,
+    get_semantic_context,
+    render_business_context,
+    render_document_catalog,
+    render_graph_schema,
+    render_table_catalog,
+    render_tool_hints,
 )
+from solomon.semantic.models import (
+    AIContext,
+    OssieDataset,
+    OssieField,
+    OssieMetric,
+    OssieRelationship,
+    OssieSemanticModel,
+)
+from solomon.semantic.source_catalog import SourceCatalog, build_source_catalog
 from solomon.semantic.store import (
+    load_models,
     list_datasets,
     read_dataset,
     search_datasets,
     semantic_root,
-    write_dataset,
 )
 
 __all__ = [
+    "AIContext",
     "OssieDataset",
-    "OssieDimension",
-    "OssieDocument",
-    "OssieMeasure",
+    "OssieField",
+    "OssieMetric",
     "OssieRelationship",
-    "OssieSampleQuery",
-    "OssieSource",
-    "classify_column",
-    "trino_to_ossie_type",
+    "OssieSemanticModel",
+    "SemanticContext",
+    "SourceCatalog",
+    "build_source_catalog",
+    "get_semantic_context",
     "list_datasets",
+    "load_models",
     "read_dataset",
     "search_datasets",
     "semantic_root",
-    "write_dataset",
+    "render_business_context",
+    "render_document_catalog",
+    "render_graph_schema",
+    "render_table_catalog",
+    "render_tool_hints",
 ]

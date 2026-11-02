@@ -26,6 +26,7 @@ const AGENT_LABEL: Record<string, string> = {
   AnalyticsSummaryCrew: "Analytics",
   AnalyticsDashboardCrew: "Analytics",
   KnowledgeRagCrew: "Knowledge RAG",
+  KnowledgeAgent: "Knowledge RAG",
   Chat: "Chat",
 };
 
@@ -46,6 +47,7 @@ const AGENT_ACTIVITY: Record<string, string> = {
   AnalyticsSummaryCrew: "Generating summary",
   AnalyticsDashboardCrew: "Building dashboard",
   KnowledgeRagCrew: "Searching knowledge base",
+  KnowledgeAgent: "Searching knowledge base",
   Chat: "Composing reply",
 };
 

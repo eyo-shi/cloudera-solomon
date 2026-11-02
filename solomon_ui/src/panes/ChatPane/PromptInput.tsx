@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import type { UseWishStream } from "./useWishStream";
+import { RAG_PRESET_OPTIONS } from "./ragSources";
 
 const MAX_ATTACHMENTS = 5;
 const ACCEPTED_FILE_TYPES =
@@ -29,6 +30,8 @@ export function PromptInput({ wish }: Props) {
   const streaming = useChatStore((s) => s.streaming);
   const pendingPrompt = useChatStore((s) => s.pendingPrompt);
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt);
+  const ragSourcesPreset = useChatStore((s) => s.ragSourcesPreset);
+  const setRagSourcesPreset = useChatStore((s) => s.setRagSourcesPreset);
 
   useEffect(() => {
     if (pendingPrompt != null) {
@@ -155,6 +158,30 @@ export function PromptInput({ wish }: Props) {
             if (canSend) void submit();
           }}
         />
+        <div className="chat-composer__footer">
+          <div
+            className="chat-rag-sources"
+            role="group"
+            aria-label="Knowledge RAG ソース構成"
+          >
+            {RAG_PRESET_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                className={
+                  "chat-rag-sources__btn" +
+                  (ragSourcesPreset === opt.id
+                    ? " chat-rag-sources__btn--active"
+                    : "")
+                }
+                disabled={streaming}
+                aria-pressed={ragSourcesPreset === opt.id}
+                onClick={() => setRagSourcesPreset(opt.id)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         <div className="chat-composer__toolbar">
           <span className="chat-composer__hint">
             {streaming
@@ -213,6 +240,7 @@ export function PromptInput({ wish }: Props) {
               </button>
             )}
           </div>
+        </div>
         </div>
       </div>
       <p className="chat-composer__disclaimer">

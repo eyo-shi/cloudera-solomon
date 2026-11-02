@@ -143,9 +143,19 @@ def _looks_like_casual_chat(prompt: str) -> bool:
     lower = text.lower()
     if any(kw in text or kw in lower for kw in _TASK_KEYWORDS):
         return False
+    from solomon.router.semantic_hints import (
+        knowledge_relevance,
+        load_router_semantic_bundle,
+        _knowledge_threshold,
+    )
     from solomon.rag.classifier import is_knowledge_query
 
-    if is_knowledge_query(text):
+    ctx, catalog = load_router_semantic_bundle()
+    if ctx.models:
+        score, _ = knowledge_relevance(text, ctx, catalog)
+        if score >= _knowledge_threshold():
+            return False
+    elif is_knowledge_query(text):
         return False
     return True
 
@@ -181,7 +191,14 @@ def heuristic_classify(
             reasoning="data ingest is out of scope for Solomon query agent",
         )
 
-    # 1) ANALYZE_DASHBOARD / ANALYZE_SUMMARY
+    from solomon.rag.classifier import is_knowledge_query
+    from solomon.router.semantic_hints import (
+        _knowledge_threshold,
+        extract_fq_table_name,
+        knowledge_relevance,
+        load_router_semantic_bundle,
+    )
+
     is_dashboard = (
         any(kw in prompt for kw in _DASHBOARD_KEYWORDS)
         or any(kw in p_lower for kw in _DASHBOARD_KEYWORDS)
@@ -189,11 +206,27 @@ def heuristic_classify(
     is_summary = any(kw in prompt for kw in _SUMMARY_KEYWORDS) or any(
         kw in p_lower for kw in _SUMMARY_KEYWORDS
     )
-    if is_dashboard or is_summary:
-        intent: IntentLiteral = "ANALYZE_DASHBOARD" if is_dashboard else "ANALYZE_SUMMARY"
-        # 代名詞 or 対象未指定 -> entity_memory.last_table を試す
+    has_pronoun = any(kw in prompt for kw in _PRONOUN_KEYWORDS) or any(
+        kw in p_lower for kw in _PRONOUN_KEYWORDS
+    )
+
+    fq_explicit = extract_fq_table_name(prompt)
+    if fq_explicit and (is_dashboard or is_summary):
+        intent: IntentLiteral = (
+            "ANALYZE_DASHBOARD" if is_dashboard else "ANALYZE_SUMMARY"
+        )
+        return IntentClassification(
+            intent=intent,
+            confidence=0.9,
+            extracted_args={"fq_table_name": fq_explicit, "question": prompt},
+            needs_clarification=False,
+            reasoning=f"explicit fq_table_name={fq_explicit}",
+        )
+
+    if (is_dashboard or is_summary) and has_pronoun:
         fq = entity_memory.get("last_table")
         if fq:
+            intent = "ANALYZE_DASHBOARD" if is_dashboard else "ANALYZE_SUMMARY"
             return IntentClassification(
                 intent=intent,
                 confidence=0.85,
@@ -201,6 +234,21 @@ def heuristic_classify(
                 needs_clarification=False,
                 reasoning=f"resolved via entity_memory.last_table={fq}",
             )
+
+    ctx, catalog = load_router_semantic_bundle()
+    if ctx.models:
+        score, reasons = knowledge_relevance(prompt, ctx, catalog)
+        if score >= _knowledge_threshold():
+            return IntentClassification(
+                intent="KNOWLEDGE_RAG",
+                confidence=min(0.95, score),
+                extracted_args={"question": prompt},
+                needs_clarification=False,
+                reasoning="semantic knowledge relevance: " + "; ".join(reasons[:4]),
+            )
+
+    if is_dashboard or is_summary:
+        intent = "ANALYZE_DASHBOARD" if is_dashboard else "ANALYZE_SUMMARY"
         return IntentClassification(
             intent=intent,
             confidence=0.5,
@@ -209,11 +257,8 @@ def heuristic_classify(
             clarification_prompt=(
                 "対象のテーブル名を教えてください (例: iceberg.demo.sales_2024)。"
             ),
-            reasoning="analyze keyword but no last_table in entity_memory",
+            reasoning="analyze keyword but no table reference",
         )
-
-    # 2) KNOWLEDGE_RAG (分析/雑談以外のナレッジ探索)
-    from solomon.rag.classifier import is_knowledge_query
 
     if is_knowledge_query(prompt):
         return IntentClassification(
@@ -221,7 +266,7 @@ def heuristic_classify(
             confidence=0.85,
             extracted_args={"question": prompt},
             needs_clarification=False,
-            reasoning="knowledge RAG query detected",
+            reasoning="knowledge RAG query detected (legacy classifier)",
         )
 
     # 4) CHITCHAT
@@ -434,12 +479,16 @@ def kickoff_router(
             session_id=sid,
             prompt_len=len(prompt),
         )
+        from solomon.router.prompt_context import build_router_prompt_pack
+
+        prompt_pack = build_router_prompt_pack()
         try:
             raw = crew.kickoff(
                 inputs={
                     "prompt": prompt,
                     "session_id": sid,
                     "entity_memory_hint": _summarize_entity_memory(entity_memory),
+                    **prompt_pack,
                 }
             )
         except Exception as e:  # noqa: BLE001

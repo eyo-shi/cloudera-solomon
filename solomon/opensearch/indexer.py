@@ -2,16 +2,65 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from solomon.opensearch.client import build_client
 from solomon.opensearch.embeddings import try_embed
+from solomon.semantic.models import AIContext
+from solomon.semantic.search import tokenize
 from solomon.transport.config import OpenSearchConfig
 from solomon.transport.logging import get_logger
 
 _logger = get_logger(__name__)
-_TOKEN_RE = re.compile(r"[a-z0-9_]+")
+
+
+def _ai_text(ctx: AIContext | str | dict[str, Any] | None) -> list[str]:
+    if ctx is None:
+        return []
+    if isinstance(ctx, str):
+        return [ctx]
+    if isinstance(ctx, dict):
+        parts: list[str] = []
+        if isinstance(ctx.get("instructions"), str):
+            parts.append(ctx["instructions"])
+        for s in ctx.get("synonyms") or []:
+            if isinstance(s, str):
+                parts.append(s)
+        for ex in ctx.get("examples") or []:
+            if isinstance(ex, str):
+                parts.append(ex)
+        return parts
+    parts = []
+    if ctx.instructions:
+        parts.append(ctx.instructions)
+    parts.extend(ctx.synonyms or [])
+    parts.extend(ctx.examples or [])
+    return parts
+
+
+def _dataset_search_parts(ds: dict[str, Any]) -> list[str]:
+    parts: list[str] = []
+    for key in ("name", "description"):
+        v = ds.get(key)
+        if isinstance(v, str) and v.strip():
+            parts.append(v.strip())
+    parts.extend(_ai_text(ds.get("ai_context")))
+    for field in ds.get("fields") or []:
+        if not isinstance(field, dict):
+            continue
+        for key in ("name", "label", "description"):
+            v = field.get(key)
+            if isinstance(v, str) and v.strip():
+                parts.append(v.strip())
+        parts.extend(_ai_text(field.get("ai_context")))
+    for metric in ds.get("metrics") or []:
+        if not isinstance(metric, dict):
+            continue
+        for key in ("name", "description"):
+            v = metric.get(key)
+            if isinstance(v, str) and v.strip():
+                parts.append(v.strip())
+    return parts
 
 
 def build_searchable_text(
@@ -21,26 +70,19 @@ def build_searchable_text(
     dataset: dict[str, Any] | None = None,
     extra_text: str = "",
 ) -> str:
-    """検索用テキストを組み立てる。"""
+    """検索用テキストを組み立てる (本家 Ossie フィールド対象)。"""
     parts: list[str] = []
     for value in (title, description, extra_text):
         if value and value.strip():
             parts.append(value.strip())
 
     ds = dataset or {}
-    for key in ("name", "fq_name", "description"):
-        value = ds.get(key)
-        if isinstance(value, str) and value.strip():
-            parts.append(value.strip())
-    for col in ds.get("dimensions", []) + ds.get("measures", []):
-        for key in ("name", "description"):
-            value = col.get(key)
-            if isinstance(value, str) and value.strip():
-                parts.append(value.strip())
-    for sq in ds.get("sample_queries", []):
-        question = sq.get("question")
-        if isinstance(question, str) and question.strip():
-            parts.append(question.strip())
+    parts.extend(_dataset_search_parts(ds))
+    # トークン化で正規化した語も混ぜる (日本語対応)
+    blob = " ".join(parts)
+    tokens = tokenize(blob)
+    if tokens:
+        parts.append(" ".join(tokens))
     return " ".join(parts)
 
 
@@ -185,9 +227,17 @@ def index_graph_documents(
     return results
 
 
+def ensure_docs_index(client: Any, config: OpenSearchConfig, doc_index_def: dict | None = None) -> str:
+    """文書インデックスを作成（:mod:`docs_indexer` への委譲）。"""
+    from solomon.opensearch.docs_indexer import ensure_docs_index as _ensure
+
+    return _ensure(client, config, doc_index_def)
+
+
 __all__ = [
     "build_searchable_text",
     "ensure_index",
+    "ensure_docs_index",
     "index_document",
     "index_ossie_dataset",
     "index_graph_documents",

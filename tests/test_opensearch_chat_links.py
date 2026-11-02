@@ -21,3 +21,14 @@ def test_search_document_markdown_link() -> None:
 
 def test_search_document_markdown_link_no_key() -> None:
     assert search_document_markdown_link("x", {}) == "x"
+
+
+def test_search_document_markdown_link_doc_id() -> None:
+    md = search_document_markdown_link(
+        "Memo",
+        {"doc_id": "doc-1", "chunk_id": "ch-9", "index": "support_notes"},
+    )
+    assert md.startswith("[Memo](solomon://search-document?")
+    assert "doc_id=doc-1" in md
+    assert "chunk_id=ch-9" in md
+    assert "object_key" not in md

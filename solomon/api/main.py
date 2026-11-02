@@ -43,6 +43,7 @@ from solomon.api.routes import (
     graph as graph_route,
     health as health_route,
     ossie as ossie_route,
+    semantic as semantic_route,
     query as query_route,
     search as search_route,
     sessions as sessions_route,
@@ -185,6 +186,7 @@ def create_app() -> FastAPI:
     app.include_router(files_route.router)
     app.include_router(query_route.router)
     app.include_router(ossie_route.router)
+    app.include_router(semantic_route.router)
     app.include_router(artifacts_route.router)
     app.include_router(sessions_route.router)
     app.include_router(setup_route.router)

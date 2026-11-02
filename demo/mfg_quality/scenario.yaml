@@ -1,0 +1,212 @@
+# 製造品質デモ — 正解データ（ジェネレータは事件部分を固定注入、背景のみ乱数）
+version: 1
+seed_default: 42
+
+companies:
+  tier1: { name: 東邦精機株式会社, plants: [豊浜工場, 北見工場] }
+  tier2: { name: 三協モールド工業, machines: M-01..M-12, dryers: D-01..D-12 }
+  tier3_primary: 北陸ケミカル
+  tier3_alt: 東洋ポリマー
+  oems:
+    - { id: OEM-MIRAI, name: ミライ自動車, models: [SX-5, CV-3, KX-1] }
+    - { id: OEM-YAMATO, name: 大和モータース, models: [VN-7] }
+
+parts:
+  wh200: { part_no: WH-200, name: ウォームホイール }
+  pg310: { part_no: PG-310, name: パワーウィンドウ用ギア }
+  eps_a200: { part_no: EPS-A200, name: EPS ユニット SX-5 向け }
+  eps_a210: { part_no: EPS-A210, name: EPS ユニット派生 }
+  pwr55: { part_no: PWR-55, name: レギュレータユニット }
+
+incident:
+  year: 2026
+  claim:
+    oem: OEM-MIRAI
+    model: SX-5
+    symptom_market: ハンドルを切るとゴトゴト
+    count: 14
+    unit_lots:
+      - { lot_id: U-A200-260601, prod_date: "2026-06-01" }
+      - { lot_id: U-A200-260602, prod_date: "2026-06-02" }
+      - { lot_id: U-A200-260603, prod_date: "2026-06-03" }
+  dryer_failure:
+    equipment_id: D-07
+    parent_machine: M-07
+    start: "2026-05-12"
+    end: "2026-05-26"
+    maintenance_note: 露点計不調、部品入荷待ち、5/26 交換完了
+  material_lots:
+    primary: HC-2605-117
+    secondary: HC-2605-121
+  mold_lots_from_117: 9   # WH-200×6, PG-310×3
+  mold_lots_from_121: 6
+  mold_lots_d07_window: 15  # 117→9 + 121→6
+  dry_shorten_reports: 5    # 2026-05-14..05-24
+
+genealogy_hops:
+  note: |
+    lot_genealogy は 1 行 = 親子 1 段（child が parent を消費）。
+    固定 3 段 JOIN では SX-5 の EPS-A200 経路しか出ず、PG-310→PWR-55（4 段）や WH-200→EPS-A210（5 段）が漏れる。
+  eps_a200_path_hops: 3   # 材料→成形→サブ組立→ユニット
+  pg310_pwr55_path_hops: 4
+  wh200_eps_a210_path_hops: 5
+
+hidden_facts:
+  H1:
+    material_lot: HC-2605-117
+    mold_lots: 9
+    affected_models: [SX-5, CV-3, VN-7, KX-1]
+    affected_oems: 2
+    estimated_units: 11400
+  H2:
+    doc_8d: QR-2024-0815
+    plant: 北見工場
+    phrases: [打音, コトコト]
+    root_cause_text: ペレット吸湿
+    d7_empty: true
+    daily_2025_03: true
+    defects_table_code: 外観その他
+  H3:
+    daily_dates: ["2026-05-14", "2026-05-15", "2026-05-16", "2026-05-22", "2026-05-24"]
+    equipment_aliases: ["7 号機", M07, "成形 No.7", "7 番機"]
+    dry_hours_short: 2.5
+    dry_hours_normal: 4
+  H4:
+    machine: M-07
+    window: ["2026-05-12", "2026-05-26"]
+    mold_lots_total: 15
+  H5:
+    backlash_avg_pct_usl_incident: 92
+    backlash_avg_pct_usl_normal: 60
+    judgment: OK
+  H6:
+    decoy_doc_count: 400
+    decoy_terms: [異音, 振動]
+
+containment:
+  mold_lots: 15
+  subassy_lots: 11
+  unit_lots: 8
+  inventory_tier1: 1240
+  inventory_tier2: 3100
+  shipped:
+    OEM-MIRAI:
+      SX-5: 4800
+      CV-3: 2100
+      KX-1: 3300
+    OEM-YAMATO:
+      VN-7: 1900
+
+q7_ppap:
+  material: PA66-GF30
+  parts_using_north_chem: 7
+  ppap_approved: 4
+  ppap_pending: 3
+  includes_pg310: true
+
+expected_answers:
+  Q1:
+    unit_lots: [U-A200-260601, U-A200-260602, U-A200-260603]
+    prod_dates: ["2026-06-01", "2026-06-02", "2026-06-03"]
+  Q2:
+    resin_lot: HC-2605-117
+    mold_lots: 9
+    models: [SX-5, CV-3, VN-7, KX-1]
+    oems: 2
+    units: 11400
+  Q3:
+    doc_8d: QR-2024-0815
+    d7_empty: true
+    defect_code_zero: 外観その他
+  Q4:
+    backlash_pct_incident: 92
+    backlash_pct_normal: 60
+    key_doc_date: "2026-05-14"
+    dryer: D-07
+  Q5:
+    equipment: M-07
+    window: ["2026-05-12", "2026-05-26"]
+    mold_lots: 15
+  Q6: { use_containment_block: true }
+  Q7:
+    approved: 4
+    pending: 3
+    parts: 7
+
+forbidden_terms_planted_docs: [異音]
+
+generation_lexicon:
+  symptoms: [打音, ガタ, ガタつき, ゴトゴト, カタカタ, コトコト, 噛み合い音, バックラッシ過大, 遊び大, 振動, ビビリ]
+  causes: [吸湿, 水分率高, 乾燥不足, 乾燥時間短縮, 露点高め, 除湿不良, 加水分解]
+  equipment: ["M-07", M07, "7 号機", "成形 No.7", "7 番機", D-07, "7 号ドライヤー", "ホッパードライヤー(7)"]
+  parts: [WH-200, ウォームホイール, "EPS ギア", 樹脂ホイール, PG-310, "PW ギア", レギュレータギア]
+
+planted_documents:
+  - doc_id: QR-2024-0815
+    doc_type: 8d
+    plant: 北見工場
+    must_include: [打音, コトコト, ペレット吸湿, 露点計]
+    must_exclude: [異音]
+  - doc_id: DR-2025-0320-北見
+    doc_type: daily_report
+    must_include: [コトコト, 乾燥やり直し]
+    must_exclude: [異音]
+  - doc_id: DR-2026-0514-M07
+    doc_type: daily_report
+    equipment_id: M-07
+    must_include: ["7 号機", 露点, "2.5h"]
+    must_exclude: [異音]
+
+doc_type_targets:
+  daily_report: 1800
+  maintenance: 600
+  8d: 40
+  defect_report: 250
+  claim: 800
+  fmea: 15
+  change_notice: 50
+  decoy: 400
+
+questions:
+  - id: Q1
+    prompt: SX-5 の異音クレーム 14 件の対象ユニットのロットと製造日は？
+  - id: Q2
+    prompt: そのウォームホイールに使われた樹脂ロットは、他にどの製品・どの車種に入っている？
+  - id: Q3
+    prompt: 過去に似たような不具合はあった？
+  - id: Q4
+    prompt: 検査は全部合格なのに、なぜ不良が出た？
+  - id: Q5
+    prompt: 不良条件で作られた可能性がある部品を全部洗い出して
+  - id: Q6
+    prompt: 封じ込め対象ロット・出荷先・台数を根拠付きで確定して
+  - id: Q7
+    prompt: 北陸ケミカルから東洋ポリマーに切り替えたら、影響する部品と認可状況は？
+
+search_checks:
+  - id: q3_demo
+    query: ハンドル操作時のゴトゴト音、樹脂ギアのガタ
+    top_k: 5
+    keyword_query: 異音
+    must_rank:
+      - { doc_id: QR-2024-0815, max_rank: 3, modes: [expand_on, expand_off] }
+    must_not_rank:
+      - { doc_id: QR-2024-0815, max_rank: 20, modes: [keyword] }
+
+table_targets:
+  suppliers: 40
+  supplier_alternatives: 30
+  parts: 350
+  bom: 900
+  equipment: 120
+  material_lots: 1500
+  production_runs: 60000
+  lot_genealogy: 180000
+  inspection_results: 400000
+  unit_lots: 6000
+  shipments: 25000
+  vehicle_models: 8
+  oem_customers: 3
+  field_claims: 800
+  defects: 5000
+  doc_index: 3000

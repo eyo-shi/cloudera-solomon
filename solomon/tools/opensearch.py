@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from solomon.opensearch.client import ping
 from solomon.opensearch.indexer import index_graph_documents, index_ossie_dataset
+from solomon.opensearch.docs_search import search_documents_with_expansion
 from solomon.opensearch.search import hybrid_search, keyword_search, vector_search
 from solomon.transport.config import get_opensearch_config
 from solomon.transport.errors import ErrorCode, err, ok
@@ -186,7 +187,7 @@ class OpenSearchIndexTool(BaseSolomonTool):
     name: str = "opensearch_index"
     description: str = (
         "Index an Ossie dataset and optional related documents into the external "
-        "Cloudera Semantic Search cluster. Call after ossie_write during ingestion. "
+        "Cloudera Semantic Search cluster. Index or refresh dataset metadata from Ossie models. "
         "Skips gracefully when OpenSearch is not configured."
     )
     args_schema: type[BaseModel] = OpenSearchIndexArgs
@@ -234,6 +235,82 @@ class OpenSearchIndexTool(BaseSolomonTool):
                 "dataset_index": main,
                 "document_indexes": doc_results,
                 "indexed_count": 1 + len(doc_results),
+            }
+        )
+
+
+class DocumentSearchArgs(BaseModel):
+    query: str = Field(..., description="Natural language search query")
+    top_k: int = Field(8, ge=1, le=20)
+    mode: str = Field(
+        "hybrid",
+        description="keyword | vector | hybrid",
+    )
+    filters: dict[str, Any] | None = Field(
+        None,
+        description="doc_type, date_from, date_to, and Ossie filterable fields",
+    )
+    expand: bool = Field(
+        True,
+        description="LLM query expansion before multi-search RRF merge",
+    )
+
+
+class DocumentSearchTool(BaseSolomonTool):
+    """業務文書チャンク検索（Ossie document_index 定義に基づく）。"""
+
+    name: str = "doc_search"
+    description: str = (
+        "Search business document chunks in the configured OpenSearch docs index. "
+        "Filter schema is derived from Ossie document_index definitions."
+    )
+    args_schema: type[BaseModel] = DocumentSearchArgs
+    requires_auth: bool = False
+
+    def run(
+        self,
+        user_ctx: Optional[UserContext],
+        query: str,
+        top_k: int = 8,
+        mode: str = "hybrid",
+        filters: dict[str, Any] | None = None,
+        expand: bool = True,
+        **_: Any,
+    ) -> dict[str, Any]:
+        _ = user_ctx
+        config = get_opensearch_config()
+        if config is None:
+            return err(ErrorCode.OPENSEARCH_NOT_CONFIGURED, _not_configured_msg())
+        try:
+            result = search_documents_with_expansion(
+                config,
+                query,
+                top_k=top_k,
+                filters=filters,
+                mode=mode,
+                expand=expand,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return err(
+                ErrorCode.OPENSEARCH_QUERY_FAILED,
+                f"Document search failed: {exc}",
+            )
+        if result.get("status") == "error":
+            return err(
+                result.get("error_code", ErrorCode.OPENSEARCH_QUERY_FAILED),
+                str(result.get("message", "document search failed")),
+                warnings=result.get("warnings"),
+            )
+        return ok(
+            {
+                "query": query,
+                "top_k": top_k,
+                "mode": mode,
+                "index": result.get("index"),
+                "documents": result.get("documents") or [],
+                "count": result.get("count", 0),
+                "warnings": result.get("warnings") or [],
+                "expanded_queries": result.get("expanded_queries") or [],
             }
         )
 

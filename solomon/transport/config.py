@@ -173,6 +173,10 @@ class OpenSearchConfig:
     connection_name: Optional[str] = None
     #: Knox ``.../cdp-proxy-api/opensearch`` 等（``OPENSEARCH_URL`` の path 部）
     url_prefix: str = ""
+    #: 業務文書チャンク用インデックス（``OPENSEARCH_DOCS_INDEX`` / Ossie / ``{namespace}-docs``）
+    docs_index_name: str = ""
+    #: 文書 ``text`` / ``title`` 用アナライザー（``cjk`` | ``kuromoji``）
+    docs_analyzer: str = "cjk"
 
 
 # ------------------------------------------------------------------ #
@@ -185,6 +189,26 @@ def _env(name: str) -> Optional[str]:
         return None
     v = v.strip()
     return v or None
+
+
+_RAG_SOURCE_VALID = frozenset({"table", "graph", "search"})
+
+
+def get_rag_default_sources() -> frozenset[str]:
+    """``SOLOMON_RAG_SOURCES``（カンマ区切り、既定 ``table,graph,search``）。"""
+    raw = _env("SOLOMON_RAG_SOURCES") or "table,graph,search"
+    out: set[str] = set()
+    for part in raw.split(","):
+        name = part.strip().lower()
+        if not name:
+            continue
+        if name in _RAG_SOURCE_VALID:
+            out.add(name)
+        else:
+            _logger.warning("rag_config.unknown_source", source=name)
+    if not out:
+        return frozenset({"table", "graph", "search"})
+    return frozenset(out)
 
 
 def _normalize_trino_host(host: str, port: int) -> tuple[str, int]:
@@ -575,7 +599,10 @@ AGENT_LLM_DEFAULT_ROLE: dict[str, str] = {
     "summary_writer": "strong",
     "dashboard_builder": "strong",
     "rag_synthesis": "strong",
+    "rag_agent": "strong",
     "excel_validate": "light",
+    "doc_query_expansion": "light",
+    "text2sql": "strong",
 }
 
 
@@ -1026,7 +1053,18 @@ def get_opensearch_config() -> Optional[OpenSearchConfig]:
     )
     if cfg is None:
         _logger.debug("opensearch_config.not_configured")
-    return cfg
+        return None
+    return _enrich_opensearch_config(cfg)
+
+
+def _enrich_opensearch_config(cfg: OpenSearchConfig) -> OpenSearchConfig:
+    from solomon.opensearch.doc_index import resolve_docs_analyzer, resolve_docs_index_name
+
+    return replace(
+        cfg,
+        docs_index_name=resolve_docs_index_name(cfg),
+        docs_analyzer=resolve_docs_analyzer(),
+    )
 
 
 __all__ = [
@@ -1045,4 +1083,5 @@ __all__ = [
     "get_cdv_config",
     "get_graph_config",
     "get_opensearch_config",
+    "get_rag_default_sources",
 ]

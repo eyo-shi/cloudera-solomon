@@ -22,7 +22,7 @@ export function SQLTab({ tab }: Props) {
   useEffect(() => {
     if (codeRef.current) {
       // hljs 側の重複ハイライトを避ける
-      delete (codeRef.current as any).dataset.highlighted;
+      delete codeRef.current.dataset.highlighted;
       codeRef.current.classList.remove("hljs");
       hljs.highlightElement(codeRef.current);
     }

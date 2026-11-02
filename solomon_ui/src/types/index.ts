@@ -87,7 +87,7 @@ export interface GraphTabRef {
 export type SearchDocumentScope = "inspection" | "datasets" | "both";
 
 export interface SearchDocumentEntry {
-  document_type?: "inspection" | "dataset";
+  document_type?: "inspection" | "dataset" | "doc";
   index?: string | null;
   score?: number;
   /** Primary line (file name or fq_name) */
@@ -102,6 +102,19 @@ export interface SearchDocumentEntry {
   dataset?: Record<string, unknown>;
   /** Bronze ファイルの解析 JSON（inspection-*） */
   payload?: Record<string, unknown> | null;
+  doc_id?: string | null;
+  chunk_id?: string | null;
+  doc_type?: string | null;
+  doc_type_label?: string | null;
+  doc_date?: string | null;
+  metadata?: Record<string, unknown>;
+  metadata_labels?: Record<string, string>;
+  chunks?: Array<{
+    chunk_id?: string | null;
+    section?: string | null;
+    text?: string | null;
+  }>;
+  text?: string | null;
 }
 export interface SearchDocumentsResponse {
   index: string;

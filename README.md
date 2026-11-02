@@ -15,7 +15,7 @@ solomon/           Python パッケージ (Crew + FastAPI)
   opensearch/   外部 OpenSearch (Cloudera Semantic Search) クライアント
   rag/          Agentic RAG (分類 / オーケストレーション / 合成)
   analytics/    Analytics Crew (サマリー / ダッシュボード)
-  semantic/     Ossie YAML 読み書き / 検索
+  semantic/     Ossie 本家形式の読込・検索・集約コンテキスト
   session/      セッション、リクエスト、メモリ
   transport/    Knox JWT / HTTP / ロギング共通層
   tools/        CrewAI Tool 実装 (S3 / Trino / Graph Cypher / OpenSearch / Text2SQL 等)
@@ -28,7 +28,7 @@ solomon_ui/        React + TypeScript + Vite (3 ペイン UI)
     ResultPane/ 中央: Table / Dashboard / Summary / SQL / File / Graph のタブ
     ChatPane/   右: SSE ストリーム対応チャット
 
-semantic/       Apache Ossie YAML の Git 管理領域
+semantic/models/  Apache Ossie セマンティックモデル (1 ファイル = 1 モデル)
 tests/          pytest
 agent_studio_manifest/     Agent Studio 用 tools/agents/crews YAML (自動生成)
 .project-metadata.yaml     Cloudera AI Workbench (AMP) マニフェスト
@@ -51,16 +51,22 @@ Solomon は 4 つの Knowledge Source を UI と Agent から共通利用する�
 
 ## Agentic RAG
 
-自然言語のナレッジ質問は Router が `KNOWLEDGE_RAG` intent に振り分け、以下の戦略で複数ソースを横断検索する。
+自然言語のナレッジ質問は Router が `KNOWLEDGE_RAG` intent に振り分ける。
 
-| 戦略 | 主なソース |
+**既定 (`SOLOMON_RAG_ENGINE=agent`)** — ReAct 型 **Knowledge Agent**（最大 8 手）が `sql_query` / `graph_query` / `doc_search` を litellm 経由で自律的に組み合わせ、SQL・グラフ・文書を横断して回答する。グラフの意味論は `SOLOMON_GRAPH_SCHEMA_FILE`（既定 `semantic/graph/schema.yaml`）をシステムプロンプトに載せる。LLM は `rag_agent`（strong ロール、`SOLOMON_LLM_AGENT_RAG_AGENT_*` で上書き可）。ツール呼び出し形式は `SOLOMON_RAG_TOOL_MODE=auto|native|json`。
+
+**heuristic (`SOLOMON_RAG_ENGINE=heuristic`)** — 従来どおり正規表現で 1 戦略を選び固定パイプラインを 1 回実行する。
+
+**ソース構成** — `table` / `graph` / `search` をリクエストごとに ON/OFF（`POST /api/wish` の `sources`、省略時は `SOLOMON_RAG_SOURCES`）。Chat の 4 択（テーブルのみ / ＋Graph / ＋Search / 全部）で切り替え、再起動不要。
+
+| 戦略 (heuristic) | 主なソース |
 |---|---|
 | `GRAPH_QUERY` | PuppyGraph (Lakehouse/RDB 上の graph schema) |
 | `SQL_ANALYTICS` | Ossie + OpenSearch コンテキスト → Trino Text2SQL |
 | `KEYWORD` / `HYBRID` | OpenSearch (BM25 / k-NN / RRF) |
 | `COMPOSITE` | 上記の組み合わせ |
 
-RAG 実行後、graph ヒットがある場合は中央ペインに Graph 可視化タブを自動で開く。
+heuristic で graph ヒットがある場合は中央ペインに Graph 可視化タブを自動で開く（agent モードでは未対応）。
 
 ## PuppyGraph
 
@@ -87,6 +93,8 @@ MVP + Knowledge Source 拡張が `main` に入っている:
 未着手 (v2 候補): TablePreview の仮想スクロール、Graph 2-hop/3-hop UI、Ossie バッジの実 YAML 判定、セッション履歴の hydrate、Analytics の Hierarchical Process 移行。
 
 ## 開発
+
+CDW + Iceberg / PuppyGraph / OpenSearch の**デモ環境構築・リハーサル**は [demo/SETUP.md](demo/SETUP.md) を参照（`demo.loader` / `demo.validate` / `demo.checks.preflight`）。
 
 ### バックエンド
 

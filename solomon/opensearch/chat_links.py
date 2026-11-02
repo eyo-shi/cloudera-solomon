@@ -11,10 +11,19 @@ def search_document_markdown_link(label: str, doc: dict[str, Any]) -> str:
 
     表セル内に置くため **インラインリンクのみ**（reference 形式は GFM 表を壊す）。
     """
+    doc_id = str(doc.get("doc_id") or "").strip()
+    if doc_id:
+        params: dict[str, str] = {"doc_id": doc_id}
+        for field in ("chunk_id", "index"):
+            val = doc.get(field)
+            if val not in (None, ""):
+                params[field] = str(val)
+        return solomon_markdown_link(label, "search-document", params)
+
     key = str(doc.get("object_key") or "").strip()
     if not key:
         return _escape_md_label(label)
-    params: dict[str, str] = {"object_key": key}
+    params = {"object_key": key}
     for field in ("format", "trace_id", "index", "vb_machine_no"):
         val = doc.get(field)
         if val not in (None, ""):

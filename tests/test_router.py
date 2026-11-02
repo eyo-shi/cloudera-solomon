@@ -1,6 +1,10 @@
 """Router Crew の配線 + heuristic テスト (LLM なし)。"""
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from solomon.router import (
     DispatchPlan,
     IntentClassification,
@@ -18,8 +22,31 @@ from solomon.router.crew import (
     _DATA_INGEST_OUT_OF_SCOPE_MSG,
     _summarize_entity_memory,
 )
+from solomon.router.tasks import make_classify_intent_task
 from solomon.router.tools import AnalyticsKickoffTool, EntityMemoryReadTool
 from solomon.transport.user_context import UserContext
+
+FIXTURE_SEMANTIC = (
+    Path(__file__).resolve().parent / "fixtures" / "semantic" / "sample_orders"
+)
+
+
+def _reset_semantic_caches() -> None:
+    from solomon.semantic import context as ctx_mod
+    from solomon.semantic import store as store_mod
+    from solomon.router import prompt_context as pc_mod
+    from solomon.semantic import source_catalog as sc_mod
+
+    store_mod.load_models(force=True)
+    ctx_mod._cache_ctx = None
+    sc_mod._cache_catalog = None
+    pc_mod._cache_pack = None
+
+
+@pytest.fixture(autouse=True)
+def _router_semantic_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SOLOMON_SEMANTIC_ROOT", str(FIXTURE_SEMANTIC))
+    _reset_semantic_caches()
 
 
 def _tool_names(agent: object) -> set[str]:
@@ -84,9 +111,62 @@ def test_heuristic_chitchat() -> None:
     assert c.intent == "CHITCHAT"
 
 
-def test_heuristic_knowledge_rag() -> None:
-    c = heuristic_classify("障害対応の手順を教えて")
+def test_heuristic_knowledge_rag_from_ossie_examples() -> None:
+    c = heuristic_classify(
+        "Which customers placed the most orders last month?"
+    )
     assert c.intent == "KNOWLEDGE_RAG"
+
+
+def test_heuristic_knowledge_rag_japanese_synonym() -> None:
+    c = heuristic_classify("顧客は何人いますか？")
+    assert c.intent == "KNOWLEDGE_RAG"
+
+
+def test_heuristic_chitchat_off_domain() -> None:
+    c = heuristic_classify("今日の天気はどう？")
+    assert c.intent == "CHITCHAT"
+
+
+def test_heuristic_summary_explicit_fq() -> None:
+    c = heuristic_classify("iceberg.demo.orders をサマリーして")
+    assert c.intent == "ANALYZE_SUMMARY"
+    assert c.extracted_args.get("fq_table_name") == "iceberg.demo.orders"
+
+
+def test_heuristic_summary_keywords_do_not_override_semantic_knowledge() -> None:
+    c = heuristic_classify(
+        "Which customers placed the most orders last month? 傾向をまとめて"
+    )
+    assert c.intent == "KNOWLEDGE_RAG"
+
+
+def test_heuristic_empty_semantic_falls_back_to_legacy_classifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty = Path(__file__).resolve().parent / "fixtures" / "semantic" / "empty_root"
+    empty.mkdir(parents=True, exist_ok=True)
+    (empty / "models").mkdir(exist_ok=True)
+    monkeypatch.setenv("SOLOMON_SEMANTIC_ROOT", str(empty))
+    _reset_semantic_caches()
+    c = heuristic_classify("lineage を調べて")
+    assert c.intent == "KNOWLEDGE_RAG"
+
+
+def test_classify_intent_task_includes_semantic_placeholders() -> None:
+    from solomon.router.agents import make_intent_classifier_agent
+    from solomon.router.prompt_context import build_router_prompt_pack
+
+    task = make_classify_intent_task(make_intent_classifier_agent())
+    desc = str(getattr(task, "description", ""))
+    assert "{domain_context}" in desc
+    assert "{source_catalog}" in desc
+    assert "{routing_examples}" in desc
+    pack = build_router_prompt_pack(force=True)
+    assert "sample_orders" in pack["domain_context"] or "order" in pack[
+        "domain_context"
+    ].lower()
+    assert "KNOWLEDGE_RAG" in pack["routing_examples"]
 
 
 def test_dispatch_plan_summary_no_table_asks_clarify() -> None:

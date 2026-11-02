@@ -20,17 +20,25 @@ export function parseSearchDocumentLink(href: string): URLSearchParams | null {
 async function fetchSearchDocument(
   params: URLSearchParams,
 ): Promise<SearchDocumentEntry> {
+  const docId = params.get("doc_id");
   const objectKey = params.get("object_key");
-  if (!objectKey) {
-    throw new Error("object_key missing in search document link");
+  if (!docId && !objectKey) {
+    throw new Error("doc_id or object_key missing in search document link");
   }
-  const apiParams = new URLSearchParams({ object_key: objectKey });
+  const apiParams = new URLSearchParams();
+  if (docId) apiParams.set("doc_id", docId);
+  else if (objectKey) apiParams.set("object_key", objectKey);
   const format = params.get("format");
   if (format) apiParams.set("format", format);
   const res = await apiFetch<{ document: SearchDocumentEntry }>(
     `/api/search/document?${apiParams.toString()}`,
   );
-  return res.document;
+  const doc = res.document;
+  const chunkId = params.get("chunk_id");
+  if (chunkId && !doc.chunk_id) {
+    doc.chunk_id = chunkId;
+  }
+  return doc;
 }
 
 export async function openSearchDocumentFromLink(
@@ -41,21 +49,29 @@ export async function openSearchDocumentFromLink(
   const params = parseSearchDocumentLink(normalized);
   if (!params) return;
 
+  const docId = params.get("doc_id");
   const objectKey = params.get("object_key") ?? "";
-  const stub: SearchDocumentEntry = {
-    object_key: objectKey,
-    format: params.get("format"),
-    trace_id: params.get("trace_id"),
-    index: params.get("index"),
-    vb_machine_no: params.get("vb_machine_no"),
-    title: objectKey.split("/").filter(Boolean).pop() ?? objectKey,
-  };
+  const stub: SearchDocumentEntry = docId
+    ? {
+        document_type: "doc",
+        doc_id: docId,
+        chunk_id: params.get("chunk_id"),
+        title: docId,
+      }
+    : {
+        object_key: objectKey,
+        format: params.get("format"),
+        trace_id: params.get("trace_id"),
+        index: params.get("index"),
+        vb_machine_no: params.get("vb_machine_no"),
+        title: objectKey.split("/").filter(Boolean).pop() ?? objectKey,
+      };
 
-  const titleFromKey =
+  const titleFromStub =
     stub.title ??
-    (objectKey ? objectKey.split("/").filter(Boolean).pop() : null) ??
+    (docId || objectKey.split("/").filter(Boolean).pop()) ??
     "document";
-  openSearchDocumentTab(openTab, stub, titleFromKey);
+  openSearchDocumentTab(openTab, stub, String(titleFromStub));
 
   try {
     const doc = await fetchSearchDocument(params);
@@ -66,7 +82,8 @@ export async function openSearchDocumentFromLink(
         (doc.object_key
           ? doc.object_key.split("/").filter(Boolean).pop()
           : null) ??
-        titleFromKey,
+        doc.doc_id ??
+        String(titleFromStub),
     );
   } catch {
     /* 404 等 — stub タブのまま */

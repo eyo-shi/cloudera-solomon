@@ -1,0 +1,153 @@
+version: "0.2"
+name: sample_orders
+description: Generic order processing semantic model for tests.
+ai_context:
+  instructions: Use tables for counts and trends; graph for customer-order links; documents for support notes.
+  examples:
+    - Which customers placed the most orders last month?
+custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      glossary:
+        - term: order_line
+          description: A single line item on an order.
+          synonyms: [line item, detail row]
+      tool_hints:
+        table: Structured counts and filters on orders and products.
+        graph: Traverse customer to order relationships.
+        search: Free-text support notes and inquiries.
+      search:
+        expansion_instructions: Writers mix casual phrasing with short product codes.
+        use_synonyms: true
+      graph_examples:
+        - question: List orders linked to a customer
+          cypher: "MATCH (c:Customer {customer_id:$id})-[:PLACED]->(o:Order) RETURN o ORDER BY o.order_date DESC LIMIT 20"
+          notes: Parameterize customer_id.
+      verified_queries:
+        - question: Total order count
+          sql: SELECT COUNT(*) AS cnt FROM demo_catalog.demo_schema.orders
+          notes: Example only
+datasets:
+  - name: customers
+    source: demo_catalog.demo_schema.customers
+    description: Customer master records (顧客マスタ).
+    ai_context:
+      synonyms: [client, buyer, 顧客]
+      examples:
+        - How many active customers are there?
+    fields:
+      - name: customer_id
+        datatype: String
+        description: Primary customer identifier.
+      - name: customer_name
+        datatype: String
+        dimension:
+          is_time: false
+        description: Display name.
+        ai_context:
+          synonyms: [client name, buyer name, 顧客名]
+      - name: region
+        datatype: String
+        dimension:
+          is_time: false
+    metrics:
+      - name: customer_count
+        expression: COUNT(*)
+        description: Number of customers.
+    custom_extensions:
+      - vendor_name: SOLOMON
+        data:
+          version: 1
+          kind: table
+          queryable: true
+          graph:
+            vertex:
+              label: Customer
+              id_field: customer_id
+              property_fields: [customer_name, region]
+              description: Customer node
+            edges:
+              - label: PLACED
+                from_label: Customer
+                to_label: Order
+                from_field: customer_id
+                to_field: customer_id
+                description: Customer placed an order
+  - name: orders
+    source: demo_catalog.demo_schema.orders
+    description: Order header facts.
+    fields:
+      - name: order_id
+        datatype: String
+      - name: customer_id
+        datatype: String
+        dimension:
+          is_time: false
+      - name: order_date
+        datatype: Date
+        dimension:
+          is_time: true
+      - name: amount
+        datatype: Decimal
+    metrics:
+      - name: total_amount
+        expression: SUM(amount)
+        description: Sum of order amounts.
+    custom_extensions:
+      - vendor_name: SOLOMON
+        data:
+          version: 1
+          kind: table
+          graph:
+            vertex:
+              label: Order
+              id_field: order_id
+              property_fields: [order_date, amount]
+  - name: support_notes
+    source: demo_catalog.demo_schema.support_notes
+    description: Support inquiry text indexed for search.
+    fields:
+      - name: doc_id
+        datatype: String
+      - name: title
+        datatype: String
+      - name: note_type
+        datatype: String
+        description: Inquiry category code.
+        custom_extensions:
+          - vendor_name: SOLOMON
+            data:
+              version: 1
+              filterable: true
+      - name: body
+        datatype: String
+        custom_extensions:
+          - vendor_name: SOLOMON
+            data:
+              version: 1
+              filterable: false
+    custom_extensions:
+      - vendor_name: SOLOMON
+        data:
+          version: 1
+          kind: document_index
+          queryable: false
+          document_index:
+            index: support_notes
+            id_field: doc_id
+            title_field: title
+            text_field: body
+            type_field: note_type
+            doc_types:
+              - id: inquiry
+                label: Inquiry
+                description: Customer inquiry memo
+relationships:
+  - name: customer_orders
+    from: customers
+    to: orders
+    from_columns: [customer_id]
+    to_columns: [customer_id]
+    ai_context:
+      instructions: Join orders to their customer on customer_id.

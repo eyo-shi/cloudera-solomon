@@ -1,0 +1,14 @@
+version: 1
+expected_answers:
+  Q1:
+    entity_id: ALPHA-1
+questions:
+  - id: Q1
+    prompt: ナレッジベースで主要エンティティの ID を教えて
+
+search_checks:
+  - id: sample
+    query: sample query
+    top_k: 3
+    must_rank:
+      - { doc_id: doc-a, max_rank: 2, modes: [expand_off] }
