@@ -331,3 +331,61 @@ def test_load_graph_posts_trino_schema(neutral_domain: Path, monkeypatch: pytest
     assert url == "http://pg.example:8081/schema"
     assert body["catalog"][0]["jdbc"]["username"] == "svc"
     assert "${" not in __import__("json").dumps(body)
+
+
+def test_default_catalog_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    from demo.loader.graph_load import default_catalog_type
+
+    for key in ("DEMO_PUPPYGRAPH_CATALOG", "PUPPYGRAPH_TRINO_JDBC_URI", "HIVE_METASTORE_URI",
+                "ICEBERG_REST_URI"):
+        monkeypatch.delenv(key, raising=False)
+    assert default_catalog_type() == "trino"
+    monkeypatch.setenv("HIVE_METASTORE_URI", "thrift://hms.example:9083")
+    assert default_catalog_type() == "hms"
+    monkeypatch.setenv("PUPPYGRAPH_TRINO_JDBC_URI", "jdbc:trino://trino.example:443/iceberg")
+    assert default_catalog_type() == "trino"
+    monkeypatch.setenv("DEMO_PUPPYGRAPH_CATALOG", "rest")
+    assert default_catalog_type() == "rest"
+
+
+def test_load_graph_writes_resolved_schema_for_ui(
+    neutral_domain: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import json
+    import stat
+
+    from demo.loader import graph_load
+    from demo.loader.ossie_domain import load_domain
+
+    monkeypatch.delenv("DEMO_PUPPYGRAPH_CATALOG", raising=False)
+    monkeypatch.setenv("PUPPYGRAPH_TRINO_JDBC_URI", "jdbc:trino://trino.example:443/iceberg?SSL=true")
+    monkeypatch.setenv("PUPPYGRAPH_TRINO_USER", "svc")
+    monkeypatch.setenv("PUPPYGRAPH_TRINO_PASSWORD", "pw")
+
+    def no_post(*_a):
+        raise AssertionError("must not POST when schema_out is given")
+
+    out = tmp_path / "schema_upload.json"
+    domain = load_domain(neutral_domain, validate=False)
+    graph_load.load_graph(domain, dry_run=False, post_fn=no_post, schema_out=out)
+    body = json.loads(out.read_text())
+    assert body["catalog"][0]["jdbc"] == {
+        "username": "svc",
+        "password": "pw",
+        "jdbcUri": "jdbc:trino://trino.example:443/iceberg?SSL=true",
+    }
+    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+def test_post_schema_reports_unreachable_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    from demo.loader import graph_load
+
+    def boom(*_a, **_k):
+        raise httpx.ConnectTimeout("timed out")
+
+    monkeypatch.setattr(httpx, "post", boom)
+    monkeypatch.setenv("PUPPYGRAPH_HTTP_URL", "http://pg.example:8081")
+    with pytest.raises(graph_load.GraphLoadError, match="--graph-schema-out"):
+        graph_load.post_schema({"node": []}, dry_run=False)

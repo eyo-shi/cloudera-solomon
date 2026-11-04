@@ -27,6 +27,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--iceberg-method", choices=["a", "b"], default=None)
     parser.add_argument("--allow-missing-embedding", action="store_true")
     parser.add_argument("--skip-create", action="store_true", help="OpenSearch index create skip")
+    parser.add_argument(
+        "--graph-schema-out",
+        type=Path,
+        default=None,
+        help="PuppyGraph に POST せず、置換済み schema JSON を書く (UI Upload 用)",
+    )
     args = parser.parse_args(argv)
 
     domain_dir = Path(args.domain_dir)
@@ -55,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.target in ("all", "graph"):
         print("== graph ==")
-        load_graph(domain, dry_run=args.dry_run)
+        load_graph(domain, dry_run=args.dry_run, schema_out=args.graph_schema_out)
 
     if args.target in ("all", "search"):
         print("== search ==")

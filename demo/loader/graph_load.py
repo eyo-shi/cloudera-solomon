@@ -21,13 +21,25 @@ class GraphLoadError(RuntimeError):
 
 
 def default_catalog_type() -> str:
-    """``DEMO_PUPPYGRAPH_CATALOG`` 未指定なら、Trino JDBC URI があれば trino、無ければ hms。"""
+    """``DEMO_PUPPYGRAPH_CATALOG`` 未指定時のカタログ形式。
+
+    ``PUPPYGRAPH_TRINO_JDBC_URI`` があれば trino。``HIVE_METASTORE_URI`` だけなら hms、
+    ``ICEBERG_REST_URI`` だけなら rest。どれも無ければ trino (``TRINO_*`` から補う)。
+    """
     raw = (os.environ.get("DEMO_PUPPYGRAPH_CATALOG") or "").strip().lower()
     if raw:
         return raw
-    if (os.environ.get("PUPPYGRAPH_TRINO_JDBC_URI") or "").strip():
+
+    def has(key: str) -> bool:
+        return bool((os.environ.get(key) or "").strip())
+
+    if has("PUPPYGRAPH_TRINO_JDBC_URI"):
         return "trino"
-    return "hms"
+    if has("HIVE_METASTORE_URI"):
+        return "hms"
+    if has("ICEBERG_REST_URI"):
+        return "rest"
+    return "trino"
 
 
 def trino_jdbc_defaults(trino_catalog: str | None = None) -> dict[str, str]:
@@ -154,12 +166,20 @@ def post_schema(
     user = os.environ.get("PUPPYGRAPH_USERNAME", "puppygraph")
     pwd = os.environ.get("PUPPYGRAPH_PASSWORD", "")
     auth = base64.b64encode(f"{user}:{pwd}".encode()).decode()
-    resp = httpx.post(
-        endpoint,
-        json=body,
-        headers={"Authorization": f"Basic {auth}"},
-        timeout=120.0,
-    )
+    try:
+        resp = httpx.post(
+            endpoint,
+            json=body,
+            headers={"Authorization": f"Basic {auth}"},
+            timeout=httpx.Timeout(120.0, connect=15.0),
+        )
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise GraphLoadError(
+            f"PuppyGraph HTTP API に接続できません: {endpoint} ({type(exc).__name__}). "
+            "この環境から PuppyGraph の HTTP ポート (既定 8081) に届くか "
+            "(Security Group / 経路 / PUPPYGRAPH_HTTP_URL) を確認するか、"
+            "--graph-schema-out で JSON を書き出して PuppyGraph UI から Upload してください"
+        ) from exc
     if resp.status_code >= 400:
         raise GraphLoadError(
             f"PuppyGraph schema POST failed: HTTP {resp.status_code} {resp.text[:1000]}"
@@ -173,7 +193,13 @@ def load_graph(
     dry_run: bool,
     catalog_type: str | None = None,
     post_fn: Callable[[str, dict], Any] | None = None,
+    schema_out: Path | None = None,
 ) -> dict[str, Any]:
+    """スキーマを生成して PuppyGraph に POST する。
+
+    ``schema_out`` を渡すと POST せず、``${ENV}`` を置換済みの JSON をそのパスに書く
+    (PuppyGraph UI の Upload 用。資格情報を含むのでリポジトリ外に置き、使ったら消す)。
+    """
     cat = catalog_type or default_catalog_type()
     out_path = domain.domain_dir / "puppygraph" / "schema.json"
     schema = write_schema_json(domain, out_path, catalog_type=cat)
@@ -188,6 +214,15 @@ def load_graph(
             spec.catalog for spec in domain.tables.values() if spec.graph
         }
         defaults = trino_jdbc_defaults(next(iter(catalogs)) if len(catalogs) == 1 else None)
+    if schema_out is not None:
+        body = resolve_schema(schema, defaults)
+        out = Path(schema_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(body, fh, ensure_ascii=False, indent=2)
+        print(f"wrote resolved schema for UI upload: {out} (contains credentials)")
+        return {"vertices": len(vertex_labels), "edges": len(edge_labels)}
     post_schema(schema, dry_run=dry_run, post_fn=post_fn, defaults=defaults)
     if not dry_run:
         _verify_bolt(domain, schema)

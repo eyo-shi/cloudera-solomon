@@ -10,7 +10,8 @@ PYTHONPATH=. python -m demo.loader \
   --target all \
   [--recreate] [--dry-run] \
   [--iceberg-method a|b] \
-  [--allow-missing-embedding] [--skip-create]
+  [--allow-missing-embedding] [--skip-create] \
+  [--graph-schema-out /tmp/puppygraph_schema.json]
 ```
 
 投入前に `python -m solomon.semantic validate --root <domain>/semantic` を実行（`--dry-run` 以外）。
@@ -50,7 +51,7 @@ loader だけで Basic 認証を使うときは、deploy.env には書かずコ�
 | `DEMO_EMBED_MAX_CHARS` | 埋め込み用テキスト切り詰め（既定 2000） |
 | `PUPPYGRAPH_HTTP_URL` / `PUPPYGRAPH_HTTP_PORT` | スキーマ POST（既定 `http://127.0.0.1:8081`） |
 | `PUPPYGRAPH_USERNAME` / `PUPPYGRAPH_PASSWORD` | PuppyGraph の Basic 認証 |
-| `DEMO_PUPPYGRAPH_CATALOG` | `trino` / `hms` / `rest`。未設定なら `PUPPYGRAPH_TRINO_JDBC_URI` があれば `trino`、無ければ `hms` |
+| `DEMO_PUPPYGRAPH_CATALOG` | `trino` / `hms` / `rest`。未設定なら `PUPPYGRAPH_TRINO_JDBC_URI` があれば `trino`、`HIVE_METASTORE_URI` だけなら `hms`、`ICEBERG_REST_URI` だけなら `rest`、どれも無ければ `trino` |
 | `PUPPYGRAPH_TRINO_CATALOG` | PuppyGraph 側のカタログ名（既定 `solomon_trino`） |
 | `PUPPYGRAPH_TRINO_JDBC_URI` | PuppyGraph から Trino への JDBC URI。未設定なら `TRINO_URL` / `TRINO_HOST` から `jdbc:trino://<host>:<port>/<Ossie の catalog>?SSL=true` を作る |
 | `PUPPYGRAPH_TRINO_USER` / `PUPPYGRAPH_TRINO_PASSWORD` | PuppyGraph が Trino に接続するユーザー。未設定なら `TRINO_USER` / `TRINO_PASSWORD` |
@@ -78,6 +79,7 @@ PuppyGraph 1.x の形式（`catalog` / `node` / `edge`）で、Trino カタロ�
 - JDBC URI の catalog（`jdbc:trino://host:443/<catalog>`）は Ossie の `catalog.schema.table` の catalog と一致させる
 - PuppyGraph から Trino のホストに到達できる必要がある（別ネットワークの EC2 等では Security Group / 経路を確認）
 - `--dry-run` は置換前の schema を表示する（password は `***`）
+- `--graph-schema-out <path>` は POST せず、置換済みの schema JSON を `<path>` に書く（権限 600）。PuppyGraph UI の Schema → Upload で投入する。資格情報を含むのでリポジトリ外（`/tmp` 等）に書き、投入後は消す
 
 ## 冪等
 
