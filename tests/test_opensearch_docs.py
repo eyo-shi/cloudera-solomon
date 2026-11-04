@@ -128,7 +128,7 @@ def test_search_documents_rrf_uses_chunk_id(
     )
     monkeypatch.setattr(
         "solomon.opensearch.docs_search.try_embed",
-        lambda _q: [0.1] * 8,
+        lambda _q, **_kw: [0.1] * 8,
     )
 
     result = search_documents(config, "test query", top_k=2, mode="hybrid")
@@ -166,7 +166,7 @@ def test_search_documents_vector_error_surface(
     )
     monkeypatch.setattr(
         "solomon.opensearch.docs_search.try_embed",
-        lambda _q: [0.0] * 8,
+        lambda _q, **_kw: [0.0] * 8,
     )
 
     result = search_documents(config, "q", mode="hybrid", top_k=3)

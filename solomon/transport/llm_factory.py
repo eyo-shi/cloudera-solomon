@@ -14,15 +14,20 @@ LLMRole = Literal["light", "strong"]
 
 
 def _apply_prefix(provider: str, model: str) -> str:
-    """LiteLLM が要求する provider prefix を付ける。既に付いていればそのまま。"""
+    """LiteLLM が要求する provider prefix を付ける。既に付いていればそのまま。
+
+    cai / openai は OpenAI 互換 API なので、``google/gemma-...`` や
+    ``nvidia/llama-...`` のようにベンダー名入りの model ID でも ``openai/`` を
+    付ける (付けないと LiteLLM が ``google`` 等を provider と解釈して失敗する)。
+    """
+    if provider in ("cai", "openai"):
+        if model.startswith("openai/"):
+            return model
+        return f"openai/{model}"
     if "/" in model:
         return model
-    if provider == "cai":
-        return f"openai/{model}"
     if provider == "anthropic":
         return f"anthropic/{model}"
-    if provider == "openai":
-        return f"openai/{model}"
     if provider == "bedrock":
         return f"bedrock/{model}"
     return model

@@ -83,7 +83,8 @@ internal: CML の `1_start-puppygraph` Application。external: `PUPPYGRAPH_MODE=
 | 確認 | 手段 | OK | NG |
 |------|------|----|----|
 | モデル | `SOLOMON_LLM_EMBEDDING_MODEL=bge-m3` | preflight embedding pass | CAI / API キー |
-| 次元 | ベクトル長 | `OPENSEARCH_EMBEDDING_DIM=1024` | mapping 再作成 |
+| query / passage | 非対称モデル (NVIDIA embedqa 等) | `SOLOMON_LLM_EMBEDDING_QUERY_MODEL` / `_PASSAGE_MODEL` を設定 | 検索精度低下 |
+| 次元 | ベクトル長 | `OPENSEARCH_EMBEDDING_DIM=1024`（必要なら `SOLOMON_LLM_EMBEDDING_DIMENSIONS=1024`） | mapping 再作成 |
 | 長文 | `DEMO_EMBED_MAX_CHARS` | 切り詰め後も embed OK | 上限を下げる |
 
 ### LLM（エージェント）

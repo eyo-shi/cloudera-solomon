@@ -31,8 +31,8 @@ function guideFor(errorCode: string): GuideDetails {
             hint: "cai / anthropic / openai / bedrock のいずれか",
           },
           {
-            name: "CAI_INFERENCE_BASE_URL + CAI_INFERENCE_API_KEY",
-            hint: "provider=cai の場合",
+            name: "CAI_INFERENCE_BASE_URL または SOLOMON_LLM_<ROLE>_BASE_URL",
+            hint: "provider=cai の場合。API キーは Workbench 内なら /tmp/jwt を自動使用",
           },
           {
             name: "ANTHROPIC_API_KEY",

@@ -168,7 +168,7 @@ def _vector_search_docs(
     top_k: int,
     filter_clauses: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], str | None]:
-    embedding = try_embed(query)
+    embedding = try_embed(query, purpose="query")
     if embedding is None:
         return [], "embedding unavailable"
     knn: dict[str, Any] = {

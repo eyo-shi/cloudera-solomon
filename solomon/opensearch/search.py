@@ -51,7 +51,7 @@ def vector_search(
     top_k: int = 3,
 ) -> list[dict[str, Any]]:
     """k-NN ベクトル検索で外部 OpenSearch を検索する。"""
-    embedding = try_embed(query)
+    embedding = try_embed(query, purpose="query")
     if embedding is None:
         return []
 

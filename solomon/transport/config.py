@@ -606,6 +606,17 @@ AGENT_LLM_DEFAULT_ROLE: dict[str, str] = {
 }
 
 
+def _cai_workload_token() -> Optional[str]:
+    """Workbench の ``/tmp/jwt`` (``SOLOMON_CML_JWT_PATH``) の access_token。
+
+    CAI Inference の認証は短命な CDP workload JWT。固定の API キーを env に
+    書くと期限切れになるため、キー未設定時は呼び出しごとにファイルを読む。
+    """
+    from solomon.transport.auth import load_workload_jwt_token
+
+    return load_workload_jwt_token()
+
+
 def _resolve_default_llm_provider() -> Optional[str]:
     provider = (_env("SOLOMON_LLM_PROVIDER") or "").lower()
     if provider:
@@ -613,7 +624,9 @@ def _resolve_default_llm_provider() -> Optional[str]:
             _logger.warning("llm_config.unknown_provider", provider=provider)
             return None
         return provider
-    if _env("CAI_INFERENCE_BASE_URL") and _env("CAI_INFERENCE_API_KEY"):
+    if _env("CAI_INFERENCE_BASE_URL") and (
+        _env("CAI_INFERENCE_API_KEY") or _cai_workload_token()
+    ):
         return "cai"
     _logger.debug("llm_config.provider_not_set")
     return None
@@ -639,6 +652,28 @@ def _provider_for_role(role: str) -> Optional[str]:
     return _resolve_default_llm_provider()
 
 
+# Role 別エンドポイント上書き (別名は provider / model と同じ ROUTER / ANALYTICS)。
+# Cloudera AI Inference はエンドポイントごとに URL が分かれるため、light / strong /
+# embedding を別モデルにするにはここで URL を分ける。
+_ROLE_ENV_NAMES: dict[str, tuple[str, ...]] = {
+    "light": ("LIGHT", "ROUTER"),
+    "strong": ("STRONG", "ANALYTICS"),
+    "embedding": ("EMBEDDING",),
+}
+
+
+def _role_endpoint_overrides(role: str) -> tuple[Optional[str], Optional[str]]:
+    """``SOLOMON_LLM_<ROLE>_BASE_URL`` / ``_API_KEY`` を返す (未設定は None)。"""
+    names = _ROLE_ENV_NAMES.get(role, ())
+    base_url = next(
+        (v for n in names if (v := _env(f"SOLOMON_LLM_{n}_BASE_URL"))), None
+    )
+    api_key = next(
+        (v for n in names if (v := _env(f"SOLOMON_LLM_{n}_API_KEY"))), None
+    )
+    return base_url, api_key
+
+
 def _model_for_role(role: str, provider: str) -> str:
     if role == "light":
         return (
@@ -660,33 +695,80 @@ def _model_for_role(role: str, provider: str) -> str:
     return _DEFAULT_LIGHT_MODEL[provider]
 
 
+_EMBEDDING_PURPOSES = frozenset({"query", "passage"})
+
+
+def embedding_model_for_purpose(base_model: str, purpose: str) -> str:
+    """検索 (query) / 索引 (passage) 別の embedding model ID を返す。
+
+    非対称 embedding モデル (NVIDIA embedqa 等) は用途で model ID を変える。
+    CAI Inference では ``nvidia/llama-3.2-nv-embedqa-1b-v2-query`` /
+    ``...-passage`` のように末尾で切り替える。
+    ``SOLOMON_LLM_EMBEDDING_QUERY_MODEL`` / ``_PASSAGE_MODEL`` が未設定なら
+    ``base_model`` (``SOLOMON_LLM_EMBEDDING_MODEL``) をそのまま使う。
+    """
+    if purpose not in _EMBEDDING_PURPOSES:
+        raise ValueError(f"unknown embedding purpose: {purpose!r}")
+    return _env(f"SOLOMON_LLM_EMBEDDING_{purpose.upper()}_MODEL") or base_model
+
+
+def get_embedding_dimensions() -> Optional[int]:
+    """``SOLOMON_LLM_EMBEDDING_DIMENSIONS`` (Matryoshka 対応モデルの出力次元)。
+
+    未設定ならモデル既定の次元。OpenSearch の ``OPENSEARCH_EMBEDDING_DIM`` と
+    一致させる必要がある。
+    """
+    raw = _env("SOLOMON_LLM_EMBEDDING_DIMENSIONS")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        _logger.warning("llm_config.invalid_embedding_dimensions", value=raw)
+        return None
+    if value <= 0:
+        _logger.warning("llm_config.invalid_embedding_dimensions", value=raw)
+        return None
+    return value
+
+
 def _credentials_for_provider(
     provider: str,
+    *,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
 ) -> tuple[Optional[str], Optional[str], Optional[str]] | None:
-    """Return (api_base, api_key, aws_region) or None if required env missing."""
+    """Return (api_base, api_key, aws_region) or None if required env missing.
+
+    ``base_url`` / ``api_key`` は role / Agent 別の上書き。未指定なら provider 共通の
+    env (``CAI_INFERENCE_*`` 等) を使う。bedrock では使わない。
+    cai でキーがどこにも無ければ Workbench の ``/tmp/jwt`` を使う。
+    """
     api_base: Optional[str] = None
-    api_key: Optional[str] = None
     aws_region: Optional[str] = None
 
     if provider == "cai":
-        api_base = _env("CAI_INFERENCE_BASE_URL")
-        api_key = _env("CAI_INFERENCE_API_KEY")
+        api_base = base_url or _env("CAI_INFERENCE_BASE_URL")
+        api_key = api_key or _env("CAI_INFERENCE_API_KEY") or _cai_workload_token()
         if not api_base or not api_key:
             _logger.debug("llm_config.cai_env_missing")
             return None
     elif provider == "anthropic":
-        api_key = _env("ANTHROPIC_API_KEY")
-        api_base = _env("ANTHROPIC_BASE_URL")
+        api_key = api_key or _env("ANTHROPIC_API_KEY")
+        api_base = base_url or _env("ANTHROPIC_BASE_URL")
         if not api_key:
             _logger.debug("llm_config.anthropic_key_missing")
             return None
     elif provider == "openai":
-        api_key = _env("OPENAI_API_KEY")
-        api_base = _env("OPENAI_BASE_URL")
+        api_key = api_key or _env("OPENAI_API_KEY")
+        api_base = base_url or _env("OPENAI_BASE_URL")
         if not api_key:
             _logger.debug("llm_config.openai_key_missing")
             return None
     elif provider == "bedrock":
+        if base_url or api_key:
+            _logger.warning("llm_config.bedrock_ignores_endpoint_override")
+        api_key = None
         aws_region = _env("AWS_REGION") or _env("SOLOMON_AWS_REGION")
         if not aws_region:
             _logger.debug("llm_config.bedrock_region_missing")
@@ -704,7 +786,10 @@ def get_llm_role_config(role: str) -> Optional[LLMRoleConfig]:
     provider = _provider_for_role(role)
     if provider is None:
         return None
-    creds = _credentials_for_provider(provider)
+    role_base_url, role_api_key = _role_endpoint_overrides(role)
+    creds = _credentials_for_provider(
+        provider, base_url=role_base_url, api_key=role_api_key
+    )
     if creds is None:
         return None
     api_base, api_key, aws_region = creds
@@ -727,6 +812,8 @@ def get_llm_agent_config(agent_key: str) -> Optional[LLMRoleConfig]:
     env_prefix = f"SOLOMON_LLM_AGENT_{key.upper()}_"
     provider_override = (_env(f"{env_prefix}PROVIDER") or "").lower()
     model_override = _env(f"{env_prefix}MODEL")
+    base_url_override = _env(f"{env_prefix}BASE_URL")
+    api_key_override = _env(f"{env_prefix}API_KEY")
 
     default_role = AGENT_LLM_DEFAULT_ROLE.get(key, "light")
     base = get_llm_role_config(default_role)
@@ -739,7 +826,17 @@ def get_llm_agent_config(agent_key: str) -> Optional[LLMRoleConfig]:
             _logger.warning("llm_config.unknown_provider", provider=provider, agent=key)
         return None
 
-    creds = _credentials_for_provider(provider)
+    # 既定 role と同じ provider なら role 別エンドポイント上書きも引き継ぐ
+    role_base_url: Optional[str] = None
+    role_api_key: Optional[str] = None
+    if base is not None and provider == base.provider:
+        role_base_url, role_api_key = _role_endpoint_overrides(default_role)
+
+    creds = _credentials_for_provider(
+        provider,
+        base_url=base_url_override or role_base_url,
+        api_key=api_key_override or role_api_key,
+    )
     if creds is None:
         return None
     api_base, api_key, aws_region = creds
@@ -1080,6 +1177,8 @@ __all__ = [
     "get_llm_config",
     "get_llm_role_config",
     "get_llm_agent_config",
+    "embedding_model_for_purpose",
+    "get_embedding_dimensions",
     "get_cdv_config",
     "get_graph_config",
     "get_opensearch_config",

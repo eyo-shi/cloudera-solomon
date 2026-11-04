@@ -119,6 +119,36 @@ class TestApplyPrefix:
             == "openai/custom-name"
         )
 
+    @pytest.mark.parametrize(
+        "provider,model,expected",
+        [
+            # CAI Inference の model ID はベンダー名入り
+            ("cai", "google/gemma-4-26B-A4B-it", "openai/google/gemma-4-26B-A4B-it"),
+            (
+                "cai",
+                "nvidia/nemotron-3-super-120b-a12b",
+                "openai/nvidia/nemotron-3-super-120b-a12b",
+            ),
+            (
+                "cai",
+                "nvidia/llama-3.2-nv-embedqa-1b-v2-query",
+                "openai/nvidia/llama-3.2-nv-embedqa-1b-v2-query",
+            ),
+            # OpenAI 互換プロキシ (vLLM 等) の HF 形式 ID
+            ("openai", "meta-llama/Llama-3.1-8B", "openai/meta-llama/Llama-3.1-8B"),
+        ],
+    )
+    def test_vendor_slash_still_gets_openai_prefix(
+        self, provider: str, model: str, expected: str
+    ) -> None:
+        assert llm_factory._apply_prefix(provider, model) == expected
+
+    def test_slash_respected_for_non_openai_compatible(self) -> None:
+        assert (
+            llm_factory._apply_prefix("bedrock", "bedrock/converse/foo")
+            == "bedrock/converse/foo"
+        )
+
     def test_unknown_provider_passthrough(self) -> None:
         """未知の provider は prefix を付けずに LiteLLM へ渡す。"""
         assert (

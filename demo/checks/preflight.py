@@ -285,26 +285,44 @@ def check_embedding(
         if embed_fn is None:
             from solomon.opensearch.embeddings import try_embed
 
-            embed_fn = try_embed
-        v1 = embed_fn(text_short)
-        v2 = embed_fn(text_long)
+            # 検索側 (query) と索引側 (passage) の両方を確認する
+            def query_fn(text: str) -> list[float] | None:
+                return try_embed(text, purpose="query")
+
+            def passage_fn(text: str) -> list[float] | None:
+                return try_embed(text, purpose="passage")
+        else:
+            query_fn = passage_fn = embed_fn
+        v1 = query_fn(text_short)
+        v2 = passage_fn(text_long)
         if v1 is None:
             return PreflightRow(
                 check="embedding",
                 status="fail",
                 detail="short embed returned None",
-                recommendation="SOLOMON_LLM_EMBEDDING_MODEL=bge-m3, CAI/OpenAI キー",
+                recommendation=(
+                    "SOLOMON_LLM_EMBEDDING_MODEL (または _QUERY_MODEL / _PASSAGE_MODEL)"
+                    " と BASE_URL / API キー"
+                ),
             )
         dim = len(v1)
         exp_dim = int(os.environ.get("OPENSEARCH_EMBEDDING_DIM", "1024"))
         ok_dim = dim == exp_dim
         long_ok = v2 is not None
-        status = "pass" if ok_dim and long_ok else "warn"
+        same_dim = v2 is None or len(v2) == dim
+        status = "pass" if ok_dim and long_ok and same_dim else "warn"
+        passage_dim = len(v2) if v2 is not None else None
         return PreflightRow(
             check="embedding",
             status=status,
-            detail=f"dim={dim} long_ok={long_ok} max_chars={max_c}",
-            recommendation=f"OPENSEARCH_EMBEDDING_DIM={dim}; DEMO_EMBED_MAX_CHARS={max_c}",
+            detail=(
+                f"dim={dim} passage_dim={passage_dim} expected={exp_dim}"
+                f" long_ok={long_ok} max_chars={max_c}"
+            ),
+            recommendation=(
+                f"OPENSEARCH_EMBEDDING_DIM={dim} または SOLOMON_LLM_EMBEDDING_DIMENSIONS={exp_dim};"
+                f" DEMO_EMBED_MAX_CHARS={max_c}"
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         return PreflightRow("embedding", "fail", str(exc), "SOLOMON_LLM_EMBEDDING_* を設定")

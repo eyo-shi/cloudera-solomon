@@ -334,19 +334,20 @@ Solomon のプロセス内では OpenSearch サーバーは起動しない。
 
 ### 5. LLM プロバイダ
 
-**既定:** `SOLOMON_LLM_PROVIDER` で全体のデフォルトを指定する（`cai` / `anthropic` / `openai` / `bedrock`）。未指定でも `CAI_INFERENCE_BASE_URL` と `CAI_INFERENCE_API_KEY` がそろっていれば `cai` を使う。
-Crew.ai の各 Agent は、**role / Agent キーごと** に provider と model を上書きできる。
+**既定:** `SOLOMON_LLM_PROVIDER` で全体のデフォルトを指定する（`cai` / `anthropic` / `openai` / `bedrock`）。未指定でも `CAI_INFERENCE_BASE_URL` と認証（`CAI_INFERENCE_API_KEY` または Workbench の `/tmp/jwt`）がそろっていれば `cai` を使う。
+Crew.ai の各 Agent は、**role / Agent キーごと** に provider・model・エンドポイント (URL / API キー) を上書きできる。
 
 | レイヤ | env 例 | 用途 |
 |---|---|---|
 | デフォルト | `SOLOMON_LLM_PROVIDER` + 各 provider の API env | 未指定の role / Agent のフォールバック |
 | **Role** | `SOLOMON_LLM_LIGHT_PROVIDER`, `SOLOMON_LLM_STRONG_PROVIDER`, `SOLOMON_LLM_EMBEDDING_PROVIDER` | light = Router / Inspector 等、strong = Summary / Dashboard / RAG、embedding = OpenSearch vector |
 | **Model (role)** | `SOLOMON_LLM_ROUTER_MODEL` / `SOLOMON_LLM_ANALYTICS_MODEL`（別名 `SOLOMON_LLM_LIGHT_MODEL` / `SOLOMON_LLM_STRONG_MODEL`）、`SOLOMON_LLM_EMBEDDING_MODEL` | 同じ provider 内でのモデル切り替え（未指定時は provider ごとの既定モデル） |
-| **Agent** | `SOLOMON_LLM_AGENT_<KEY>_PROVIDER`, `SOLOMON_LLM_AGENT_<KEY>_MODEL` | 例: `SUMMARY_WRITER`, `INTENT_CLASSIFIER`, `RAG_SYNTHESIS`, `RAG_AGENT`（キー一覧は `solomon/transport/config.py` の `AGENT_LLM_DEFAULT_ROLE`） |
+| **Endpoint (role)** | `SOLOMON_LLM_{LIGHT,STRONG,EMBEDDING}_BASE_URL` / `_API_KEY`（別名 `ROUTER` / `ANALYTICS`） | role ごとに別のエンドポイントへ送る。未指定なら provider 共通の `CAI_INFERENCE_BASE_URL` 等。bedrock では無視 |
+| **Agent** | `SOLOMON_LLM_AGENT_<KEY>_PROVIDER`, `_MODEL`, `_BASE_URL`, `_API_KEY` | 例: `SUMMARY_WRITER`, `INTENT_CLASSIFIER`, `RAG_SYNTHESIS`, `RAG_AGENT`（キー一覧は `solomon/transport/config.py` の `AGENT_LLM_DEFAULT_ROLE`）。provider が既定 role と同じなら role のエンドポイントを引き継ぐ |
 
 | Provider | 必須 env |
 |---|---|
-| `cai` | `CAI_INFERENCE_BASE_URL`, `CAI_INFERENCE_API_KEY` |
+| `cai` | `CAI_INFERENCE_BASE_URL`（または role 別 `SOLOMON_LLM_<ROLE>_BASE_URL`）。API キーは Workbench 内なら不要（下記） |
 | `anthropic` | `ANTHROPIC_API_KEY`（任意で `ANTHROPIC_BASE_URL`） |
 | `openai` | `OPENAI_API_KEY`（任意で `OPENAI_BASE_URL`） |
 | `bedrock` | `AWS_REGION` または `SOLOMON_AWS_REGION`（IAM role 前提） |
@@ -354,6 +355,34 @@ Crew.ai の各 Agent は、**role / Agent キーごと** に provider と model 
 **例:** Router は CAI、Analytics は Anthropic にする場合は、`SOLOMON_LLM_LIGHT_PROVIDER=cai` + CAI の env、`SOLOMON_LLM_STRONG_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` を設定する。
 
 Embedding モデルは `SOLOMON_LLM_EMBEDDING_MODEL`（provider は `SOLOMON_LLM_EMBEDDING_PROVIDER`、未指定時は `SOLOMON_LLM_PROVIDER` に従う）。
+
+#### Cloudera AI Inference (`cai`)
+
+- **URL:** CAI Inference はエンドポイントごとに URL が分かれる。light / strong / embedding を別モデルにするときは、role ごとに `SOLOMON_LLM_<ROLE>_BASE_URL` を指定する。値には各エンドポイントの **Code Sample にある `base_url` をそのまま** 貼る。末尾はサービング方式によって `.../endpoints/<名前>/v1`（NIM）と `.../endpoints/<名前>/openai/v1`（vLLM 等）の 2 通りがある。URL 中のエンドポイント名は表示名とは異なる（小文字化され、空白は `-` になる）。
+- **Model ID:** Code Sample の `MODEL_ID` をそのまま入れる（例 `google/gemma-4-26B-A4B-it`）。ベンダー名入りの ID でも、Solomon が LiteLLM 用の `openai/` 接頭辞を自動で付ける。
+- **認証:** CAI Inference の認証は短命な CDP workload JWT である。Workbench 内（AMP の Application）では `CAI_INFERENCE_API_KEY` を **空のまま** にしておくと、呼び出しのたびに `/tmp/jwt` の `access_token` を読む（パスは `SOLOMON_CML_JWT_PATH` で変更できる）。固定のトークンを書くと期限切れで 401 になる。Workbench の外から使う場合だけ CDP トークンを `CAI_INFERENCE_API_KEY` / `SOLOMON_LLM_<ROLE>_API_KEY` に設定する。
+- **Embedding の query / passage:** NVIDIA embedqa のような非対称モデルは、検索クエリ用と文書索引用で model ID が異なる（CAI では末尾の `-query` / `-passage`）。この場合は `SOLOMON_LLM_EMBEDDING_QUERY_MODEL`（Search タブ・RAG の検索）と `SOLOMON_LLM_EMBEDDING_PASSAGE_MODEL`（索引・`demo.loader` の投入）を設定する。未設定なら両方とも `SOLOMON_LLM_EMBEDDING_MODEL` を使う。
+
+```text
+SOLOMON_LLM_PROVIDER=cai
+SOLOMON_LLM_LIGHT_BASE_URL=<gemma エンドポイントの Code Sample の base_url>
+SOLOMON_LLM_LIGHT_MODEL=google/gemma-4-26B-A4B-it
+SOLOMON_LLM_STRONG_BASE_URL=<nemotron エンドポイントの Code Sample の base_url>
+SOLOMON_LLM_STRONG_MODEL=nvidia/nemotron-3-super-120b-a12b
+SOLOMON_LLM_EMBEDDING_BASE_URL=<embedqa エンドポイントの Code Sample の base_url>
+SOLOMON_LLM_EMBEDDING_MODEL=nvidia/llama-3.2-nv-embedqa-1b-v2
+SOLOMON_LLM_EMBEDDING_QUERY_MODEL=nvidia/llama-3.2-nv-embedqa-1b-v2-query
+SOLOMON_LLM_EMBEDDING_PASSAGE_MODEL=nvidia/llama-3.2-nv-embedqa-1b-v2-passage
+SOLOMON_LLM_EMBEDDING_DIMENSIONS=1024
+```
+
+#### Embedding の次元数
+
+OpenSearch の kNN フィールドの次元（`OPENSEARCH_EMBEDDING_DIM`、既定 1024）は、embedding の出力次元と一致している必要がある。Matryoshka 対応モデル（embedqa-1b-v2 等）では `SOLOMON_LLM_EMBEDDING_DIMENSIONS` で出力次元を指定でき、指定するとリクエストに `dimensions` を付けて送る。エンドポイントが `dimensions` に対応していない場合は、未設定のまま `OPENSEARCH_EMBEDDING_DIM` をモデルの既定次元に合わせる。
+
+一致しているかは `PYTHONPATH=. python -m demo.checks.preflight --no-write` の `embedding` 行で確認できる。query 側と passage 側の両方の次元を表示する。
+
+Embedding モデルや次元を変えたらベクトルを投入し直す（既存ベクトルとは比較できない）。別プロジェクトで索引している場合は、そちらも同じモデルの passage 用 ID と同じ次元にそろえる。
 
 設定状況は `GET /api/setup/llm` で確認できる（未設定なら 503）。
 

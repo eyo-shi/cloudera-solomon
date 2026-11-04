@@ -57,6 +57,22 @@ _ALL_ENV_KEYS = [
     "ANTHROPIC_BASE_URL",
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
+    "SOLOMON_LLM_LIGHT_PROVIDER",
+    "SOLOMON_LLM_STRONG_PROVIDER",
+    "SOLOMON_LLM_EMBEDDING_PROVIDER",
+    "SOLOMON_LLM_EMBEDDING_MODEL",
+    "SOLOMON_LLM_EMBEDDING_QUERY_MODEL",
+    "SOLOMON_LLM_EMBEDDING_PASSAGE_MODEL",
+    "SOLOMON_LLM_EMBEDDING_DIMENSIONS",
+    *(
+        f"SOLOMON_LLM_{name}_{suffix}"
+        for name in ("LIGHT", "ROUTER", "STRONG", "ANALYTICS", "EMBEDDING")
+        for suffix in ("BASE_URL", "API_KEY")
+    ),
+    "SOLOMON_LLM_AGENT_SUMMARY_WRITER_PROVIDER",
+    "SOLOMON_LLM_AGENT_SUMMARY_WRITER_MODEL",
+    "SOLOMON_LLM_AGENT_SUMMARY_WRITER_BASE_URL",
+    "SOLOMON_LLM_AGENT_SUMMARY_WRITER_API_KEY",
     # cdv
     "SOLOMON_CDV_BASE_URL",
     "SOLOMON_CDV_TRINO_CONNECTION_ID",
@@ -385,6 +401,200 @@ class TestGetLLMConfig:
         assert agent is not None
         assert agent.provider == "openai"
         assert agent.model == "gpt-4o"
+
+    # ---- Role 別エンドポイント (CAI Inference はエンドポイントごとに URL が異なる) ----
+    def test_per_role_base_url_for_cai(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_API_KEY", "cai-key")
+        monkeypatch.setenv("SOLOMON_LLM_LIGHT_BASE_URL", "https://cai/ep/gemma/v1")
+        monkeypatch.setenv("SOLOMON_LLM_STRONG_BASE_URL", "https://cai/ep/nemotron/v1")
+        monkeypatch.setenv("SOLOMON_LLM_EMBEDDING_BASE_URL", "https://cai/ep/embed/v1")
+        light = cfg_mod.get_llm_role_config("light")
+        strong = cfg_mod.get_llm_role_config("strong")
+        emb = cfg_mod.get_llm_role_config("embedding")
+        assert light is not None and strong is not None and emb is not None
+        assert light.api_base == "https://cai/ep/gemma/v1"
+        assert strong.api_base == "https://cai/ep/nemotron/v1"
+        assert emb.api_base == "https://cai/ep/embed/v1"
+        assert {light.api_key, strong.api_key, emb.api_key} == {"cai-key"}
+        # CAI_INFERENCE_BASE_URL 無しでも role 別 URL があれば集約設定も成立
+        assert cfg_mod.get_llm_config() is not None
+
+    def test_role_base_url_falls_back_to_provider_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://cai/ep/shared/v1")
+        monkeypatch.setenv("CAI_INFERENCE_API_KEY", "cai-key")
+        monkeypatch.setenv("SOLOMON_LLM_STRONG_BASE_URL", "https://cai/ep/nemotron/v1")
+        monkeypatch.setenv("SOLOMON_LLM_STRONG_API_KEY", "strong-key")
+        light = cfg_mod.get_llm_role_config("light")
+        strong = cfg_mod.get_llm_role_config("strong")
+        assert light is not None and strong is not None
+        assert light.api_base == "https://cai/ep/shared/v1"
+        assert light.api_key == "cai-key"
+        assert strong.api_base == "https://cai/ep/nemotron/v1"
+        assert strong.api_key == "strong-key"
+
+    def test_role_base_url_legacy_alias(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_API_KEY", "cai-key")
+        monkeypatch.setenv("SOLOMON_LLM_ROUTER_BASE_URL", "https://cai/ep/router/v1")
+        monkeypatch.setenv("SOLOMON_LLM_ANALYTICS_BASE_URL", "https://cai/ep/analytics/v1")
+        light = cfg_mod.get_llm_role_config("light")
+        strong = cfg_mod.get_llm_role_config("strong")
+        assert light is not None and strong is not None
+        assert light.api_base == "https://cai/ep/router/v1"
+        assert strong.api_base == "https://cai/ep/analytics/v1"
+
+    def test_cai_role_without_any_base_url_is_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_API_KEY", "cai-key")
+        monkeypatch.setenv("SOLOMON_LLM_LIGHT_BASE_URL", "https://cai/ep/gemma/v1")
+        assert cfg_mod.get_llm_role_config("light") is not None
+        assert cfg_mod.get_llm_role_config("strong") is None
+        assert cfg_mod.get_llm_config() is None
+
+    def test_agent_inherits_role_base_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_API_KEY", "cai-key")
+        monkeypatch.setenv("SOLOMON_LLM_LIGHT_BASE_URL", "https://cai/ep/gemma/v1")
+        monkeypatch.setenv("SOLOMON_LLM_STRONG_BASE_URL", "https://cai/ep/nemotron/v1")
+        agent = cfg_mod.get_llm_agent_config("summary_writer")  # 既定 role=strong
+        assert agent is not None
+        assert agent.api_base == "https://cai/ep/nemotron/v1"
+
+    def test_agent_base_url_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_API_KEY", "cai-key")
+        monkeypatch.setenv("SOLOMON_LLM_STRONG_BASE_URL", "https://cai/ep/nemotron/v1")
+        monkeypatch.setenv(
+            "SOLOMON_LLM_AGENT_SUMMARY_WRITER_BASE_URL", "https://cai/ep/qwen/v1"
+        )
+        monkeypatch.setenv("SOLOMON_LLM_AGENT_SUMMARY_WRITER_API_KEY", "qwen-key")
+        monkeypatch.setenv("SOLOMON_LLM_AGENT_SUMMARY_WRITER_MODEL", "qwen3.6")
+        agent = cfg_mod.get_llm_agent_config("summary_writer")
+        assert agent is not None
+        assert agent.api_base == "https://cai/ep/qwen/v1"
+        assert agent.api_key == "qwen-key"
+        assert agent.model == "qwen3.6"
+
+    def test_agent_with_other_provider_ignores_role_base_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_API_KEY", "cai-key")
+        monkeypatch.setenv("SOLOMON_LLM_STRONG_BASE_URL", "https://cai/ep/nemotron/v1")
+        monkeypatch.setenv("SOLOMON_LLM_AGENT_SUMMARY_WRITER_PROVIDER", "openai")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-oai")
+        agent = cfg_mod.get_llm_agent_config("summary_writer")
+        assert agent is not None
+        assert agent.provider == "openai"
+        assert agent.api_base is None
+        assert agent.api_key == "sk-oai"
+
+    # ---- CAI: API キー未設定なら Workbench の /tmp/jwt を使う ----
+    @staticmethod
+    def _write_jwt(monkeypatch: pytest.MonkeyPatch, tmp_path: Any, token: str) -> None:
+        path = tmp_path / "jwt"
+        path.write_text('{"access_token": "%s"}' % token, encoding="utf-8")
+        monkeypatch.setenv("SOLOMON_CML_JWT_PATH", str(path))
+
+    def test_cai_falls_back_to_workload_jwt(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        self._write_jwt(monkeypatch, tmp_path, "jwt-1")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("SOLOMON_LLM_LIGHT_BASE_URL", "https://cai/ep/gemma/openai/v1")
+        light = cfg_mod.get_llm_role_config("light")
+        assert light is not None
+        assert light.api_key == "jwt-1"
+
+    def test_cai_workload_jwt_is_reread_each_call(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """短命トークンなので config 解決のたびに最新のファイルを読む。"""
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://cai/ep/x/v1")
+        self._write_jwt(monkeypatch, tmp_path, "jwt-old")
+        assert cfg_mod.get_llm_role_config("light").api_key == "jwt-old"
+        self._write_jwt(monkeypatch, tmp_path, "jwt-new")
+        assert cfg_mod.get_llm_role_config("light").api_key == "jwt-new"
+
+    def test_cai_explicit_key_wins_over_workload_jwt(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        self._write_jwt(monkeypatch, tmp_path, "jwt-1")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://cai/ep/x/v1")
+        monkeypatch.setenv("CAI_INFERENCE_API_KEY", "static-key")
+        monkeypatch.setenv("SOLOMON_LLM_STRONG_API_KEY", "strong-key")
+        assert cfg_mod.get_llm_role_config("light").api_key == "static-key"
+        assert cfg_mod.get_llm_role_config("strong").api_key == "strong-key"
+
+    def test_cai_auto_detect_with_workload_jwt(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        self._write_jwt(monkeypatch, tmp_path, "jwt-1")
+        monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://cai/ep/x/v1")
+        cfg = cfg_mod.get_llm_role_config("light")
+        assert cfg is not None
+        assert cfg.provider == "cai"
+        assert cfg.api_key == "jwt-1"
+
+    def test_cai_without_key_or_jwt_is_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://cai/ep/x/v1")
+        assert cfg_mod.get_llm_role_config("light") is None
+
+    def test_workload_jwt_not_used_for_openai(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        self._write_jwt(monkeypatch, tmp_path, "jwt-1")
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "openai")
+        assert cfg_mod.get_llm_role_config("light") is None
+
+
+# ================================================================== #
+# Embedding: query / passage モデル、出力次元
+# ================================================================== #
+class TestEmbeddingOptions:
+    def test_purpose_models_default_to_base(self) -> None:
+        assert cfg_mod.embedding_model_for_purpose("bge-m3", "query") == "bge-m3"
+        assert cfg_mod.embedding_model_for_purpose("bge-m3", "passage") == "bge-m3"
+
+    def test_purpose_models_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        base = "nvidia/llama-3.2-nv-embedqa-1b-v2"
+        monkeypatch.setenv("SOLOMON_LLM_EMBEDDING_QUERY_MODEL", f"{base}-query")
+        monkeypatch.setenv("SOLOMON_LLM_EMBEDDING_PASSAGE_MODEL", f"{base}-passage")
+        assert cfg_mod.embedding_model_for_purpose(base, "query") == f"{base}-query"
+        assert cfg_mod.embedding_model_for_purpose(base, "passage") == f"{base}-passage"
+
+    def test_unknown_purpose_raises(self) -> None:
+        with pytest.raises(ValueError):
+            cfg_mod.embedding_model_for_purpose("m", "document")
+
+    @pytest.mark.parametrize(
+        "raw,expected", [(None, None), ("1024", 1024), ("abc", None), ("0", None)]
+    )
+    def test_dimensions(
+        self, monkeypatch: pytest.MonkeyPatch, raw: Optional[str], expected: Optional[int]
+    ) -> None:
+        if raw is not None:
+            monkeypatch.setenv("SOLOMON_LLM_EMBEDDING_DIMENSIONS", raw)
+        assert cfg_mod.get_embedding_dimensions() == expected
 
 
 # ================================================================== #

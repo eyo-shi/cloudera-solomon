@@ -150,7 +150,7 @@ def index_document(
     }
 
     if with_embedding and text.strip():
-        embedding = try_embed(text)
+        embedding = try_embed(text, purpose="passage")
         if embedding is not None:
             body["embedding"] = embedding
 

@@ -96,7 +96,7 @@ def bulk_index_doc_chunks(
             texts.append(t)
         embeddings: list[list[float] | None] = [None] * len(batch)
         if with_embedding:
-            embeddings = try_embed_batch(texts)
+            embeddings = try_embed_batch(texts, purpose="passage")
 
         actions = []
         for ch, emb in zip(batch, embeddings, strict=True):

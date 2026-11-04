@@ -1,19 +1,86 @@
-"""Embedding generation for vector search against external OpenSearch."""
+"""Embedding generation for vector search against external OpenSearch.
+
+``purpose`` で検索 (``query``) と索引 (``passage``) を区別する。非対称 embedding
+モデル (NVIDIA embedqa 等) は用途ごとに model ID が異なるため
+(:func:`~solomon.transport.config.embedding_model_for_purpose`)、索引側と検索側で
+取り違えると検索精度が落ちる。
+"""
 
 from __future__ import annotations
 
-import os
-from typing import Optional
+from typing import Any, Literal, Optional
 
-from solomon.transport.config import get_llm_role_config
+from solomon.transport.config import (
+    embedding_model_for_purpose,
+    get_embedding_dimensions,
+    get_llm_role_config,
+)
 from solomon.transport.llm_factory import _apply_prefix
 from solomon.transport.logging import get_logger
 
 _logger = get_logger(__name__)
 
+EmbeddingPurpose = Literal["query", "passage"]
 
-def try_embed(text: str, *, model: Optional[str] = None) -> list[float] | None:
-    """LLM embedding API でクエリをベクトル化する (vector search 用)。"""
+
+def _embedding_kwargs(
+    inputs: list[str],
+    *,
+    model: Optional[str],
+    purpose: EmbeddingPurpose,
+) -> Optional[dict[str, Any]]:
+    """``litellm.embedding`` の kwargs。LLM 未設定なら ``None``。"""
+    cfg = get_llm_role_config("embedding")
+    if cfg is None:
+        _logger.debug("opensearch.embeddings.llm_not_configured")
+        return None
+
+    resolved = model or embedding_model_for_purpose(cfg.model, purpose)
+    kwargs: dict[str, Any] = {
+        "model": _apply_prefix(cfg.provider, resolved),
+        "input": inputs,
+    }
+    if cfg.api_base:
+        kwargs["api_base"] = cfg.api_base
+    if cfg.api_key:
+        kwargs["api_key"] = cfg.api_key
+    if cfg.provider == "bedrock" and cfg.aws_region:
+        kwargs["aws_region_name"] = cfg.aws_region
+
+    dimensions = get_embedding_dimensions()
+    if dimensions is not None:
+        if cfg.provider in ("cai", "openai"):
+            # LiteLLM は text-embedding-3 以外の openai/ モデルで dimensions を
+            # UnsupportedParamsError にするため、リクエスト body に直接載せる。
+            kwargs["extra_body"] = {"dimensions": dimensions}
+        else:
+            kwargs["dimensions"] = dimensions
+    return kwargs
+
+
+def _vector(item: Any) -> list[float] | None:
+    embedding = getattr(item, "embedding", None)
+    if embedding is None and isinstance(item, dict):
+        embedding = item.get("embedding")
+    if not isinstance(embedding, list):
+        return None
+    return [float(v) for v in embedding]
+
+
+def _response_data(response: Any) -> list[Any]:
+    data = getattr(response, "data", None)
+    if data is None and isinstance(response, dict):
+        data = response.get("data")
+    return list(data or [])
+
+
+def try_embed(
+    text: str,
+    *,
+    model: Optional[str] = None,
+    purpose: EmbeddingPurpose = "query",
+) -> list[float] | None:
+    """1 テキストをベクトル化する。既定は検索クエリ用 (``purpose="query"``)。"""
     if not text.strip():
         return None
 
@@ -23,38 +90,34 @@ def try_embed(text: str, *, model: Optional[str] = None) -> list[float] | None:
         _logger.debug("opensearch.embeddings.litellm_not_installed")
         return None
 
-    cfg = get_llm_role_config("embedding")
-    if cfg is None:
-        _logger.debug("opensearch.embeddings.llm_not_configured")
+    kwargs = _embedding_kwargs([text], model=model, purpose=purpose)
+    if kwargs is None:
         return None
-
-    resolved = model or cfg.model
-    prefixed = _apply_prefix(cfg.provider, resolved)
-
-    kwargs: dict = {"model": prefixed, "input": [text]}
-    if cfg.api_base:
-        kwargs["api_base"] = cfg.api_base
-    if cfg.api_key:
-        kwargs["api_key"] = cfg.api_key
 
     try:
         response = litellm.embedding(**kwargs)
     except Exception as exc:  # noqa: BLE001
-        _logger.warning("opensearch.embeddings.failed", error=str(exc))
+        _logger.warning(
+            "opensearch.embeddings.failed",
+            purpose=purpose,
+            model=kwargs["model"],
+            error=str(exc),
+        )
         return None
 
-    data = getattr(response, "data", None) or response.get("data", [])
+    data = _response_data(response)
     if not data:
         return None
-    first = data[0]
-    embedding = getattr(first, "embedding", None) or first.get("embedding")
-    if not isinstance(embedding, list):
-        return None
-    return [float(v) for v in embedding]
+    return _vector(data[0])
 
 
-def try_embed_batch(texts: list[str], *, model: Optional[str] = None) -> list[list[float] | None]:
-    """複数テキストを 1 回の embedding API 呼び出しでベクトル化。"""
+def try_embed_batch(
+    texts: list[str],
+    *,
+    model: Optional[str] = None,
+    purpose: EmbeddingPurpose = "passage",
+) -> list[list[float] | None]:
+    """複数テキストを 1 回の API 呼び出しでベクトル化。既定は索引用 (``passage``)。"""
     if not texts:
         return []
     try:
@@ -63,34 +126,26 @@ def try_embed_batch(texts: list[str], *, model: Optional[str] = None) -> list[li
         _logger.debug("opensearch.embeddings.litellm_not_installed")
         return [None] * len(texts)
 
-    cfg = get_llm_role_config("embedding")
-    if cfg is None:
-        return [None] * len(texts)
-
     inputs = [t[:8000] if t else " " for t in texts]
-    resolved = model or cfg.model
-    prefixed = _apply_prefix(cfg.provider, resolved)
-    kwargs: dict = {"model": prefixed, "input": inputs}
-    if cfg.api_base:
-        kwargs["api_base"] = cfg.api_base
-    if cfg.api_key:
-        kwargs["api_key"] = cfg.api_key
+    kwargs = _embedding_kwargs(inputs, model=model, purpose=purpose)
+    if kwargs is None:
+        return [None] * len(texts)
 
     try:
         response = litellm.embedding(**kwargs)
     except Exception as exc:  # noqa: BLE001
-        _logger.warning("opensearch.embeddings.batch_failed", error=str(exc))
+        _logger.warning(
+            "opensearch.embeddings.batch_failed",
+            purpose=purpose,
+            model=kwargs["model"],
+            error=str(exc),
+        )
         return [None] * len(texts)
 
-    data = getattr(response, "data", None) or response.get("data", [])
     out: list[list[float] | None] = [None] * len(texts)
-    for i, item in enumerate(data):
-        if i >= len(out):
-            break
-        embedding = getattr(item, "embedding", None) or item.get("embedding")
-        if isinstance(embedding, list):
-            out[i] = [float(v) for v in embedding]
+    for i, item in enumerate(_response_data(response)[: len(out)]):
+        out[i] = _vector(item)
     return out
 
 
-__all__ = ["try_embed", "try_embed_batch"]
+__all__ = ["EmbeddingPurpose", "try_embed", "try_embed_batch"]
