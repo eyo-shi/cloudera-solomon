@@ -296,11 +296,54 @@ def _format_container_status(name: str, status: client.V1ContainerStatus) -> str
     return f"{name}: unknown"
 
 
+def _format_last_termination(status: client.V1ContainerStatus) -> str | None:
+    last = status.last_state.terminated if status.last_state else None
+    if not last:
+        return None
+    return (
+        f"last terminated reason={last.reason} exit={last.exit_code} "
+        f"restarts={status.restart_count}"
+    )
+
+
 def _describe_pod(pod: client.V1Pod) -> str:
     parts = [f"{pod.metadata.name}: phase={pod.status.phase}"]
     for status in pod.status.container_statuses or []:
         parts.append(_format_container_status(status.name, status))
+        last = _format_last_termination(status)
+        if last:
+            parts.append(last)
     return " | ".join(parts)
+
+
+def _pod_security_summary() -> str | None:
+    """Effective securityContext after admission (CML may mutate it)."""
+    pods = _list_puppygraph_pods()
+    if not pods:
+        return None
+    spec = pods[0].spec
+    pod_sc = spec.security_context
+    parts: list[str] = []
+    if pod_sc:
+        parts.append(
+            f"pod runAsNonRoot={pod_sc.run_as_non_root} runAsUser={pod_sc.run_as_user} "
+            f"fsGroup={pod_sc.fs_group} seccomp="
+            f"{pod_sc.seccomp_profile.type if pod_sc.seccomp_profile else None}"
+        )
+    for container in spec.containers or []:
+        sc = container.security_context
+        if not sc:
+            parts.append(f"{container.name}: no securityContext")
+            continue
+        caps = sc.capabilities
+        parts.append(
+            f"{container.name}: runAsUser={sc.run_as_user} "
+            f"allowPrivilegeEscalation={sc.allow_privilege_escalation} "
+            f"capabilities.drop={caps.drop if caps else None} "
+            f"capabilities.add={caps.add if caps else None} "
+            f"readOnlyRootFilesystem={sc.read_only_root_filesystem}"
+        )
+    return " | ".join(parts) or None
 
 
 def _pod_status_summary() -> str | None:
@@ -311,18 +354,31 @@ def _pod_status_summary() -> str | None:
 
 
 def _pod_logs(tail_lines: int = 120) -> str | None:
+    """Current container logs, or the previous (crashed) container's in CrashLoopBackOff."""
     pods = _list_puppygraph_pods()
     if not pods:
         return None
+    core = client.CoreV1Api()
+    kwargs = {
+        "name": pods[0].metadata.name,
+        "namespace": get_current_namespace(),
+        "tail_lines": tail_lines,
+        "container": "puppygraph",
+    }
+    current: str | None = None
     try:
-        return client.CoreV1Api().read_namespaced_pod_log(
-            name=pods[0].metadata.name,
-            namespace=get_current_namespace(),
-            tail_lines=tail_lines,
-            container="puppygraph",
-        )
+        current = core.read_namespaced_pod_log(**kwargs)
     except ApiException:
-        return None
+        current = None
+    if current and current.strip():
+        return current
+    try:
+        previous = core.read_namespaced_pod_log(previous=True, **kwargs)
+    except ApiException:
+        return current or None
+    if previous and previous.strip():
+        return f"[previous container]\n{previous}"
+    return current or None
 
 
 def _pod_has_fatal_failure() -> bool:
@@ -463,6 +519,17 @@ def wait_for_puppygraph() -> None:
         if _pod_has_fatal_failure():
             logs = _pod_logs()
             detail = f" Pod status: {_pod_status_summary()}."
+            security = _pod_security_summary()
+            if security:
+                detail += f"\nEffective securityContext: {security}"
+                if "allowPrivilegeEscalation=False" in security:
+                    detail += (
+                        "\nHint: the stock puppygraph/puppygraph image starts as puppy and "
+                        "escalates with `su root` (entrypoint.sh), which this cluster forbids "
+                        "(allowPrivilegeEscalation=false / SETUID dropped). Use an image that "
+                        "runs start.sh as uid 1000 without su (PUPPYGRAPH_IMAGE), or "
+                        "PUPPYGRAPH_MODE=external."
+                    )
             if logs:
                 detail += f"\nRecent pod logs:\n{logs[-3000:]}"
             raise RuntimeError(
