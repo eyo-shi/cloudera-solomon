@@ -2,18 +2,44 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from solomon.opensearch.client import build_client
 from solomon.opensearch.doc_index import primary_document_index_def
 from solomon.opensearch.docs_mapping import KnnEngine, build_docs_mapping
 from solomon.opensearch.embeddings import try_embed_batch
+from solomon.opensearch.env import opensearch_env
 from solomon.transport.config import OpenSearchConfig
 from solomon.transport.logging import get_logger
 
 _logger = get_logger(__name__)
 
 BULK_HEADERS = {"Content-Type": "application/x-ndjson"}
+
+#: 1 回の ``_bulk`` 本文の上限 (bytes)。CDP Semantic Search の Knox は再送用に
+#: 本文を約 16 KiB までしか保持できず、超えると 500 (NonRepeatableRequestException)
+#: になる (12 KiB は通り 16 KiB で失敗することを実測)。``OPENSEARCH_BULK_MAX_BYTES`` で変更可
+DEFAULT_BULK_MAX_BYTES = 12 * 1024
+
+
+def bulk_max_bytes() -> int:
+    raw = opensearch_env("BULK_MAX_BYTES")
+    try:
+        value = int(raw) if raw else DEFAULT_BULK_MAX_BYTES
+    except ValueError:
+        value = DEFAULT_BULK_MAX_BYTES
+    return value if value > 0 else DEFAULT_BULK_MAX_BYTES
+
+
+def _action_bytes(action: dict[str, Any]) -> int:
+    """``helpers.bulk`` が送る 1 アクション分 (メタ行 + 本文行) のバイト数。"""
+    meta = {"index": {"_index": action["_index"], "_id": action["_id"]}}
+    lines = [meta, action["_source"]]
+    return sum(
+        len(json.dumps(x, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 1
+        for x in lines
+    )
 
 
 def ensure_docs_index(
@@ -87,6 +113,7 @@ def bulk_index_doc_chunks(
     index_name = config.docs_index_name
     if ensure_index:
         ensure_docs_index(client, config)
+    max_bytes = bulk_max_bytes()
 
     indexed = 0
     errors: list[str] = []
@@ -110,20 +137,36 @@ def bulk_index_doc_chunks(
             body.pop("_id", None)
             if emb is not None:
                 body["embedding"] = emb
-            actions.append(
-                {
-                    "_op_type": "index",
-                    "_index": index_name,
-                    "_id": str(chunk_id),
-                    "_source": body,
-                }
-            )
+            action = {
+                "_op_type": "index",
+                "_index": index_name,
+                "_id": str(chunk_id),
+                "_source": body,
+            }
+            size = _action_bytes(action)
+            if size > max_bytes:
+                # 単独でも上限を超えるものは gateway で必ず失敗し、bulk 全体が止まる
+                _logger.warning(
+                    "opensearch.bulk_action_too_large",
+                    chunk_id=str(chunk_id),
+                    bytes=size,
+                    max_bytes=max_bytes,
+                )
+                errors.append(
+                    f"chunk {chunk_id}: {size} bytes > OPENSEARCH_BULK_MAX_BYTES={max_bytes}"
+                )
+                continue
+            actions.append(action)
         if not actions:
             continue
         # CDP Semantic Search の gateway は application/json の body を正規化して
         # 末尾改行を落とすため、_bulk は ndjson で送る
         ok_count, bulk_errors = bulk(
-            client, actions, refresh=False, headers=BULK_HEADERS
+            client,
+            actions,
+            refresh=False,
+            headers=BULK_HEADERS,
+            max_chunk_bytes=max_bytes,
         )
         indexed += int(ok_count)
         if bulk_errors:

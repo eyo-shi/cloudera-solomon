@@ -58,13 +58,20 @@ def _embedding_kwargs(
     return kwargs
 
 
+#: ベクトル成分の小数桁数。CDP Semantic Search の Knox は再送用に本文を約 16 KiB
+#: までしか保持できず、超えると 500 (NonRepeatableRequestException) になる。
+#: 丸めないと 1024 次元で JSON が約 20 KB、6 桁なら約 10 KB に収まる
+#: (knn_vector は float32 なので実質的な精度は落ちない)
+EMBEDDING_DECIMALS = 6
+
+
 def _vector(item: Any) -> list[float] | None:
     embedding = getattr(item, "embedding", None)
     if embedding is None and isinstance(item, dict):
         embedding = item.get("embedding")
     if not isinstance(embedding, list):
         return None
-    return [float(v) for v in embedding]
+    return [round(float(v), EMBEDDING_DECIMALS) for v in embedding]
 
 
 def _response_data(response: Any) -> list[Any]:
@@ -148,4 +155,4 @@ def try_embed_batch(
     return out
 
 
-__all__ = ["EmbeddingPurpose", "try_embed", "try_embed_batch"]
+__all__ = ["EMBEDDING_DECIMALS", "EmbeddingPurpose", "try_embed", "try_embed_batch"]

@@ -138,3 +138,84 @@ def test_bulk_index_sends_ndjson_content_type(monkeypatch: pytest.MonkeyPatch) -
     )
     assert out["indexed"] == 1
     assert seen["headers"] == {"Content-Type": "application/x-ndjson"}
+
+
+def _bulk_capture(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, dict[str, Any]]:
+    import opensearchpy.helpers as helpers
+
+    from solomon.opensearch import docs_indexer
+
+    monkeypatch.setattr(docs_indexer, "build_client", lambda _cfg: MagicMock())
+    seen: dict[str, Any] = {"actions": []}
+
+    def _bulk(client: Any, actions: Any, **kwargs: Any) -> tuple[int, list[Any]]:
+        acts = list(actions)
+        seen["actions"].extend(acts)
+        seen.update(kwargs)
+        return len(acts), []
+
+    monkeypatch.setattr(helpers, "bulk", _bulk)
+    return docs_indexer, seen
+
+
+def _docs_cfg() -> OpenSearchConfig:
+    return OpenSearchConfig(
+        host="localhost", port=9200, scheme="http", verify_ssl=False,
+        docs_index_name="solomon-docs",
+    )
+
+
+def test_bulk_index_caps_request_size_for_knox(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Knox は約 16 KiB を超える本文を再送できず 500 になる。"""
+    monkeypatch.delenv("OPENSEARCH_BULK_MAX_BYTES", raising=False)
+    docs_indexer, seen = _bulk_capture(monkeypatch)
+    docs_indexer.bulk_index_doc_chunks(
+        _docs_cfg(), [{"chunk_id": "c1", "text": "t"}], with_embedding=False, ensure_index=False
+    )
+    assert seen["max_chunk_bytes"] == 12 * 1024
+
+
+def test_bulk_max_bytes_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENSEARCH_BULK_MAX_BYTES", "1048576")
+    docs_indexer, seen = _bulk_capture(monkeypatch)
+    docs_indexer.bulk_index_doc_chunks(
+        _docs_cfg(), [{"chunk_id": "c1", "text": "t"}], with_embedding=False, ensure_index=False
+    )
+    assert seen["max_chunk_bytes"] == 1048576
+
+
+def test_bulk_index_skips_chunk_larger_than_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENSEARCH_BULK_MAX_BYTES", raising=False)
+    docs_indexer, seen = _bulk_capture(monkeypatch)
+    out = docs_indexer.bulk_index_doc_chunks(
+        _docs_cfg(),
+        [{"chunk_id": "small", "text": "t"}, {"chunk_id": "big", "text": "あ" * 8000}],
+        with_embedding=False,
+        ensure_index=False,
+    )
+    assert [a["_id"] for a in seen["actions"]] == ["small"]
+    assert out["indexed"] == 1
+    assert any("big" in e for e in out["errors"])
+
+
+def test_1024_dim_embedding_chunk_fits_bulk_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """丸めた 1024 次元ベクトル + 本文 1 件が上限に収まる。"""
+    import random
+
+    from solomon.opensearch import embeddings
+
+    rng = random.Random(0)
+    raw = [rng.uniform(-0.1, 0.1) for _ in range(1024)]
+    vec = embeddings._vector({"embedding": raw})
+    assert vec is not None
+    assert all(abs(a - b) < 1e-6 for a, b in zip(vec, raw, strict=True))
+
+    monkeypatch.delenv("OPENSEARCH_BULK_MAX_BYTES", raising=False)
+    docs_indexer, seen = _bulk_capture(monkeypatch)
+    monkeypatch.setattr(docs_indexer, "try_embed_batch", lambda texts, purpose: [vec] * len(texts))
+    out = docs_indexer.bulk_index_doc_chunks(
+        _docs_cfg(),
+        [{"chunk_id": "c1", "doc_id": "d1", "title": "作業日報", "text": "異音を確認。" * 50}],
+        ensure_index=False,
+    )
+    assert out["indexed"] == 1, out["errors"]
