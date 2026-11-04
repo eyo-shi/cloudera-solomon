@@ -260,9 +260,13 @@ def run_derived_sql(
     if not path.is_file():
         return
     text = path.read_text(encoding="utf-8")
-    for stmt in re.split(r";\s*\n", text):
-        stmt = stmt.strip()
-        if stmt and not stmt.startswith("--"):
+    for chunk in re.split(r";\s*\n", text):
+        # 先頭のコメント行だけを落とす (コメントで始まる文を丸ごと捨てない)
+        lines = chunk.strip().splitlines()
+        while lines and (not lines[0].strip() or lines[0].lstrip().startswith("--")):
+            lines.pop(0)
+        stmt = "\n".join(lines).strip().rstrip(";").strip()
+        if stmt:
             trino_execute(stmt, dry_run=dry_run, execute_fn=execute_fn)
 
 
@@ -347,6 +351,16 @@ def load_iceberg(
         if pq_path is None:
             continue
         targets.append((name, spec, pq_path))
+
+    if not targets:
+        msg = (
+            f"no parquet tables for this domain under {output / 'tables'} "
+            "(output/ は Git 管理外。先に生成する: "
+            f"PYTHONPATH=. python -m demo.{domain.domain_name}.generator --seed 42 --scale 1.0 --docs template)"
+        )
+        if not dry_run:
+            raise RuntimeError(msg)
+        print(f"WARN {msg}")
 
     ensure_schemas(
         [spec for _, spec, _ in targets],

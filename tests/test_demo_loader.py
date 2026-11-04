@@ -389,3 +389,26 @@ def test_post_schema_reports_unreachable_endpoint(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("PUPPYGRAPH_HTTP_URL", "http://pg.example:8081")
     with pytest.raises(graph_load.GraphLoadError, match="--graph-schema-out"):
         graph_load.post_schema({"node": []}, dry_run=False)
+
+
+def test_run_derived_sql_keeps_statements_after_comments(tmp_path: Path) -> None:
+    from demo.loader.iceberg_load import run_derived_sql
+
+    (tmp_path / "derived.sql").write_text(
+        "-- header\n-- more\n\nCREATE TABLE IF NOT EXISTS a.b.c AS\nSELECT 1 AS x;\n"
+        "-- only a comment\n",
+        encoding="utf-8",
+    )
+    executed: list[str] = []
+    run_derived_sql(tmp_path, dry_run=False, execute_fn=executed.append)
+    assert executed == ["CREATE TABLE IF NOT EXISTS a.b.c AS\nSELECT 1 AS x"]
+
+
+def test_load_iceberg_without_parquet_fails(neutral_domain: Path) -> None:
+    from demo.loader.iceberg_load import load_iceberg
+    from demo.loader.ossie_domain import load_domain
+
+    domain = load_domain(neutral_domain, validate=False)
+    with pytest.raises(RuntimeError, match="no parquet tables"):
+        load_iceberg(domain, dry_run=False, recreate=False, method="b",
+                     execute_fn=lambda _s: None, query_fn=lambda _s: [])
