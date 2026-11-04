@@ -520,6 +520,20 @@ class TestGetLLMConfig:
         assert light is not None
         assert light.api_key == "jwt-1"
 
+    def test_cai_ignores_html_error_page_in_workload_jwt(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """Knox の token 取得失敗時に /tmp/jwt へ書かれた HTML をキーとして使わない。"""
+        path = tmp_path / "jwt"
+        path.write_text(
+            "<html>\n<head><title>Error 404 Not Found</title></head>\n</html>\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("SOLOMON_CML_JWT_PATH", str(path))
+        monkeypatch.setenv("SOLOMON_LLM_PROVIDER", "cai")
+        monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://cai/ep/x/v1")
+        assert cfg_mod.get_llm_role_config("light") is None
+
     def test_cai_workload_jwt_is_reread_each_call(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:

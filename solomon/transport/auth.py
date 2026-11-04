@@ -15,7 +15,10 @@ from urllib.parse import unquote
 
 import jwt
 
+from solomon.transport.logging import get_logger
 from solomon.transport.user_context import UserContext
+
+_logger = get_logger(__name__)
 
 # Knox が転送してくるヘッダの候補 (デプロイ形態により異なる)
 _JWT_HEADER_CANDIDATES = (
@@ -118,9 +121,24 @@ def _load_workload_jwt_file() -> Optional[str]:
                 if isinstance(val, str) and val.strip():
                     return _normalize_token(val)
         candidate = _normalize_token(text)
+        if not _is_header_safe_token(candidate):
+            # Knox からのトークン取得に失敗すると、CML はエラーページ (HTML) を
+            # そのまま /tmp/jwt に書くことがある。Bearer に載せると不正ヘッダになる
+            _logger.warning(
+                "auth.workload_jwt_invalid",
+                path=str(path),
+                length=len(candidate),
+                looks_like_html=candidate.lstrip().startswith("<"),
+            )
+            return None
         return candidate or None
     except (OSError, json.JSONDecodeError, ValueError):
         return None
+
+
+def _is_header_safe_token(token: str) -> bool:
+    """Bearer に載せられるトークンか (空白・改行・HTML を含まない)。"""
+    return bool(token) and "<" not in token and not any(c.isspace() for c in token)
 
 
 def extract_jwt_from_cookies(cookies: dict[str, str]) -> Optional[str]:
