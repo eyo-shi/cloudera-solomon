@@ -24,12 +24,12 @@ Solomon の **Agentic RAG デモ**（CDW Trino + Iceberg、PuppyGraph、OpenSear
 | Semantic Search 外部 / 内部 | `OPENSEARCH_MODE`、CML Data Connection | | `external` + `OPENSEARCH_CONNECTION_NAME` |
 | kuromoji プラグイン | `GET _cat/plugins?v` または preflight | | 有 → `OPENSEARCH_DOCS_ANALYZER=kuromoji`、無 → `cjk` |
 | OpenSearch インデックス作成権限 | preflight（テスト index 作成） | | 無 → loader `--skip-create` |
-| PuppyGraph Iceberg 接続 | HMS thrift / REST、UI エクスポート JSON | | `DEMO_PUPPYGRAPH_CATALOG=hms\|rest` |
+| PuppyGraph Iceberg 接続 | PuppyGraph → Trino の到達性、または HMS thrift / REST | | `DEMO_PUPPYGRAPH_CATALOG=trino\|hms\|rest`（CDW Trino は `trino`） |
 | Iceberg **ビュー**を PuppyGraph が読めるか | 1 ビューで試験 | | 不可なら派生は **CTAS 実表**（`derived.sql`） |
 | 埋め込み入力長上限 | preflight 長文 + ベンダー doc | | `DEMO_EMBED_MAX_CHARS`（既定 2000） |
 | エージェント LLM の function calling | preflight `llm_function_calling` | | 非対応 → `SOLOMON_RAG_TOOL_MODE=json` |
-| CDW Trino に **hive** カタログ | `SHOW CATALOGS` | | 有 → loader 方式 A、無 → B |
-| S3 書き込み先 | `DEMO_S3_PREFIX` に Parquet upload | | `s3://…/mfg_quality/…` |
+| CDW Trino に **hive** カタログ | `SHOW CATALOGS` | | 有 + `DEMO_S3_PREFIX` → loader 方式 A、それ以外 → B（既定） |
+| S3 書き込み先（方式 A のみ） | `DEMO_S3_PREFIX` に Parquet upload | | `s3://…/mfg_quality/…` |
 
 一括確認:
 
@@ -48,10 +48,10 @@ PYTHONPATH=. python -m demo.checks.preflight \
 | 確認 | コマンド / 手段 | OK なら | NG なら |
 |------|----------------|---------|---------|
 | 接続 | preflight / Trino CLI | 次へ | `TRINO_URL`・認証・Ranger |
-| カタログ | `SHOW CATALOGS` | hive あり → [loader 方式 A](../loader/README.md) | hive 無し → 方式 B または `--iceberg-method b` |
-| スキーマ | `SHOW SCHEMAS FROM iceberg` | 対象 schema あり | `CREATE SCHEMA iceberg.<schema>` 権限を管理者に依頼 |
+| カタログ | `SHOW CATALOGS` | 既定は [loader 方式 B](../loader/README.md)（INSERT） | hive + `DEMO_S3_PREFIX` があれば方式 A も可 |
+| スキーマ | `SHOW SCHEMAS FROM iceberg` | 対象 schema あり（無ければ loader が `CREATE SCHEMA IF NOT EXISTS`） | 権限が無ければ管理者に依頼 |
 | 表 | 投入後 `SELECT count(*) FROM iceberg.<schema>.lot_genealogy` | 件数 ≈ manifest | `demo.loader` 再実行 / S3 パス |
-| S3 | `DEMO_S3_PREFIX` へ Put | loader upload OK | IAM / IDBroker / バケットポリシー |
+| S3（方式 A のみ） | `DEMO_S3_PREFIX` へ Put | loader upload OK | IAM / IDBroker / バケットポリシー |
 
 **デモでは `TRINO_MODE=external` 必須**（internal DuckDB は Iceberg ではなく PuppyGraph とデータを共有できない）。
 
@@ -60,7 +60,7 @@ PYTHONPATH=. python -m demo.checks.preflight \
 | 確認 | 手段 | OK | NG |
 |------|------|----|----|
 | バージョン | イメージ tag（例 1.15） | 手順どおり schema POST | ドキュメント / UI エクスポートで JSON 調整 |
-| Iceberg | HMS `thrift://…` または REST URI | `DEMO_PUPPYGRAPH_CATALOG` 設定 | env プレースホルダ `${HIVE_METASTORE_URI}` 等 |
+| Iceberg | Trino JDBC（`PUPPYGRAPH_TRINO_JDBC_URI`、既定は `TRINO_URL` から生成）、または HMS / REST | `DEMO_PUPPYGRAPH_CATALOG` 設定 | PuppyGraph → Trino の経路・資格情報、`${HIVE_METASTORE_URI}` 等 |
 | S3 認証 | PuppyGraph 側設定 | 頂点件数 > 0 | カタログ接続ログ |
 | ビュー | 試験 1 本 | 読める | **ビューは使わず CTAS** |
 | HTTP 8081 | preflight `puppygraph_http` | schema POST 可 | `PUPPYGRAPH_HTTP_URL` |
@@ -130,7 +130,7 @@ PYTHONPATH=. python -m solomon.semantic show --root demo/<domain>/semantic
 
 1. **Trino** — `TRINO_MODE=external`、catalog `iceberg`、schema（例 `mfg_quality`）
 2. **Iceberg スキーマ** — 権限があれば `CREATE SCHEMA`、なければ管理者依頼（loader README）
-3. **PuppyGraph** — internal launcher または external URI；Iceberg カタログを Solomon と同じ HMS/REST に
+3. **PuppyGraph** — internal launcher または external URI；Solomon と同じ Trino カタログ（または HMS/REST）経由で Iceberg を読む
 4. **OpenSearch** — external Connection または internal launcher
 5. **LLM / 埋め込み** — CAI Inference 等、`SOLOMON_LLM_EMBEDDING_MODEL=bge-m3`
 6. **preflight** — 上記表の「未確認」を埋める
