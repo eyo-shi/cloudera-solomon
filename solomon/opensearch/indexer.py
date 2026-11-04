@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from solomon.opensearch.client import build_client
+from solomon.opensearch.docs_mapping import KnnEngine, _knn_method
 from solomon.opensearch.embeddings import try_embed
 from solomon.semantic.models import AIContext
 from solomon.semantic.search import tokenize
@@ -86,11 +87,8 @@ def build_searchable_text(
     return " ".join(parts)
 
 
-def ensure_index(client: Any, config: OpenSearchConfig) -> None:
-    """k-NN 対応インデックスを作成 (存在しなければ)。"""
-    if client.indices.exists(index=config.index_name):
-        return
-    body = {
+def _dataset_index_body(config: OpenSearchConfig, engine: KnnEngine) -> dict[str, Any]:
+    return {
         "settings": {"index.knn": True},
         "mappings": {
             "properties": {
@@ -105,18 +103,43 @@ def ensure_index(client: Any, config: OpenSearchConfig) -> None:
                 "embedding": {
                     "type": "knn_vector",
                     "dimension": config.embedding_dim,
-                    "method": {
-                        "name": "hnsw",
-                        "space_type": "cosinesimil",
-                        "engine": "nmslib",
-                    },
+                    "method": _knn_method(engine, embedding_dim=config.embedding_dim),
                 },
                 "dataset": {"type": "object", "enabled": False},
             }
         },
     }
-    client.indices.create(index=config.index_name, body=body)
-    _logger.info("opensearch.index_created", index=config.index_name)
+
+
+# nmslib は OpenSearch 3.0 で新規インデックス作成不可。lucene → faiss の順に試す
+_DATASET_INDEX_ENGINES: tuple[KnnEngine, ...] = ("lucene", "faiss")
+
+
+def ensure_index(client: Any, config: OpenSearchConfig) -> None:
+    """k-NN 対応インデックスを作成 (存在しなければ)。"""
+    if client.indices.exists(index=config.index_name):
+        return
+    last_exc: Exception | None = None
+    for engine in _DATASET_INDEX_ENGINES:
+        try:
+            client.indices.create(
+                index=config.index_name, body=_dataset_index_body(config, engine)
+            )
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            _logger.warning(
+                "opensearch.index_create_failed",
+                index=config.index_name,
+                knn_engine=engine,
+                error=str(exc),
+            )
+            continue
+        _logger.info(
+            "opensearch.index_created", index=config.index_name, knn_engine=engine
+        )
+        return
+    assert last_exc is not None
+    raise last_exc
 
 
 def index_document(

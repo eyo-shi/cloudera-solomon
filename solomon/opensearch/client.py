@@ -36,6 +36,15 @@ def build_client(config: OpenSearchConfig) -> Any:
     return OpenSearch(**client_kwargs)
 
 
+def _is_authorization_error(exc: Exception) -> bool:
+    """HTTP 403 (認証済み・権限不足)。401 (認証失敗) は含めない。"""
+    try:
+        from opensearchpy.exceptions import AuthorizationException  # type: ignore
+    except ImportError:  # pragma: no cover
+        return False
+    return isinstance(exc, AuthorizationException)
+
+
 def ping(config: OpenSearchConfig, *, probe_index: str | None = None) -> bool:
     """外部 OpenSearch クラスタへの接続確認。"""
     try:
@@ -44,7 +53,17 @@ def ping(config: OpenSearchConfig, *, probe_index: str | None = None) -> bool:
         if index:
             client.count(index=index)
             return True
-        health = client.cluster.health()
+        try:
+            health = client.cluster.health()
+        except Exception as exc:  # noqa: BLE001
+            if _is_authorization_error(exc):
+                # 認証は通ったが cluster:monitor 権限が無い (Ranger 管理の
+                # Semantic Search で一般的)。到達性と認証は確認できている。
+                _logger.debug(
+                    "opensearch.ping_cluster_monitor_forbidden", host=config.host
+                )
+                return True
+            raise
         if isinstance(health, dict) and health.get("cluster_name"):
             return True
         return bool(client.ping())
