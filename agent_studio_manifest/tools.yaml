@@ -324,6 +324,52 @@ tools:
     - format
     title: DataFramePreviewArgs
     type: object
+- name: doc_search
+  class_path: solomon.tools.opensearch.DocumentSearchTool
+  description: 'Tool Name: doc_search
+
+    Tool Arguments: {''query'': {''description'': ''Natural language search query'', ''type'': ''str''}, ''top_k'': {''description'':
+    None, ''type'': ''int''}, ''mode'': {''description'': ''keyword | vector | hybrid'', ''type'': ''str''}, ''filters'':
+    {''description'': ''doc_type, date_from, date_to, and Ossie filterable fields'', ''type'': ''UnionType[dict[str, Any],
+    NoneType]''}, ''expand'': {''description'': ''LLM query expansion before multi-search RRF merge'', ''type'': ''bool''}}
+
+    Tool Description: Search business document chunks in the configured OpenSearch docs index. Filter schema is derived from
+    Ossie document_index definitions.'
+  requires_auth: false
+  args_schema:
+    properties:
+      query:
+        description: Natural language search query
+        title: Query
+        type: string
+      top_k:
+        default: 8
+        maximum: 20
+        minimum: 1
+        title: Top K
+        type: integer
+      mode:
+        default: hybrid
+        description: keyword | vector | hybrid
+        title: Mode
+        type: string
+      filters:
+        anyOf:
+        - additionalProperties: true
+          type: object
+        - type: 'null'
+        default: null
+        description: doc_type, date_from, date_to, and Ossie filterable fields
+        title: Filters
+      expand:
+        default: true
+        description: LLM query expansion before multi-search RRF merge
+        title: Expand
+        type: boolean
+    required:
+    - query
+    title: DocumentSearchArgs
+    type: object
 - name: entity_memory_read
   class_path: solomon.router.tools.EntityMemoryReadTool
   description: 'Tool Name: entity_memory_read
@@ -936,8 +982,8 @@ tools:
     ''既知の catalog.schema.table (省略可)'', ''type'': ''Union[str, NoneType]''}, ''max_rows'': {''description'': None, ''type'':
     ''int''}}
 
-    Tool Description: Answer analytics questions by retrieving relevant dataset context (Ossie/OpenSearch), generating a read-only
-    Trino SELECT, and executing it.'
+    Tool Description: Answer analytics questions using Ossie semantic schema context, generate a read-only Trino SELECT, and
+    execute it (one retry on Trino error).'
   requires_auth: true
   args_schema:
     properties:
