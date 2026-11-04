@@ -23,6 +23,11 @@ PUPPYGRAPH_STARTUP_TIMEOUT_SECONDS = int(
 PUPPYGRAPH_USERNAME = os.getenv("PUPPYGRAPH_USERNAME") or "puppygraph"
 PUPPYGRAPH_PASSWORD = os.getenv("PUPPYGRAPH_PASSWORD") or "puppygraph123"
 PUPPYGRAPH_QUERY_TIMEOUT = os.getenv("PUPPYGRAPH_QUERY_TIMEOUT") or "5m"
+# The image declares ``USER puppy`` (a name). Under CML's runAsNonRoot policy the
+# kubelet rejects non-numeric users with CreateContainerConfigError, so pin the
+# numeric IDs (puppy = uid/gid 1000 in /etc/passwd of puppygraph/puppygraph:1.15.0).
+PUPPYGRAPH_CONTAINER_UID = int(os.getenv("PUPPYGRAPH_CONTAINER_UID") or "1000")
+PUPPYGRAPH_CONTAINER_GID = int(os.getenv("PUPPYGRAPH_CONTAINER_GID") or "1000")
 
 _POD_FAILURE_WAITING_REASONS = (
     "CrashLoopBackOff",
@@ -165,11 +170,20 @@ def create_deployment_spec() -> client.V1Deployment:
             failure_threshold=30,
         ),
         volume_mounts=[data_mount],
+        security_context=client.V1SecurityContext(
+            run_as_user=PUPPYGRAPH_CONTAINER_UID,
+            run_as_group=PUPPYGRAPH_CONTAINER_GID,
+            run_as_non_root=True,
+        ),
     )
 
     pod_spec = client.V1PodSpec(
         containers=[puppygraph_container],
         volumes=[data_volume],
+        security_context=client.V1PodSecurityContext(
+            fs_group=PUPPYGRAPH_CONTAINER_GID,
+            fs_group_change_policy="Always",
+        ),
     )
 
     return client.V1Deployment(
