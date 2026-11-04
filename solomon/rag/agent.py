@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
@@ -34,6 +35,99 @@ _JSON_SYSTEM_TAIL = (
     '2) 最終回答: {{"thought": "...", "final_answer": "日本語 Markdown"}}\n'
     "利用可能なツール名: {tool_names}"
 )
+
+
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_THINK_CLOSE = "</think>"
+_TOOL_CALL_RE = re.compile(
+    r"<tool_call>(.*?)(?:</tool_call>|\Z)", re.DOTALL | re.IGNORECASE
+)
+_XML_FUNCTION_RE = re.compile(
+    r"<function=([^>\s]+)\s*>(.*?)(?:</function>|\Z)", re.DOTALL | re.IGNORECASE
+)
+_XML_PARAM_RE = re.compile(
+    r"<parameter=([^>\s]+)\s*>(.*?)(?=</parameter>|<parameter=|</function>|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _strip_reasoning(text: Any) -> str:
+    """``<think>…</think>`` を除去する。開始タグ欠落時は ``</think>`` までを捨てる。"""
+    if not isinstance(text, str):
+        return ""
+    out = _THINK_BLOCK_RE.sub("", text)
+    idx = out.lower().rfind(_THINK_CLOSE)
+    if idx >= 0:
+        out = out[idx + len(_THINK_CLOSE) :]
+    return out.strip()
+
+
+def _coerce_param_value(raw: str) -> Any:
+    value = raw.strip()
+    if value[:1] in ("{", "[") or value in ("true", "false", "null") or re.fullmatch(
+        r"-?\d+(\.\d+)?", value
+    ):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            pass
+    return value
+
+
+def _parse_tool_call_body(body: str) -> list[tuple[str, dict[str, Any]]]:
+    """``<tool_call>`` 内側 1 件分を (name, args) のリストへ。"""
+    stripped = body.strip()
+    found: list[tuple[str, dict[str, Any]]] = []
+    if stripped.startswith("{"):
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            obj = None
+        if isinstance(obj, dict) and isinstance(obj.get("name"), str):
+            args = obj.get("arguments", obj.get("parameters", {}))
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            found.append((obj["name"], args if isinstance(args, dict) else {}))
+        return found
+    for fm in _XML_FUNCTION_RE.finditer(stripped):
+        args = {
+            pm.group(1).strip(): _coerce_param_value(pm.group(2))
+            for pm in _XML_PARAM_RE.finditer(fm.group(2))
+        }
+        found.append((fm.group(1).strip(), args))
+    return found
+
+
+def _parse_text_tool_calls(
+    content: str, tool_names: list[str], *, step: int = 0
+) -> tuple[str, list[dict[str, Any]]]:
+    """content 内のテキスト形式ツール呼び出し (Qwen XML / Hermes JSON) を抽出する。
+
+    戻り値は (ツール呼び出し部分を除いた残りテキスト, OpenAI 形式の tool_calls)。
+    """
+    if not content or "<tool_call>" not in content.lower():
+        return content, []
+    allowed = set(tool_names)
+    calls: list[dict[str, Any]] = []
+    for m in _TOOL_CALL_RE.finditer(content):
+        for name, args in _parse_tool_call_body(m.group(1)):
+            if name not in allowed:
+                continue
+            calls.append(
+                {
+                    "id": f"text_call_{step}_{len(calls)}",
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(args, ensure_ascii=False),
+                    },
+                }
+            )
+    remaining = _TOOL_CALL_RE.sub("", content).strip()
+    return remaining, calls
 
 
 def _env_tool_mode() -> ToolMode:
@@ -382,7 +476,7 @@ def _json_turn(
 
     msg = _message_from_response(resp)
     content = msg.get("content")
-    parsed = _parse_json_lenient(content)
+    parsed = _parse_json_lenient(_strip_reasoning(content))
     if parsed is None and not retry:
         return None, True
     return parsed, False
@@ -551,9 +645,26 @@ def run_knowledge_agent(
                 break
 
             tool_calls = msg.get("tool_calls") or []
-            content = msg.get("content")
-            if isinstance(content, str) and content.strip() and on_event:
-                on_event({"type": "thought", "text": content.strip()[:500]})
+            content = _strip_reasoning(msg.get("content"))
+            if not tool_calls:
+                remaining, text_calls = _parse_text_tool_calls(
+                    content, tool_names, step=steps_taken
+                )
+                if text_calls:
+                    _logger.info(
+                        "rag_agent.text_tool_calls_parsed",
+                        count=len(text_calls),
+                        names=[c["function"]["name"] for c in text_calls],
+                    )
+                    tool_calls = text_calls
+                    content = remaining
+                    msg = {
+                        "role": "assistant",
+                        "content": remaining or None,
+                        "tool_calls": text_calls,
+                    }
+            if content and on_event:
+                on_event({"type": "thought", "text": content[:500]})
 
             if tool_calls:
                 messages.append(msg)
@@ -597,8 +708,8 @@ def run_knowledge_agent(
                     )
                 continue
 
-            if isinstance(content, str) and content.strip():
-                final_answer = content.strip()
+            if content:
+                final_answer = content
                 break
 
         except Exception as exc:  # noqa: BLE001
@@ -642,7 +753,10 @@ def run_knowledge_agent(
                     tool_choice="none",
                 )
                 if msg and isinstance(msg.get("content"), str):
-                    final_answer = msg["content"].strip()
+                    remaining, _ = _parse_text_tool_calls(
+                        _strip_reasoning(msg["content"]), tool_names
+                    )
+                    final_answer = remaining
             except Exception as exc:  # noqa: BLE001
                 _logger.warning("rag_agent.final_turn_failed", error=str(exc))
 

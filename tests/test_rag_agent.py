@@ -243,6 +243,135 @@ class TestAgentToolScriptJson:
         assert "完了" in result.answer_markdown
 
 
+_QWEN_XML_CONTENT = (
+    "We need to find SX-5 abnormal noise complaints.\n\n"
+    "Let's do that. </think> <tool_call> <function=sql_query> "
+    "<parameter=question> Show sample rows from field_claims </parameter> "
+    "<parameter=sql> SELECT * FROM iceberg.mfg_quality.field_claims LIMIT 5 "
+    "</parameter> </function> </tool_call>"
+)
+
+
+class TestTextToolCalls:
+    def test_strip_reasoning(self) -> None:
+        from solomon.rag.agent import _strip_reasoning
+
+        assert _strip_reasoning("<think>a</think>b") == "b"
+        assert _strip_reasoning("a\n</think>\nb") == "b"
+        assert _strip_reasoning("plain") == "plain"
+        assert _strip_reasoning(None) == ""
+
+    def test_parse_qwen_xml(self) -> None:
+        from solomon.rag.agent import _parse_text_tool_calls, _strip_reasoning
+
+        remaining, calls = _parse_text_tool_calls(
+            _strip_reasoning(_QWEN_XML_CONTENT), ["sql_query"]
+        )
+        assert remaining == ""
+        assert len(calls) == 1
+        args = json.loads(calls[0]["function"]["arguments"])
+        assert calls[0]["function"]["name"] == "sql_query"
+        assert args == {
+            "question": "Show sample rows from field_claims",
+            "sql": "SELECT * FROM iceberg.mfg_quality.field_claims LIMIT 5",
+        }
+
+    def test_parse_hermes_json_and_unclosed(self) -> None:
+        from solomon.rag.agent import _parse_text_tool_calls
+
+        _, calls = _parse_text_tool_calls(
+            'x <tool_call>{"name": "doc_search", "arguments": {"query": "q", "top_k": 3}}'
+            "</tool_call>",
+            ["doc_search"],
+        )
+        assert json.loads(calls[0]["function"]["arguments"]) == {"query": "q", "top_k": 3}
+
+        _, calls = _parse_text_tool_calls(
+            "<tool_call>\n<function=doc_search>\n<parameter=query>\nabc\n"
+            "<parameter=top_k>\n4\n",
+            ["doc_search"],
+        )
+        assert json.loads(calls[0]["function"]["arguments"]) == {"query": "abc", "top_k": 4}
+
+    def test_native_executes_text_tool_call(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_TOOL_MODE", "native")
+        from solomon.rag import agent_tools
+
+        seen: list[dict[str, Any]] = []
+
+        def fake_sql(_u: Any, **kw: Any) -> dict[str, Any]:
+            seen.append(kw)
+            return {
+                "status": "ok",
+                "sql": kw.get("sql"),
+                "columns": ["claim_id"],
+                "rows": [["C1"]],
+                "row_count": 1,
+            }
+
+        monkeypatch.setattr(agent_tools, "run_sql_query", fake_sql)
+        calls: list[dict[str, Any]] = []
+
+        def fake_completion(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return _final_native(_QWEN_XML_CONTENT)
+            return _final_native("思考</think>## 結論\nC1")
+
+        monkeypatch.setattr("solomon.rag.agent._litellm_completion", fake_completion)
+        monkeypatch.setattr("solomon.rag.agent.build_system_prompt", lambda **_kw: "sys")
+
+        result = run_knowledge_agent("q", user_ctx=None)  # type: ignore[arg-type]
+
+        assert len(result.tool_calls) == 1
+        assert seen[0]["sql"] == "SELECT * FROM iceberg.mfg_quality.field_claims LIMIT 5"
+        assert len(result.bundle.hits) == 1
+        assert any(m.get("role") == "tool" for m in calls[1]["messages"])
+        assert "## 結論" in result.answer_markdown
+        assert "</think>" not in result.answer_markdown
+        assert "<tool_call>" not in result.answer_markdown
+
+    def test_unknown_text_tool_is_not_executed(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_TOOL_MODE", "native")
+        from solomon.rag import agent_tools
+
+        monkeypatch.setattr(
+            agent_tools,
+            "run_sql_query",
+            lambda _u, **kw: pytest.fail("should not run"),
+        )
+        monkeypatch.setattr(
+            "solomon.rag.agent._litellm_completion",
+            lambda **kw: _final_native(
+                "## 結論\nok <tool_call><function=rm_rf></function></tool_call>"
+            ),
+        )
+        monkeypatch.setattr("solomon.rag.agent.build_system_prompt", lambda **_kw: "sys")
+
+        result = run_knowledge_agent("q", user_ctx=None)  # type: ignore[arg-type]
+        assert result.tool_calls == []
+        assert "## 結論" in result.answer_markdown
+
+    def test_json_mode_with_think_prefix(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_TOOL_MODE", "json")
+        monkeypatch.setattr(
+            "solomon.rag.agent._litellm_completion",
+            lambda **kw: _final_native(
+                'thinking</think>{"thought": "t", "final_answer": "## json ok"}'
+            ),
+        )
+        monkeypatch.setattr("solomon.rag.agent.build_system_prompt", lambda **_kw: "sys")
+
+        result = run_knowledge_agent("q", user_ctx=None)  # type: ignore[arg-type]
+        assert "json ok" in result.answer_markdown
+
+
 class TestAutoFallback:
     def test_native_tools_error_falls_back_to_json(
         self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
