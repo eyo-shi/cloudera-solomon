@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -111,3 +112,29 @@ def test_ping_false_on_authentication_failure(monkeypatch: pytest.MonkeyPatch) -
     fake.cluster.health.side_effect = AuthenticationException(401, "unauthorized", "")
     monkeypatch.setattr(client_mod, "build_client", lambda _cfg: fake)
     assert client_mod.ping(_config()) is False
+
+
+def test_bulk_index_sends_ndjson_content_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CDP Semantic Search gateway は application/json の _bulk 末尾改行を落とす。"""
+    import opensearchpy.helpers as helpers
+
+    from solomon.opensearch import docs_indexer
+
+    fake = MagicMock()
+    monkeypatch.setattr(docs_indexer, "build_client", lambda _cfg: fake)
+    seen: dict[str, Any] = {}
+
+    def _bulk(client: Any, actions: Any, **kwargs: Any) -> tuple[int, list[Any]]:
+        seen.update(kwargs)
+        return len(list(actions)), []
+
+    monkeypatch.setattr(helpers, "bulk", _bulk)
+    cfg = OpenSearchConfig(
+        host="localhost", port=9200, scheme="http", verify_ssl=False,
+        docs_index_name="solomon-docs",
+    )
+    out = docs_indexer.bulk_index_doc_chunks(
+        cfg, [{"chunk_id": "c1", "text": "t"}], with_embedding=False, ensure_index=False
+    )
+    assert out["indexed"] == 1
+    assert seen["headers"] == {"Content-Type": "application/x-ndjson"}

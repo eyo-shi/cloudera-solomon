@@ -13,6 +13,8 @@ from solomon.transport.logging import get_logger
 
 _logger = get_logger(__name__)
 
+BULK_HEADERS = {"Content-Type": "application/x-ndjson"}
+
 
 def ensure_docs_index(
     client: Any,
@@ -118,7 +120,11 @@ def bulk_index_doc_chunks(
             )
         if not actions:
             continue
-        ok_count, bulk_errors = bulk(client, actions, refresh=False)
+        # CDP Semantic Search の gateway は application/json の body を正規化して
+        # 末尾改行を落とすため、_bulk は ndjson で送る
+        ok_count, bulk_errors = bulk(
+            client, actions, refresh=False, headers=BULK_HEADERS
+        )
         indexed += int(ok_count)
         if bulk_errors:
             errors.extend(str(e) for e in bulk_errors[:5])
