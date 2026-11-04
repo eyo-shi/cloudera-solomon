@@ -74,6 +74,31 @@ def _list_dataset_documents(config: Any, q: str, limit: int) -> list[dict[str, A
     return hits
 
 
+def _search_business_documents(
+    config: Any, q: str, limit: int, *, strict: bool
+) -> list[dict[str, Any]]:
+    """業務文書チャンクを検索し、文書単位 (最高スコアのチャンク) で返す。
+
+    ``strict=False`` (scope=both) では文書インデックスが無くても空で返す。
+    """
+    result = search_documents(config, q, top_k=limit, group_by_doc=True)
+    if result.get("status") == "error":
+        missing = result.get("error_code") == "OPENSEARCH_DOCS_INDEX_MISSING"
+        if not strict and missing:
+            return []
+        raise HTTPException(
+            status_code=404 if missing else 502,
+            detail={
+                "error_code": result.get("error_code"),
+                "message": result.get("message"),
+            },
+        )
+    return [
+        {**doc, "document_type": "doc", "index": config.docs_index_name}
+        for doc in result.get("documents") or []
+    ]
+
+
 @router.get("/diagnostics")
 def search_diagnostics(
     _user_ctx: Annotated[UserContext, Depends(require_user_context)],
@@ -176,44 +201,21 @@ def list_documents(
     if effective_scope not in ("datasets", "docs", "both"):
         effective_scope = search_tab_scope()
 
+    query = q.strip()
+    # documents は scope によらず常に配列 (Search タブは配列として描画する)。
+    # 業務文書は検索語が必要なので、空の q では datasets だけ (docs は空) を返す
     try:
         if effective_scope == "docs":
-            if not q.strip():
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error_code": "BAD_REQUEST",
-                        "message": "docs scope requires non-empty q",
-                    },
-                )
-            result = search_documents(config, q.strip(), top_k=limit)
-            if result.get("status") == "error":
-                raise HTTPException(
-                    status_code=404
-                    if result.get("error_code") == "OPENSEARCH_DOCS_INDEX_MISSING"
-                    else 502,
-                    detail={
-                        "error_code": result.get("error_code"),
-                        "message": result.get("message"),
-                    },
-                )
-            documents = result.get("documents") or []
+            documents = (
+                _search_business_documents(config, query, limit, strict=True)
+                if query
+                else []
+            )
             index_name = config.docs_index_name
-        elif effective_scope == "both" and q.strip():
-            ds_docs = _list_dataset_documents(config, q.strip(), limit)
-            doc_result = search_documents(config, q.strip(), top_k=limit)
-            documents = {
-                "datasets": ds_docs,
-                "docs": doc_result.get("documents") or [],
-            }
+        elif effective_scope == "both" and query:
+            documents = _list_dataset_documents(config, query, limit)
+            documents += _search_business_documents(config, query, limit, strict=False)
             index_name = f"{config.index_name},{config.docs_index_name}"
-            return {
-                "index": index_name,
-                "namespace": config.namespace,
-                "scope": effective_scope,
-                "query": q,
-                "documents": documents,
-            }
         else:
             documents = _list_dataset_documents(config, q.strip(), limit)
             index_name = config.index_name

@@ -84,7 +84,7 @@ export interface GraphTabRef {
 }
 
 // ---------------- Search ---------------- //
-export type SearchDocumentScope = "inspection" | "datasets" | "both";
+export type SearchDocumentScope = "inspection" | "datasets" | "docs" | "both";
 
 export interface SearchDocumentEntry {
   document_type?: "inspection" | "dataset" | "doc";
@@ -115,6 +115,9 @@ export interface SearchDocumentEntry {
     text?: string | null;
   }>;
   text?: string | null;
+  /** 業務文書の検索ヒット: 章・節 / 本文の抜粋 */
+  section?: string | null;
+  snippet?: string | null;
 }
 export interface SearchDocumentsResponse {
   index: string;
