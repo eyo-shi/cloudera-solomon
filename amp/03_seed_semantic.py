@@ -1,7 +1,7 @@
 """AMP セットアップ Step 3: Ossie 用 semantic/ を Git 初期化する。
 
 semantic/models/ を用意し、Git 管理下に
-置く (既に .git があれば no-op)。Ossie Drafter が PR ベースで YAML を積める
+置く (既に .git があれば no-op)。Ossie YAML をバージョン管理できる
 状態にすることが目的。
 
 外部 Git remote は AMP セットアップ画面では設定しない (組織ごとに異なるため)。

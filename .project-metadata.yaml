@@ -18,23 +18,25 @@ runtimes:
 # ---------------------------------------------------------------------------
 # Deploy フォーム (AMP Configuration 画面に表示される Environment Variables)
 #
-# 方針: Deploy 時は MODE 選択のみ。PuppyGraph Bolt URI は post-deploy の
-# .solomon/deploy.env (PUPPYGRAPH_URI)。Trino / S3 は
-# Site Administration → Data Connections が single source of truth。
-# 接続 URI・launcher チューニング・LLM / CDV は Deploy 後に
-# Project → Settings → Advanced → Environment Variables で設定する。
+# 方針: Deploy 時は MODE 選択のみ。接続先・認証・launcher チューニング・LLM / CDV は
+# Deploy 後に .solomon/deploy.env (テンプレ deploy/deploy.env.example) に書いて
+# Solomon Application を Restart する。Project → Settings → Environment Variables
+# にも設定でき、非空ならそちらが deploy.env より優先される。
+# Trino は env のみ (Data Connection 不使用)。OpenSearch / S3 は Data Connection
+# または env (S3 は IDBroker 推奨)。
 #
 # --- Deploy フォームに含めない項目 (post-deploy 参照) ---
 #
-# [PuppyGraph] post-deploy .solomon/deploy.env:
-#   PUPPYGRAPH_URI (bolt://host:7687), catalog/schema は PuppyGraph 側
+# [external PuppyGraph] PUPPYGRAPH_MODE=external のとき:
+#   PUPPYGRAPH_URI (bolt://host:7687), PUPPYGRAPH_USERNAME / PUPPYGRAPH_PASSWORD
+#   catalog / graph schema は PuppyGraph 側で定義
 #
 # [external OpenSearch] OPENSEARCH_MODE=external のとき:
 #   OPENSEARCH_CONNECTION_NAME または OPENSEARCH_ENDPOINT,
 #   OPENSEARCH_NAMESPACE, OPENSEARCH_USERNAME / OPENSEARCH_PASSWORD
 #
 # [external Trino] TRINO_MODE=external のとき:
-#   TRINO_URL または TRINO_HOST 等 (README 参照)
+#   TRINO_URL または TRINO_HOST 等 (README 参照)。Knox なしなら TRINO_USER / TRINO_PASSWORD
 #
 # [internal モード optional] launcher 既定値で動作。変更する場合のみ post-deploy:
 #   OPENSEARCH_MEMORY (2Gi), OPENSEARCH_USE_PVC (false),
@@ -67,7 +69,7 @@ environment_variables:
     description: >-
       Trino / Tables 接続方式。external (デフォルト) = CDW Trino — Deploy 後に
       TRINO_URL 等を設定。internal = warehouse-launcher (Trino + DuckDB デモ) —
-      Data Connection または TRINO_HOST を設定。
+      接続先は .solomon/trino_endpoints.json から自動解決 (DNS 不通時のみ TRINO_ENDPOINT)。
     required: false
 
 # ---------------------------------------------------------------------------
@@ -113,9 +115,9 @@ tasks:
     script: amp/03_seed_semantic.py
     short_summary: semantic/ を Git 管理下に置き、Ossie 用ディレクトリを用意
     long_summary: >-
-      semantic/{datasets,metrics,relationships,prompts,index} を作成し、
-      Ossie Drafter が draft を PR ベースで積めるようにする。既に .git があれば
-      スキップ。commit author は Workbench のユーザー ID を使う。
+      semantic/models/ を作成して Git 初期化し、Ossie YAML をバージョン管理
+      できるようにする。既に .git があればスキップ。remote は組織ごとに異なるため
+      Deploy 後に Terminal から git remote add する。
     kernel: python3
     cpu: 1
     memory: 2
@@ -126,8 +128,8 @@ tasks:
     script: amp/04_verify_manifest.py
     short_summary: python -m solomon.manifest --check で Python ⇄ YAML drift を検出
     long_summary: >-
-      agent_studio_manifest/ 配下の YAML が solomon.tools / solomon.ingestion.crew の
-      Python 定義と一致していることを確認する。ズレていたら AMP セットアップは
+      agent_studio_manifest/ 配下の YAML が solomon.tools / solomon.router.crew /
+      solomon.analytics.crew の Python 定義と一致していることを確認する。ズレていたら AMP セットアップは
       失敗する (Model C ハイブリッドの契約)。
     kernel: python3
     cpu: 1
@@ -205,7 +207,7 @@ tasks:
     short_summary: FastAPI + SPA を Workbench Application として起動
     long_summary: >-
       amp/05_start_application.py が CDSW_APP_PORT を待って uvicorn で FastAPI
-      ``app`` を localhost bind する。/api/* と SPA (/) を配信。Knox JWT は
+      app を localhost bind する。/api/* と SPA (/) を配信。Knox JWT は
       X-Forwarded-User /
       Cookie から抽出し、Trino / CDV / IDBroker へパススルーする。LLM / Trino /
       Post-deploy env は .solomon/deploy.env を起動時に読み込む (Project Settings

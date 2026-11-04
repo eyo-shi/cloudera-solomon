@@ -1,4 +1,4 @@
-# S3 接続（Storage タブ・取り込み・プレビュー）
+# S3 接続（Storage タブ・ファイルプレビュー・チャット添付）
 
 Solomon は **AWS アクセスキーを Application env に置きません**。資格情報は次のどちらかです。
 
@@ -13,12 +13,17 @@ Solomon は **AWS アクセスキーを Application env に置きません**。�
 
 ---
 
-## 必須 env（IDBroker 経路・go01-demo 想定）
+## 必須 env（IDBroker 経路）
+
+CML では `.solomon/deploy.env` に書いて Solomon Application を Restart する。
 
 ```text
-SOLOMON_IDBROKER_URL=https://<Knox-gateway-base>   # クラスタの IDBroker / CAB 用ベース URL
-SOLOMON_AWS_REGION=us-east-1                        # データレイクのリージョン
-SOLOMON_S3_BUCKETS=eyda-buk-edf7cfcf                # Storage タブに出すバケット（カンマ区切り可）
+# クラスタの IDBroker / CAB 用ベース URL
+SOLOMON_IDBROKER_URL=https://<Knox-gateway-base>
+# データレイクのリージョン（S3 Data Connection に region があればそちらが優先）
+AWS_REGION=us-east-1
+# Storage タブに出すバケット（カンマ区切り可）
+SOLOMON_S3_BUCKETS=your-bucket
 ```
 
 - **`SOLOMON_S3_BUCKETS`**: UI が `ListObjects` するバケット名。未設定時は `demo-bucket` になり、実環境では **404 / AccessDenied** になりやすい。
@@ -36,9 +41,9 @@ SOLOMON_S3_ENDPOINT_URL=https://...
 
 | シナリオ | S3 |
 |----------|-----|
-| 事前投入済み **Trino / PuppyGraph / OpenSearch** だけ見せる QA | **不要**（Storage・取り込みチャットを使わない） |
+| 事前投入済み **Trino / PuppyGraph / OpenSearch** だけ見せる QA | **不要**（Storage タブ・チャット添付を使わない） |
 | **Storage** タブで Bronze パスを見せる | **必要**（上記 env + ユーザーに S3 読取権限） |
-| チャットから **取り込み** | **必要** |
+| チャットへの **ファイル添付**（`POST /api/files/upload`） | **必要** |
 
 ---
 
@@ -69,12 +74,12 @@ Application Log で **`idbroker.access_denied` / HTTP 401** のとき:
 
 Log の body に **`missing required token audience`** がある場合:
 
-- **Mappings を Sync 済みでも起こり得る**。CAB が欲しいのは Workbench Cookie や ``/tmp/jwt`` ではなく、多くの場合 **Knox delegation token**（`…/gateway/dt/knoxtoken/api/v1/token` の `access_token`）です。
+- **Mappings を Sync 済みでも起こり得る**。CAB が欲しいのは Workbench Cookie や `/tmp/jwt` ではなく、多くの場合 **Knox delegation token**（`…/gateway/dt/knoxtoken/api/v1/token` の `access_token`）です。
 - Solomon は CAB 呼び出し前に **knoxtoken API** へセッション / workload JWT（および Session では Kerberos SPNEGO が使えるとき）で交換を試みます（`SOLOMON_KNOXTOKEN_URL` で URL を上書き可）。
 - **Session での切り分け**（Kerberos ログイン済み notebook）:
 
 ```bash
-IDB=go01-aw-dl-md-idbroker0.go01-dem.ylcu-atmi.cloudera.site
+IDB=<env>-idbroker0.<env-domain>.cloudera.site   # 実環境の IDBroker ホスト名
 TOKEN="$(curl -s --negotiate -u: "https://${IDB}:8444/gateway/dt/knoxtoken/api/v1/token" \
   | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
 curl -s -H "Authorization: Bearer ${TOKEN}" \
