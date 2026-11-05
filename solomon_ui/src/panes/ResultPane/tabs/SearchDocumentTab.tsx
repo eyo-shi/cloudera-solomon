@@ -129,6 +129,16 @@ function LegacyDocumentBody({ doc }: { doc: SearchDocumentEntry }) {
 export function SearchDocumentTab({ tab }: Props) {
   const doc = asDocument(tab.ref);
   if (!doc) return <p className="placeholder">ドキュメント参照がありません</p>;
+  if (doc.load_state === "loading") {
+    return <p className="placeholder">文書を読み込んでいます…</p>;
+  }
+  if (doc.load_state === "error") {
+    return (
+      <p className="placeholder">
+        文書を取得できませんでした: {doc.load_error ?? "unknown error"}
+      </p>
+    );
+  }
 
   return (
     <div className="tab-content tab-content--search-document">
@@ -158,8 +168,8 @@ export function openSearchDocumentTab(
   openTab: ReturnType<typeof useTabStore.getState>["openTab"],
   doc: SearchDocumentEntry,
   title: string,
-): void {
-  openTab({
+): string {
+  return openTab({
     title,
     kind: "search_document",
     ref: { document: { ...doc } },

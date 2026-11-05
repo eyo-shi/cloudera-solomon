@@ -1,7 +1,7 @@
 import { apiFetch } from "../../api/client";
 import { openSearchDocumentTab } from "../ResultPane/tabs/SearchDocumentTab";
 import type { SearchDocumentEntry } from "../../types";
-import type { useTabStore } from "../../stores/tabStore";
+import { useTabStore } from "../../stores/tabStore";
 
 import { normalizeSolomonHref } from "./solomonAppLinks";
 
@@ -57,6 +57,7 @@ export async function openSearchDocumentFromLink(
         doc_id: docId,
         chunk_id: params.get("chunk_id"),
         title: docId,
+        load_state: "loading",
       }
     : {
         object_key: objectKey,
@@ -65,27 +66,28 @@ export async function openSearchDocumentFromLink(
         index: params.get("index"),
         vb_machine_no: params.get("vb_machine_no"),
         title: objectKey.split("/").filter(Boolean).pop() ?? objectKey,
+        load_state: "loading",
       };
 
   const titleFromStub =
     stub.title ??
     (docId || objectKey.split("/").filter(Boolean).pop()) ??
     "document";
-  openSearchDocumentTab(openTab, stub, String(titleFromStub));
+  // openTab は同じ dedupeKey の既存タブを差し替えない（フォーカスのみ）。
+  // 取得結果は返ってきたタブ id に patch して、空のスタブが残らないようにする。
+  const tabId = openSearchDocumentTab(openTab, stub, String(titleFromStub));
+  const { patchTabRef } = useTabStore.getState();
 
   try {
     const doc = await fetchSearchDocument(params);
-    openSearchDocumentTab(
-      openTab,
-      doc,
-      doc.title ??
-        (doc.object_key
-          ? doc.object_key.split("/").filter(Boolean).pop()
-          : null) ??
-        doc.doc_id ??
-        String(titleFromStub),
-    );
-  } catch {
-    /* 404 等 — stub タブのまま */
+    patchTabRef(tabId, { document: { ...doc, load_state: undefined } });
+  } catch (err) {
+    patchTabRef(tabId, {
+      document: {
+        ...stub,
+        load_state: "error",
+        load_error: err instanceof Error ? err.message : String(err),
+      },
+    });
   }
 }

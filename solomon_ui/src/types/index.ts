@@ -115,6 +115,9 @@ export interface SearchDocumentEntry {
     text?: string | null;
   }>;
   text?: string | null;
+  /** Chat リンクから開いたタブの取得状態（UI のみ） */
+  load_state?: "loading" | "error";
+  load_error?: string;
   /** 業務文書の検索ヒット: 章・節 / 本文の抜粋 */
   section?: string | null;
   snippet?: string | null;
