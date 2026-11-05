@@ -126,3 +126,36 @@ def test_mfg_scenario_questions_in_ossie() -> None:
     examples = set(all_examples(MFG / "semantic"))
     for q in list_questions(scenario):
         assert q["prompt"] in examples
+
+
+@pytest.mark.skipif(not MFG.is_dir(), reason="mfg_quality missing")
+def test_mfg_check_lineage_runs_all_queries(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from demo.mfg_quality import check_lineage
+    from solomon.rag import agent_tools
+    from solomon.semantic import context as sem_context
+
+    monkeypatch.setenv("SOLOMON_SEMANTIC_ROOT", str(MFG / "semantic"))
+    monkeypatch.setattr("solomon.infra.deploy_env.bootstrap_deploy_env", lambda **_kw: None)
+    sem_context.get_semantic_context(force=True)
+    sqls: list[str] = []
+    cyphers: list[tuple[str, dict]] = []
+
+    def fake_sql(_u: object, *, question: str, sql: str | None = None, **_kw: object) -> dict:
+        sqls.append(sql or "")
+        return {"status": "ok", "columns": ["a"], "rows": [["x"]], "row_count": 1}
+
+    def fake_graph(_u: object, *, cypher: str, params: dict | None = None) -> dict:
+        cyphers.append((cypher, params or {}))
+        return {"status": "error", "message": "boom"}
+
+    monkeypatch.setattr(agent_tools, "run_sql_query", fake_sql)
+    monkeypatch.setattr(agent_tools, "run_graph_query", fake_graph)
+
+    assert check_lineage.main() == 1
+    out = capsys.readouterr().out
+    assert len(sqls) == 3 and "WITH RECURSIVE up" in sqls[1] and "WITH RECURSIVE down" in sqls[2]
+    assert len(cyphers) == 3
+    assert all(not agent_tools.missing_cypher_params(c, p) for c, p in cyphers)
+    assert "error: boom" in out and "NG  Graph 下流" in out

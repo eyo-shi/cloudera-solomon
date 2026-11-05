@@ -523,6 +523,42 @@ class TestToolCache:
         assert "同じ引数で実行済み" in second
 
 
+class TestToolFailureVisibility:
+    def test_failed_tool_end_event_carries_error(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_TOOL_MODE", "json")
+        from solomon.rag import agent_tools
+
+        monkeypatch.setattr(
+            agent_tools,
+            "run_sql_query",
+            lambda _u, **kw: {"status": "error", "message": "line 1:5: mismatched input"},
+        )
+        seq = [
+            _json_action("1", "sql_query", {"question": "q", "sql": "WITH RECURSIVE x"}),
+            _json_final("2", "## done"),
+        ]
+        monkeypatch.setattr("solomon.rag.agent._litellm_completion", lambda **kw: seq.pop(0))
+        monkeypatch.setattr("solomon.rag.agent.build_system_prompt", lambda **_kw: "sys")
+        events: list[dict[str, Any]] = []
+
+        run_knowledge_agent("q", user_ctx=None, on_event=events.append)  # type: ignore[arg-type]
+        ends = [e for e in events if e.get("type") == "tool_end"]
+        assert ends and ends[0]["ok"] is False
+        assert "mismatched input" in ends[0]["error"]
+
+    def test_tool_end_message_shows_error(self) -> None:
+        from solomon.api.routes.wish import _format_tool_end_message
+
+        failed = _format_tool_end_message(
+            "graph_query", {"ok": False, "duration_ms": 12, "error": "Unknown label\n Foo"}
+        )
+        assert failed == "graph_query: error 12ms — Unknown label Foo"
+        ok = _format_tool_end_message("sql_query", {"ok": True, "duration_ms": 5, "count": 3})
+        assert ok == "sql_query: 3 hits, 5ms"
+
+
 class TestStepBudget:
     def test_native_mode_warns_when_two_steps_remain(
         self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None

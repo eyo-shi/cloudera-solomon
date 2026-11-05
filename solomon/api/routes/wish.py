@@ -504,6 +504,16 @@ def _format_tool_start_message(name: str, args: dict[str, Any]) -> str:
     return name
 
 
+def _format_tool_end_message(name: str, ev: dict[str, Any]) -> str:
+    ms = ev.get("duration_ms", 0)
+    if not ev.get("ok") and ev.get("error"):
+        err = " ".join(str(ev["error"]).split())
+        if len(err) > 200:
+            err = err[:197] + "..."
+        return f"{name}: error {ms}ms — {err}"
+    return f"{name}: {ev.get('count', 0)} hits, {ms}ms"
+
+
 async def _handle_knowledge_rag(
     *,
     request: Request,
@@ -599,13 +609,11 @@ async def _handle_knowledge_rag(
                             activity=_sse_activity_for_tool(name),
                         )
                     else:
-                        cnt = ev.get("count", 0)
-                        ms = ev.get("duration_ms", 0)
                         st = "done" if ev.get("ok") else "error"
                         yield sse_step(
                             "KnowledgeAgent",
                             st,
-                            f"{name}: {cnt} hits, {ms}ms",
+                            _format_tool_end_message(name, ev),
                             activity=_sse_activity_for_tool(name),
                         )
 
@@ -627,13 +635,11 @@ async def _handle_knowledge_rag(
                     )
                     if narr:
                         yield sse_narrative(narr)
-            cnt = ev.get("count", 0)
-            ms = ev.get("duration_ms", 0)
             st = "done" if ev.get("ok") else "error"
             yield sse_step(
                 "KnowledgeAgent",
                 st,
-                f"{name}: {cnt} hits, {ms}ms",
+                _format_tool_end_message(name, ev),
                 activity=_sse_activity_for_tool(name),
             )
 

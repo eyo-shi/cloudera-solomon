@@ -761,6 +761,16 @@ def _run_tool(
     elapsed = time.perf_counter() - t0
     ok = result.get("status") == "ok"
     cache[key] = result
+    error = "" if ok else str(result.get("message") or "error")
+    if not ok:
+        # 失敗した呼び出しは根拠に残らないので、原因調査用にクエリごとログへ出す
+        _logger.warning(
+            "rag_agent.tool_failed",
+            tool=name,
+            error=error[:1000],
+            query=str(args.get("sql") or args.get("cypher") or args.get("query") or "")[:2000],
+            params=args.get("params"),
+        )
 
     if on_event:
         end_ev: dict[str, Any] = {
@@ -770,6 +780,8 @@ def _run_tool(
             "duration_ms": int(elapsed * 1000),
             "count": _tool_count(result),
         }
+        if error:
+            end_ev["error"] = error[:300]
         if isinstance(result.get("expanded_queries"), list):
             end_ev["expanded_queries"] = result["expanded_queries"]
         if result.get("query"):
