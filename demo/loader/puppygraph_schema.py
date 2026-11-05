@@ -130,7 +130,9 @@ def build_trino_schema(domain: DomainModel, *, catalog_name: str | None = None) 
                 "label": label,
                 "dataSourceGroup": _external_source(catalog, spec, [id_field, *props]),
                 "id": [{"name": id_field, "type": types[id_field]}],
-                "attribute": [{"name": p, "type": types[p]} for p in props if p != id_field],
+                "attribute": [
+                    {"name": p, "type": types[p]} for p in _with_id_attribute(id_field, props)
+                ],
             }
         )
     for spec, edge, elabel, fl, tl, ff, tf in _edge_specs(domain, labels):
@@ -153,6 +155,15 @@ def build_trino_schema(domain: DomainModel, *, catalog_name: str | None = None) 
         "node": nodes,
         "edge": edges,
     }
+
+
+def _with_id_attribute(id_field: str, props: list[str]) -> list[str]:
+    """ID 列も属性に入れる。
+
+    PuppyGraph の ID 列は ``attribute`` に無いとプロパティとして読めず、
+    ``(n:Lot {lot_id: $x})`` や ``n.lot_id`` が警告付きで null になる。
+    """
+    return [id_field, *(p for p in props if p != id_field)]
 
 
 def _vertex_specs(domain: DomainModel) -> list[tuple[TableSpec, str, str, list[str]]]:
@@ -238,7 +249,10 @@ def build_puppygraph_schema(
                             "table": spec.table,
                         },
                         "id": {"fields": [id_field]},
-                        "attributes": [{"field": p, "alias": p} for p in props],
+                        "attributes": [
+                            {"field": p, "alias": p}
+                            for p in _with_id_attribute(id_field, props)
+                        ],
                     },
                 }
             )

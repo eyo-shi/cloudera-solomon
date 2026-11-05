@@ -268,7 +268,11 @@ def test_puppygraph_trino_schema(neutral_domain: Path, monkeypatch: pytest.Monke
     src = node["dataSourceGroup"]["externalDataSource"]
     assert (src["catalog"], src["schema"], src["table"]) == (cat["name"], "demo_schema", "entities")
     assert node["id"] == [{"name": "entity_id", "type": "STRING"}]
-    assert node["attribute"] == [{"name": "name", "type": "STRING"}]
+    # ID 列も属性に入れないと Cypher の {entity_id: ...} / n.entity_id が null になる
+    assert node["attribute"] == [
+        {"name": "entity_id", "type": "STRING"},
+        {"name": "name", "type": "STRING"},
+    ]
     edge = schema["edge"][0]
     assert (edge["fromNodeLabel"], edge["toNodeLabel"]) == ("Entity", "Entity")
     assert edge["id"] == [{"name": "link_id", "type": "STRING"}]

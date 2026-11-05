@@ -28,8 +28,14 @@ def _show(title: str, expect: str, result: dict[str, Any]) -> bool:
     print(f"status={result.get('status')} rows={count if ok else '-'}")
     if not ok:
         print(f"error: {result.get('message')}")
-        for att in result.get("attempts") or []:
-            print(f"  attempt: {str(att)[:400]}")
+        # 最後のエラーは LLM が直した SQL のものなので、元の SQL のエラーも出す
+        for i, att in enumerate(result.get("attempts") or [], start=1):
+            if not isinstance(att, dict):
+                print(f"  attempt {i}: {str(att)[:400]}")
+                continue
+            sql_head = " ".join(str(att.get("sql") or "").split())[:160]
+            print(f"  attempt {i} sql: {sql_head}…")
+            print(f"  attempt {i} error: {str(att.get('error') or '')[:600]}")
     cols = result.get("columns")
     if cols:
         print("  " + " | ".join(str(c) for c in cols))
