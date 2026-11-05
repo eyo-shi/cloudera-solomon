@@ -546,6 +546,7 @@ class TestRagSources:
         from solomon.semantic import store as store_mod
 
         store_mod.load_models(force=True)
+        monkeypatch.setattr("solomon.rag.agent.get_trino_config", lambda: None)
 
         prompt = build_system_prompt(
             enabled_sources=frozenset({"table"}),
@@ -555,6 +556,44 @@ class TestRagSources:
         assert "文書インデックス" not in prompt
         assert "グラフ実行スキーマ" not in prompt
         assert "テーブルカタログ" in prompt
+
+    def test_system_prompt_gives_columns_joins_and_verified_sql(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """agent が sql を自分で書けるよう、列・結合キー・検証済みクエリ例を渡す。"""
+        from unittest import mock
+
+        from solomon.rag.agent import build_system_prompt
+        from solomon.semantic import store as store_mod
+        from solomon.tools.schema_context import clear_schema_context_caches
+
+        monkeypatch.setenv(
+            "SOLOMON_SEMANTIC_ROOT",
+            str(
+                __import__("pathlib").Path(__file__).resolve().parent
+                / "fixtures"
+                / "semantic"
+                / "sample_orders"
+            ),
+        )
+        store_mod.load_models(force=True)
+        clear_schema_context_caches()
+        monkeypatch.setattr(
+            "solomon.rag.agent.get_trino_config",
+            lambda: mock.Mock(catalog="demo_catalog", schema="demo_schema"),
+        )
+
+        prompt = build_system_prompt(
+            enabled_sources=frozenset({"table"}),
+            disabled_sources=[],
+            tool_names=["sql_query"],
+            question="order count by client",
+        )
+        assert "## テーブルスキーマ（sql_query 用）" in prompt
+        assert "### demo_catalog.demo_schema.orders" in prompt
+        assert "customer_id = orders.customer_id" in prompt
+        assert "Verified query examples" in prompt
+        assert "sql_query には sql を書いて渡す" in prompt
 
     def test_text2sql_skips_opensearch_when_search_disabled(
         self, monkeypatch: pytest.MonkeyPatch

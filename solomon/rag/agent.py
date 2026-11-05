@@ -18,8 +18,9 @@ from solomon.rag.models import (
     RetrievalPlan,
     SourceHit,
 )
-from solomon.transport.config import get_llm_agent_config
+from solomon.transport.config import get_llm_agent_config, get_trino_config
 from solomon.transport.llm import _parse_json_lenient, _text_completion_kwargs
+from solomon.transport.llm import strip_reasoning as _strip_reasoning
 from solomon.transport.logging import get_logger
 from solomon.transport.user_context import UserContext
 
@@ -29,6 +30,7 @@ ToolMode = Literal["auto", "native", "json"]
 EventCallback = Callable[[dict[str, Any]], None]
 
 _RESULT_MAX_CHARS = 6000
+_FINAL_TURN_MAX_TOKENS = 4096
 _JSON_SYSTEM_TAIL = (
     "各ターンは必ず次の JSON オブジェクトのどちらか 1 つだけを返す（説明文やコードフェンスは禁止）。\n"
     '1) ツール実行: {{"thought": "...", "action": "<tool名>", "args": {{...}}}}\n'
@@ -84,8 +86,6 @@ def _history_messages(
     return out
 
 
-_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-_THINK_CLOSE = "</think>"
 _TOOL_CALL_RE = re.compile(
     r"<tool_call>(.*?)(?:</tool_call>|\Z)", re.DOTALL | re.IGNORECASE
 )
@@ -96,17 +96,6 @@ _XML_PARAM_RE = re.compile(
     r"<parameter=([^>\s]+)\s*>(.*?)(?=</parameter>|<parameter=|</function>|\Z)",
     re.DOTALL | re.IGNORECASE,
 )
-
-
-def _strip_reasoning(text: Any) -> str:
-    """``<think>…</think>`` を除去する。開始タグ欠落時は ``</think>`` までを捨てる。"""
-    if not isinstance(text, str):
-        return ""
-    out = _THINK_BLOCK_RE.sub("", text)
-    idx = out.lower().rfind(_THINK_CLOSE)
-    if idx >= 0:
-        out = out[idx + len(_THINK_CLOSE) :]
-    return out.strip()
 
 
 def _coerce_param_value(raw: str) -> Any:
@@ -218,13 +207,47 @@ def _load_graph_schema_text() -> str:
         return "（グラフスキーマ情報を取得できませんでした）"
 
 
-def _semantic_sections_for_sources(enabled_sources: frozenset[str]) -> list[str]:
+_TABLE_SCHEMA_MAX_CHARS = 12000
+
+
+def _table_schema_section(question: str, user_ctx: UserContext | None) -> str:
+    """sql_query 用のスキーマ（列・結合キー・検証済みクエリ例）。
+
+    テーブル名だけでは agent が SQL を書けず、自然言語 → SQL の二重生成に頼ることになるため、
+    Text2SQL と同じスキーマ文脈を渡す。Trino 未設定時は名前だけのカタログに落とす。
+    """
+    from solomon.semantic.context import render_table_catalog
+    from solomon.tools.schema_context import build_schema_context
+
+    trino_cfg = get_trino_config()
+    if trino_cfg is not None:
+        try:
+            block = build_schema_context(
+                question,
+                catalog=trino_cfg.catalog,
+                schema=trino_cfg.schema,
+                user_ctx=user_ctx,
+                max_chars=_TABLE_SCHEMA_MAX_CHARS,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("rag_agent.schema_context_failed", error=str(exc))
+            block = ""
+        if "\n### " in f"\n{block}":
+            return "## テーブルスキーマ（sql_query 用）\n" + block
+    return render_table_catalog(max_chars=6000)
+
+
+def _semantic_sections_for_sources(
+    enabled_sources: frozenset[str],
+    *,
+    question: str = "",
+    user_ctx: UserContext | None = None,
+) -> list[str]:
     """Ossie 集約コンテキストとソースカタログ（有効ソースのみ）。"""
     from solomon.semantic.context import (
         render_business_context,
         render_document_catalog,
         render_graph_schema,
-        render_table_catalog,
         render_tool_hints,
     )
     from solomon.semantic.source_catalog import build_source_catalog
@@ -245,7 +268,7 @@ def _semantic_sections_for_sources(enabled_sources: frozenset[str]) -> list[str]
         )
 
     if "table" in enabled_sources:
-        sections.append(render_table_catalog(max_chars=6000))
+        sections.append(_table_schema_section(question, user_ctx))
     if "graph" in enabled_sources:
         labels = catalog.graph.get("ossie_labels") or []
         if labels:
@@ -263,7 +286,10 @@ def build_system_prompt(
     disabled_sources: list[str],
     tool_names: list[str],
     has_history: bool = False,
+    question: str = "",
+    user_ctx: UserContext | None = None,
 ) -> str:
+    """``question`` は検証済みクエリ例の選択、``user_ctx`` はスキーマ取得の認可に使う。"""
     sections: list[str] = [
         "あなたはテーブル・グラフ・文書検索を横断する調査アシスタントです。"
         "質問に答えるために必要な事実を、このセッションで有効なツールだけで集めてください。\n",
@@ -286,13 +312,21 @@ def build_system_prompt(
     if "graph_query" in tool_names:
         tool_help.append("- つながり・多段の追跡・系譜: graph_query")
     if "doc_search" in tool_names:
-        tool_help.append("- 自由記述の文書（理由・経緯・過去事例）: doc_search")
+        tool_help.append(
+            "- 自由記述の文書（理由・経緯・過去事例）: doc_search"
+            "（内部で言い換えも検索するので、同じ目的で言い換えて繰り返さない）"
+        )
     if tool_help:
         sections.append("## ツールの使い分け\n" + "\n".join(tool_help) + "\n")
 
     if "sql_query" in tool_names:
         sections.append(
             "## 件数・一覧・集計を含む質問（sql_query）\n"
+            "- sql_query には sql を書いて渡す。テーブル名・列名・結合キーは"
+            "「テーブルスキーマ」にあるものだけを使う。"
+            "似た質問の検証済みクエリ例があれば、それを今回の条件に合わせて直して使う。\n"
+            "- 条件に使う列の値の表記（コード値・区分名など）が分からないときは、"
+            "先に `SELECT DISTINCT 列 … LIMIT` で確かめてから WHERE に書く。\n"
             "- 質問に件数（「N 件」など）・「すべて」・内訳を求める語があるときは、"
             "LIMIT 付きのサンプル行から推測しない。"
             "質問の条件（対象・種別・症状・期間など）をすべて WHERE に入れ、"
@@ -354,7 +388,9 @@ def build_system_prompt(
         "3. 未確定事項\n"
     )
 
-    for block in _semantic_sections_for_sources(enabled_sources):
+    for block in _semantic_sections_for_sources(
+        enabled_sources, question=question, user_ctx=user_ctx
+    ):
         if block.strip():
             sections.append(block.strip() + "\n")
 
@@ -574,7 +610,7 @@ def _json_turn(
 
     msg = _message_from_response(resp)
     content = msg.get("content")
-    parsed = _parse_json_lenient(_strip_reasoning(content))
+    parsed = _parse_json_lenient(content)
     if parsed is None and not retry:
         return None, True
     return parsed, False
@@ -642,6 +678,8 @@ def run_knowledge_agent(
         disabled_sources=disabled_sources,
         tool_names=tool_names,
         has_history=bool(prior),
+        question=prompt,
+        user_ctx=user_ctx,
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system},
@@ -836,13 +874,14 @@ def run_knowledge_agent(
                 ),
             }
         )
+        # まとめの 1 手は思考 + 長めの Markdown になるので、通常手より token を多く取る
         if use_json:
             parsed, _ = _json_turn(
                 messages,
                 tool_names,
-                max_tokens=2048,
+                max_tokens=_FINAL_TURN_MAX_TOKENS,
                 temperature=0.2,
-                timeout=min(60.0, timeout_sec),
+                timeout=min(90.0, timeout_sec),
                 retry=False,
             )
             if parsed and isinstance(parsed.get("final_answer"), str):
@@ -852,16 +891,23 @@ def run_knowledge_agent(
                 msg = _native_turn(
                     messages,
                     openai_tools,
-                    max_tokens=2048,
+                    max_tokens=_FINAL_TURN_MAX_TOKENS,
                     temperature=0.2,
-                    timeout=min(60.0, timeout_sec),
+                    timeout=min(90.0, timeout_sec),
                     tool_choice="none",
                 )
-                if msg and isinstance(msg.get("content"), str):
+                raw = msg.get("content") if msg else None
+                if isinstance(raw, str):
                     remaining, _ = _parse_text_tool_calls(
-                        _strip_reasoning(msg["content"]), tool_names
+                        _strip_reasoning(raw), tool_names
                     )
                     final_answer = remaining
+                if not final_answer:
+                    _logger.warning(
+                        "rag_agent.final_turn_empty",
+                        content_chars=len(raw) if isinstance(raw, str) else 0,
+                        has_tool_calls=bool(msg and msg.get("tool_calls")),
+                    )
             except Exception as exc:  # noqa: BLE001
                 _logger.warning("rag_agent.final_turn_failed", error=str(exc))
 

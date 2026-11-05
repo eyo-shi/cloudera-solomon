@@ -254,4 +254,43 @@ def test_text2sql_uses_strong_agent(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Text2SQLTool().run(user_ctx=None, question="count orders")
     assert captured.get("agent_key") == "text2sql"
-    assert captured.get("max_tokens") == 2048
+    assert captured.get("max_tokens") == 4096
+    assert captured.get("timeout") == 60.0
+
+
+def test_text2sql_generation_failure_is_an_error_not_a_substitute_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """生成に失敗したとき、別の問い（任意テーブルの件数）を実行して ok を返さない。"""
+    monkeypatch.setattr(
+        "solomon.tools.text2sql.get_trino_config",
+        lambda: mock.Mock(catalog="demo_catalog", schema="demo_schema"),
+    )
+    monkeypatch.setattr(
+        "solomon.tools.text2sql.try_json_completion", lambda *_a, **_k: None
+    )
+    executed: list[Any] = []
+    monkeypatch.setattr(
+        "solomon.tools.text2sql.TrinoQueryTool.run",
+        lambda _self, **kw: executed.append(kw.get("sql")) or {"status": "ok"},
+    )
+
+    out = Text2SQLTool().run(
+        user_ctx=None,
+        question="orders by region",
+        fq_table_hint="demo_catalog.demo_schema.orders",
+        use_search_context=False,
+    )
+    assert out["status"] == "error"
+    assert "Could not generate SQL" in out["message"]
+    assert executed == []
+
+
+def test_run_sql_query_error_hints_explicit_sql(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "solomon.rag.agent_tools.Text2SQLTool.run",
+        lambda *_a, **_k: {"status": "error", "message": "Could not generate SQL from LLM."},
+    )
+    out = run_sql_query(None, question="q")
+    assert out["status"] == "error"
+    assert "sql 引数" in out["hint"]

@@ -97,10 +97,12 @@ def _build_sql_prompt(
 def _llm_sql(
     prompt: str,
 ) -> tuple[str | None, str]:
+    # strong は推論モデルのことがあり、思考に token と時間を使うため余裕を持たせる
     parsed = try_json_completion(
         prompt,
         agent_key="text2sql",
-        max_tokens=2048,
+        max_tokens=4096,
+        timeout=60.0,
     )
     if not parsed or not isinstance(parsed.get("sql"), str):
         return None, ""
@@ -264,41 +266,15 @@ class Text2SQLTool(BaseSolomonTool):
             schema_block=schema_block,
         )
 
+        # 生成失敗時に別の質問（任意テーブルの件数）へ差し替えると、
+        # 呼び出し元がそれを答えとして扱ってしまうため、失敗はそのまま返す。
         if pipeline.get("status") != "ok":
-            msg = str(pipeline.get("message") or "")
-            if "Could not generate SQL" in msg:
-                fq = fq_table_hint
-                if not fq:
-                    for c in contexts:
-                        fq = c.get("fq_name")
-                        if fq:
-                            break
-                if fq:
-                    pipeline = execute_readonly_sql_with_retry(
-                        user_ctx,
-                        question=question,
-                        catalog=catalog,
-                        schema=schema,
-                        max_rows=max_rows,
-                        sql=f"SELECT COUNT(*) AS row_count FROM {fq} LIMIT 10",
-                        schema_block=schema_block,
-                    )
-                    if pipeline.get("status") == "ok":
-                        pipeline["reasoning"] = (
-                            pipeline.get("reasoning") or "LLM unavailable; fallback COUNT(*)"
-                        )
-            if pipeline.get("status") != "ok":
-                if not contexts and "Could not generate" in msg:
-                    return err(
-                        ErrorCode.TRINO_QUERY_FAILED,
-                        "Could not generate SQL: no dataset context and LLM unavailable.",
-                    )
-                return err(
-                    pipeline.get("error_code", ErrorCode.TRINO_QUERY_FAILED),
-                    str(pipeline.get("message", "text2sql failed")),
-                    sql=pipeline.get("sql"),
-                    attempts=pipeline.get("attempts"),
-                )
+            return err(
+                pipeline.get("error_code", ErrorCode.TRINO_QUERY_FAILED),
+                str(pipeline.get("message", "text2sql failed")),
+                sql=pipeline.get("sql"),
+                attempts=pipeline.get("attempts"),
+            )
 
         return ok(
             {

@@ -135,6 +135,7 @@ def run_sql_query(
             "status": "error",
             "message": result.get("message", "text2sql failed"),
             "error_code": result.get("error_code"),
+            "hint": "テーブルスキーマの列名で SQL を書き、sql 引数に渡して再実行する。",
         }
     rows = result.get("rows") or []
     return {
@@ -243,18 +244,19 @@ def default_agent_tools(
                 name="sql_query",
             description=(
                 "Lakehouse (Trino) で読み取り専用 SQL を実行する。"
-                "sql を省略すると自然言語から SELECT を生成する。"
+                "通常は sql にテーブルスキーマの列名で書いた SELECT / WITH を渡す。"
+                "sql を省略したときだけ question から SQL を生成する（遅く、条件が落ちやすい）。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "分析したい内容（sql 省略時に使用）",
+                        "description": "このクエリで確かめたいこと（ログ・SQL 生成時に使用）",
                     },
                     "sql": {
                         "type": "string",
-                        "description": "実行する SELECT / WITH クエリ（任意）",
+                        "description": "実行する SELECT / WITH クエリ（推奨）",
                     },
                 },
                 "required": ["question"],

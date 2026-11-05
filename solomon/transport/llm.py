@@ -26,6 +26,20 @@ _logger = get_logger(__name__)
 
 # 応答本文から ```json ... ``` フェンスを剥がす
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.DOTALL)
+# 推論モデル（Qwen3 等）が content に書く思考ブロック
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_THINK_CLOSE = "</think>"
+
+
+def strip_reasoning(text: Any) -> str:
+    """``<think>…</think>`` を除去する。開始タグ欠落時は最後の ``</think>`` までを捨てる。"""
+    if not isinstance(text, str):
+        return ""
+    out = _THINK_BLOCK_RE.sub("", text)
+    idx = out.lower().rfind(_THINK_CLOSE)
+    if idx >= 0:
+        out = out[idx + len(_THINK_CLOSE) :]
+    return out.strip()
 
 
 def _completion_config(
@@ -112,36 +126,67 @@ def try_json_completion(
     try:
         resp = litellm.completion(**kwargs)  # type: ignore[attr-defined]
         # OpenAI 互換の choices[0].message.content
-        content = resp["choices"][0]["message"]["content"]  # type: ignore[index]
+        choice = resp["choices"][0]  # type: ignore[index]
+        content = choice["message"]["content"]
     except Exception as e:  # noqa: BLE001
         _logger.warning(
             "llm.completion_failed", provider=cfg.provider, error=str(e)
         )
         return None
 
-    return _parse_json_lenient(content)
+    parsed = _parse_json_lenient(content)
+    if parsed is None:
+        # 呼び出し元は黙ってフォールバックするので、原因（思考で max_tokens 切れ等）をここで残す
+        finish_reason = None
+        try:
+            finish_reason = choice.get("finish_reason")  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            pass
+        _logger.warning(
+            "llm.json_unparsed",
+            agent_key=agent_key,
+            finish_reason=finish_reason,
+            content_chars=len(content) if isinstance(content, str) else 0,
+            text_prefix=strip_reasoning(content)[:120],
+        )
+    return parsed
+
+
+def _first_json_object(text: str) -> Any:
+    """前後に説明文が付いた応答から、最初に読める JSON オブジェクトを取り出す。"""
+    decoder = json.JSONDecoder()
+    pos = text.find("{")
+    while pos >= 0:
+        try:
+            value, _end = decoder.raw_decode(text, pos)
+            return value
+        except json.JSONDecodeError:
+            pos = text.find("{", pos + 1)
+    return None
 
 
 def _parse_json_lenient(text: Any) -> Optional[dict[str, Any]]:
-    """LLM 応答本文 (文字列想定) を JSON dict に落とす。"""
-    if not isinstance(text, str):
-        return None
-    stripped = text.strip()
+    """LLM 応答本文 (文字列想定) を JSON dict に落とす。
+
+    思考ブロック・コードフェンス・前後の説明文には寛容にする。
+    """
+    stripped = strip_reasoning(text)
     if not stripped:
         return None
-    # 直パース
     try:
         value = json.loads(stripped)
     except json.JSONDecodeError:
-        # ```json ... ``` フェンス剥がし
         m = _JSON_FENCE_RE.search(stripped)
-        if not m:
+        value = None
+        if m:
+            try:
+                value = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                value = None
+        if value is None:
+            value = _first_json_object(stripped)
+        if value is None:
             _logger.debug("llm.json_parse_failed", text_prefix=stripped[:80])
-            return None
-        try:
-            value = json.loads(m.group(1))
-        except json.JSONDecodeError:
-            _logger.debug("llm.json_parse_failed_fence", text_prefix=stripped[:80])
             return None
     return value if isinstance(value, dict) else None
 
@@ -190,7 +235,7 @@ def _extract_text_content(resp: Any) -> Optional[str]:
         return None
     if not isinstance(content, str):
         return None
-    stripped = content.strip()
+    stripped = strip_reasoning(content)
     return stripped or None
 
 
@@ -268,4 +313,9 @@ async def try_text_completion_async(
     return _extract_text_content(resp)
 
 
-__all__ = ["try_json_completion", "try_text_completion", "try_text_completion_async"]
+__all__ = [
+    "strip_reasoning",
+    "try_json_completion",
+    "try_text_completion",
+    "try_text_completion_async",
+]

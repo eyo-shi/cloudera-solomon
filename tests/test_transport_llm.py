@@ -173,3 +173,67 @@ def test_model_resolution_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     llm_mod.try_json_completion("q")
     _, kwargs = fake.completion.call_args
     assert kwargs["model"] == "openai/env-model"
+
+
+# ------------------------------------------------------------------ #
+# 推論モデルの思考・前後の説明文に寛容なパース
+# ------------------------------------------------------------------ #
+@pytest.mark.parametrize(
+    "content",
+    [
+        '<think>reason {"x": 0}</think>{"sql": "SELECT 1"}',
+        'reason without open tag {"x": 0}\n</think>\n\n{"sql": "SELECT 1"}',
+        'Here is the query:\n{"sql": "SELECT 1"}\nDone.',
+        '</think>```json\n{"sql": "SELECT 1"}\n```',
+    ],
+)
+def test_parses_json_after_reasoning_or_prose(
+    monkeypatch: pytest.MonkeyPatch, content: str
+) -> None:
+    monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://x")
+    monkeypatch.setenv("CAI_INFERENCE_API_KEY", "k")
+    fake = mock.MagicMock()
+    fake.completion.return_value = {"choices": [{"message": {"content": content}}]}
+    monkeypatch.setitem(sys.modules, "litellm", fake)
+
+    assert llm_mod.try_json_completion("q") == {"sql": "SELECT 1"}
+
+
+def test_unparsed_json_is_logged_with_finish_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://x")
+    monkeypatch.setenv("CAI_INFERENCE_API_KEY", "k")
+    fake = mock.MagicMock()
+    fake.completion.return_value = {
+        "choices": [{"message": {"content": "thinking..."}, "finish_reason": "length"}]
+    }
+    monkeypatch.setitem(sys.modules, "litellm", fake)
+    seen: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        llm_mod._logger, "warning", lambda event, **kw: seen.append({"event": event, **kw})
+    )
+
+    assert llm_mod.try_json_completion("q", agent_key="text2sql") is None
+    assert seen and seen[0]["event"] == "llm.json_unparsed"
+    assert seen[0]["finish_reason"] == "length"
+    assert seen[0]["agent_key"] == "text2sql"
+
+
+def test_strip_reasoning() -> None:
+    assert llm_mod.strip_reasoning("<think>a</think>b") == "b"
+    assert llm_mod.strip_reasoning("a</think>b") == "b"
+    assert llm_mod.strip_reasoning(" plain ") == "plain"
+    assert llm_mod.strip_reasoning(None) == ""
+
+
+def test_text_completion_strips_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CAI_INFERENCE_BASE_URL", "https://x")
+    monkeypatch.setenv("CAI_INFERENCE_API_KEY", "k")
+    fake = mock.MagicMock()
+    fake.completion.return_value = {
+        "choices": [{"message": {"content": "hmm</think>\n## 回答"}}]
+    }
+    monkeypatch.setitem(sys.modules, "litellm", fake)
+
+    assert llm_mod.try_text_completion([{"role": "user", "content": "q"}]) == "## 回答"
