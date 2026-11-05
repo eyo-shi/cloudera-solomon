@@ -138,11 +138,17 @@ def test_mfg_check_lineage_runs_all_queries(
 
     monkeypatch.setenv("SOLOMON_SEMANTIC_ROOT", str(MFG / "semantic"))
     monkeypatch.setattr("solomon.infra.deploy_env.bootstrap_deploy_env", lambda **_kw: None)
+    from solomon.transport.user_context import UserContext
+
+    cli_ctx = UserContext(user_name="cli")
+    monkeypatch.setattr("demo.loader.trino_runtime.loader_user_context", lambda: cli_ctx)
+    ctxs: list[object] = []
     sem_context.get_semantic_context(force=True)
     sqls: list[str] = []
     cyphers: list[tuple[str, dict]] = []
 
     def fake_sql(_u: object, *, question: str, sql: str | None = None, **_kw: object) -> dict:
+        ctxs.append(_u)
         sqls.append(sql or "")
         return {"status": "ok", "columns": ["a"], "rows": [["x"]], "row_count": 1}
 
@@ -156,6 +162,7 @@ def test_mfg_check_lineage_runs_all_queries(
     assert check_lineage.main() == 1
     out = capsys.readouterr().out
     assert len(sqls) == 3 and "WITH RECURSIVE up" in sqls[1] and "WITH RECURSIVE down" in sqls[2]
+    assert all(c is cli_ctx for c in ctxs)
     assert len(cyphers) == 3
     assert all(not agent_tools.missing_cypher_params(c, p) for c, p in cyphers)
     assert "error: boom" in out and "NG  Graph 下流" in out

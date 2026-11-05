@@ -51,9 +51,13 @@ def main() -> int:
 
     bootstrap_deploy_env()
 
+    from demo.loader.trino_runtime import loader_user_context
     from solomon.rag.agent_tools import run_graph_query, run_sql_query
     from solomon.semantic.context import get_semantic_context
     from solomon.transport.config import get_trino_config
+
+    # Trino 接続には UserContext が要る（ローダーと同じく Basic 認証か workload JWT）
+    user_ctx = loader_user_context()
 
     ctx = get_semantic_context(force=True)
     cfg = get_trino_config()
@@ -68,14 +72,14 @@ def main() -> int:
             print(f"\n=== {title}\n（セマンティックモデルにクエリがありません）")
             ok[title] = False
             return
-        ok[title] = _show(title, expect, run_sql_query(None, question=title, sql=text))
+        ok[title] = _show(title, expect, run_sql_query(user_ctx, question=title, sql=text))
 
     def graph(title: str, expect: str, cypher: str, params: dict[str, Any]) -> None:
         if not cypher:
             print(f"\n=== {title}\n（セマンティックモデルに例がありません）")
             ok[title] = False
             return
-        ok[title] = _show(title, expect, run_graph_query(None, cypher=cypher, params=params))
+        ok[title] = _show(title, expect, run_graph_query(user_ctx, cypher=cypher, params=params))
 
     sql(
         "SQL 1 段: ユニットへの投入ロット",
