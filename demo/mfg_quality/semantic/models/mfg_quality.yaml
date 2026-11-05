@@ -21,7 +21,15 @@ custom_extensions:
     - term: ロット
       description: 材料・成形・サブ組立・ユニットの追跡単位
     - term: ロット系譜
-      description: lot_genealogy の親子消費関係
+      description: lot_genealogy の消費関係（child_lot_id = 投入側、parent_lot_id = 生成側）
+    - term: 北陸ケミカル
+      description: 樹脂メーカー（supplier_id SUP-NC）。PA66-GF30 の主サプライヤ
+    - term: 東洋ポリマー
+      description: 代替樹脂メーカー（supplier_id SUP-TP）
+    - term: Tier1 在庫
+      description: 東邦精機（tier 1）が保管する在庫。inventory.tier = 1
+    - term: Tier2 在庫
+      description: 三協モールド（tier 2）が保管する在庫。inventory.tier = 2
     - term: 8D
       description: 8 ディシプリン問題解決レポート
     - term: PPAP
@@ -42,9 +50,15 @@ custom_extensions:
       search: 作業日報・保全・8D・クレーム文書の自由記述
     graph_examples:
     - question: 材料ロットから搭載車種まで
-      cypher: MATCH (r:Lot {lot_id:$lot_id})-[:CONSUMED_BY*1..6]->(u:Lot {lot_type:'UNIT'})-[:SHIPPED_AS]->(:Shipment)-[:FOR_MODEL]->(m:VehicleModel)
-        RETURN m.model_name, count(DISTINCT u) AS units
-      notes: 可変長 CONSUMED_BY
+      cypher: MATCH (r:Lot {lot_id:$lot_id})-[:CONSUMED_BY*1..6]->(u:Lot {lot_type:'UNIT'})
+        WITH DISTINCT u MATCH (u)-[:SHIPPED_AS]->(s:Shipment)-[:FOR_MODEL]->(m:VehicleModel)
+        RETURN u.part_no AS product, m.model_name AS model, count(DISTINCT u) AS unit_lots,
+        sum(s.qty) AS vehicles
+      notes: 可変長 CONSUMED_BY（下流向き）。同じユニットに複数経路で届くので WITH DISTINCT u で重複を除いてから台数を合計する
+    - question: ユニットロットに使われた材料ロット（上流）
+      cypher: MATCH (m:Lot {lot_type:'MATERIAL'})-[:CONSUMED_BY*1..6]->(u:Lot {lot_id:$unit_lot_id})
+        RETURN DISTINCT m.lot_id AS material_lot
+      notes: 矢印は常に投入側 → 生成側。上流は終点にユニットを置く
     search:
       expansion_instructions: 班長の口語・略称・擬音語、保全員の型番、品証の技術用語、ディーラーの利用者語が混在する。
       use_synonyms: false
@@ -54,10 +68,34 @@ custom_extensions:
         iceberg.mfg_quality.unit_lots u ON c.unit_lot_id = u.lot_id WHERE c.model_code
         = 'SX-5' AND c.claim_date >= DATE '2026-10-01' GROUP BY u.lot_id, u.prod_date
       notes: Q1 相当
+    - question: ユニットロットに使われた成形ロットと樹脂ロット（上流トレース）
+      sql: WITH RECURSIVE up(lot_id, depth) AS (SELECT child_lot_id, 1 FROM iceberg.mfg_quality.lot_genealogy
+        WHERE parent_lot_id IN ('U-A200-260601', 'U-A200-260602', 'U-A200-260603') UNION ALL
+        SELECT g.child_lot_id, up.depth + 1 FROM iceberg.mfg_quality.lot_genealogy g JOIN up
+        ON g.parent_lot_id = up.lot_id WHERE up.depth < 8) SELECT DISTINCT l.lot_id, l.lot_type,
+        l.part_no, l.prod_date, l.equipment_id FROM up JOIN iceberg.mfg_quality.lots l ON l.lot_id
+        = up.lot_id WHERE l.lot_type IN ('MOLD', 'MATERIAL') ORDER BY l.lot_type, l.lot_id
+      notes: 上流は parent_lot_id = X から child_lot_id をたどる
+    - question: 樹脂ロットが入った製品・車種・台数（下流トレース）
+      sql: WITH RECURSIVE down(lot_id, depth) AS (SELECT parent_lot_id, 1 FROM iceberg.mfg_quality.lot_genealogy
+        WHERE child_lot_id = 'HC-2605-117' UNION ALL SELECT g.parent_lot_id, down.depth + 1
+        FROM iceberg.mfg_quality.lot_genealogy g JOIN down ON g.child_lot_id = down.lot_id WHERE
+        down.depth < 8), units AS (SELECT DISTINCT u.lot_id, u.part_no FROM down JOIN iceberg.mfg_quality.unit_lots
+        u ON u.lot_id = down.lot_id) SELECT units.part_no, s.oem_id, s.model_code, count(DISTINCT
+        units.lot_id) AS unit_lots, sum(s.qty) AS vehicles FROM units JOIN iceberg.mfg_quality.shipments
+        s ON s.unit_lot_id = units.lot_id GROUP BY units.part_no, s.oem_id, s.model_code ORDER
+        BY s.model_code
+      notes: 下流は child_lot_id = X から parent_lot_id をたどる。段数は品目により 3〜5 段なので固定 JOIN は不可。ユニットを DISTINCT してから台数を合計する
+    - question: 材料の代替サプライヤ切替で影響する部品と PPAP 状況
+      sql: SELECT a.part_no, p.name, a.ppap_status FROM iceberg.mfg_quality.supplier_alternatives
+        a JOIN iceberg.mfg_quality.parts p ON p.part_no = a.part_no WHERE a.material_part_no =
+        'PA66-GF30' AND a.supplier_id = 'SUP-NC' AND a.alt_supplier_id = 'SUP-TP' ORDER BY a.ppap_status,
+        a.part_no
+      notes: SUP-NC = 北陸ケミカル、SUP-TP = 東洋ポリマー
 datasets:
 - name: suppliers
   source: iceberg.mfg_quality.suppliers
-  description: テーブル suppliers
+  description: サプライヤマスタ。tier 1=東邦精機（自社）、2=三協モールド（成形）、3=樹脂メーカー（北陸ケミカル / 東洋ポリマー）。
   fields:
   - name: supplier_id
     datatype: String
@@ -89,11 +127,14 @@ datasets:
           - tier
 - name: supplier_alternatives
   source: iceberg.mfg_quality.supplier_alternatives
-  description: テーブル supplier_alternatives
+  description: 代替サプライヤと PPAP 状況。1 行 = 材料 material_part_no を使う部品 part_no について、主サプライヤ supplier_id から代替 alt_supplier_id へ切り替える場合の PPAP 状態（APPROVED / PENDING）。
   fields:
   - name: material_part_no
     datatype: String
     description: 材料品番
+  - name: part_no
+    datatype: String
+    description: その材料を使う部品の品番
   - name: supplier_id
     datatype: String
     description: 主サプライヤ
@@ -111,7 +152,7 @@ datasets:
       queryable: true
 - name: parts
   source: iceberg.mfg_quality.parts
-  description: テーブル parts
+  description: 品番マスタ。category = 材料 / 成形品 / サブ組立 / ユニット。成形品の material_spec が使用樹脂（例 PA66-GF30）。
   fields:
   - name: part_no
     datatype: String
@@ -149,7 +190,7 @@ datasets:
           to_field: supplier_id
 - name: bom
   source: iceberg.mfg_quality.bom
-  description: テーブル bom
+  description: 部品構成（品番レベル）。1 行 = 親品番 parent_part_no が子品番 child_part_no を員数 qty_per 使う。ロット単位の実績は lot_genealogy を使う。
   fields:
   - name: parent_part_no
     datatype: String
@@ -181,7 +222,7 @@ datasets:
           to_field: child_part_no
 - name: equipment
   source: iceberg.mfg_quality.equipment
-  description: テーブル equipment
+  description: 設備マスタ。成形機 M-01..M-12、乾燥機 D-01..D-12（parent_equipment_id = 付属する成形機）、組立ライン L-xxx、北見工場の成形機 K-xx。
   fields:
   - name: equipment_id
     datatype: String
@@ -214,7 +255,7 @@ datasets:
           - plant
 - name: material_lots
   source: iceberg.mfg_quality.material_lots
-  description: テーブル material_lots
+  description: 樹脂材料の入荷ロット（HC-yyMM-nnn）。lots にも lot_type=MATERIAL で同じ lot_id がある。
   fields:
   - name: lot_id
     datatype: String
@@ -251,7 +292,7 @@ datasets:
           to_field: supplier_id
 - name: production_runs
   source: iceberg.mfg_quality.production_runs
-  description: テーブル production_runs
+  description: 作業実績。1 行 = 1 ロットの生産（output_lot_id）。どの設備（equipment_id）でいつ作ったかを持つ。
   fields:
   - name: run_id
     datatype: String
@@ -300,17 +341,17 @@ datasets:
           id_field: run_id
 - name: lot_genealogy
   source: iceberg.mfg_quality.lot_genealogy
-  description: 1 行 = 親子 1 段の消費関係（child が parent を消費）。材料からユニットまで品目により 3〜5 段。
+  description: ロット系譜。1 行 = 1 段の消費関係で、child_lot_id（投入されたロット）を使って parent_lot_id（生成されたロット）を作った。材料 → 成形 → サブ組立 → ユニットは child → parent の向きに進み、品目により 3〜5 段。下流（どこに使われたか）は child_lot_id = X から parent_lot_id をたどり、上流（何を使ったか）は parent_lot_id = X から child_lot_id をたどる。段数が可変なので WITH RECURSIVE か graph を使う。
   fields:
   - name: edge_id
     datatype: String
     description: 辺 ID
   - name: child_lot_id
     datatype: String
-    description: 消費されたロット
+    description: 投入（消費）された上流側ロット
   - name: parent_lot_id
     datatype: String
-    description: 生成されたロット
+    description: それを使って生成された下流側ロット
   - name: qty_used
     datatype: Decimal
     description: 使用量
@@ -330,7 +371,7 @@ datasets:
           id_field: edge_id
 - name: inspection_results
   source: iceberg.mfg_quality.inspection_results
-  description: テーブル inspection_results
+  description: 検査結果。成形ロットの バックラッシ / 外径 / 歯形 を記録。judgment は規格内なら OK。value / usl で上限比を見る。
   fields:
   - name: insp_id
     datatype: String
@@ -361,11 +402,11 @@ datasets:
       queryable: true
 - name: unit_lots
   source: iceberg.mfg_quality.unit_lots
-  description: テーブル unit_lots
+  description: 完成ユニットのロット（U-品番略-yymmdd）。lots にも lot_type=UNIT で同じ lot_id がある。出荷は shipments.unit_lot_id で結合。
   fields:
   - name: lot_id
     datatype: String
-    description: ユニットロット U-xxxx-yymmdd-nn
+    description: ユニットロット U-品番略-yymmdd
   - name: part_no
     datatype: String
     description: 品番
@@ -388,7 +429,7 @@ datasets:
       queryable: true
 - name: shipments
   source: iceberg.mfg_quality.shipments
-  description: テーブル shipments
+  description: 出荷実績。1 行 = ユニットロットのある出荷（OEM・車種・台数・VIN 範囲）。台数は qty の合計。
   fields:
   - name: shipment_id
     datatype: String
@@ -442,7 +483,7 @@ datasets:
           to_field: model_code
 - name: vehicle_models
   source: iceberg.mfg_quality.vehicle_models
-  description: テーブル vehicle_models
+  description: 車種マスタ（OEM ごと）。
   fields:
   - name: model_code
     datatype: String
@@ -478,7 +519,7 @@ datasets:
           to_field: oem_id
 - name: oem_customers
   source: iceberg.mfg_quality.oem_customers
-  description: テーブル oem_customers
+  description: OEM（自動車メーカー）マスタ。
   fields:
   - name: oem_id
     datatype: String
@@ -500,7 +541,7 @@ datasets:
           - name
 - name: field_claims
   source: iceberg.mfg_quality.field_claims
-  description: テーブル field_claims
+  description: 市場クレーム。1 行 = 1 台（VIN）。unit_lot_id で搭載ユニットロットに結合。symptom_code は NOISE / RATTLE 等、symptom_text は自由記述。
   fields:
   - name: claim_id
     datatype: String
@@ -536,7 +577,7 @@ datasets:
       queryable: true
 - name: defects
   source: iceberg.mfg_quality.defects
-  description: テーブル defects
+  description: 工程内不良記録。defect_code は 外観その他 / 寸法 / 欠け など。note に経緯や関連文書番号。
   fields:
   - name: defect_id
     datatype: String
@@ -561,7 +602,7 @@ datasets:
       queryable: true
 - name: doc_index
   source: iceberg.mfg_quality.doc_index
-  description: テーブル doc_index
+  description: 文書メタデータ（本文は OpenSearch）。日報・保全・8D・不具合報告・クレーム文・FMEA・4M 変更届。
   fields:
   - name: doc_id
     datatype: String
@@ -646,7 +687,7 @@ datasets:
           description: 変更・PPAP
 - name: lots
   source: iceberg.mfg_quality.lots
-  description: テーブル lots
+  description: 全階層ロットの統合表（MATERIAL / MOLD / SUBASSY / UNIT）。lot_genealogy の両端はすべてここにある。成形ロット ML-材料ロット-品番-連番、サブ組立 SA-品番略-yymmdd-nn、ユニット U-品番略-yymmdd。equipment_id は生産設備。
   fields:
   - name: lot_id
     datatype: String
@@ -689,7 +730,7 @@ datasets:
           description: 全階層ロット統合頂点
 - name: doc_mentions_lot
   source: iceberg.mfg_quality.doc_mentions_lot
-  description: テーブル doc_mentions_lot
+  description: 文書が言及するロット（graph 専用）。
   fields:
   - name: doc_id
     datatype: String
@@ -705,7 +746,7 @@ datasets:
       queryable: false
 - name: doc_mentions_equipment
   source: iceberg.mfg_quality.doc_mentions_equipment
-  description: テーブル doc_mentions_equipment
+  description: 文書が言及する設備（graph 専用）。
   fields:
   - name: doc_id
     datatype: String
@@ -721,7 +762,7 @@ datasets:
       queryable: false
 - name: doc_mentions_part
   source: iceberg.mfg_quality.doc_mentions_part
-  description: テーブル doc_mentions_part
+  description: 文書が言及する品番（graph 専用）。
   fields:
   - name: doc_id
     datatype: String
@@ -737,7 +778,7 @@ datasets:
       queryable: false
 - name: equipment_links
   source: iceberg.mfg_quality.equipment_links
-  description: テーブル equipment_links
+  description: 設備の付属関係（乾燥機 → 成形機）。
   fields:
   - name: edge_id
     datatype: String
@@ -762,6 +803,42 @@ datasets:
           from_field: equipment_id
           to_field: parent_equipment_id
           id_field: edge_id
+- name: inventory
+  source: iceberg.mfg_quality.inventory
+  description: 在庫（基準日時点）。1 行 = あるロットの保管数量。holder_supplier_id が保管している会社、tier はその Tier（1=東邦精機, 2=三協モールド）、location は倉庫・仕掛区分。出荷済みの数量は含まない。
+  fields:
+  - name: inventory_id
+    datatype: String
+    description: 在庫 ID
+  - name: lot_id
+    datatype: String
+    description: ロット（lots.lot_id）
+  - name: part_no
+    datatype: String
+    description: 品番
+  - name: holder_supplier_id
+    datatype: String
+    description: 保管会社（suppliers.supplier_id）
+  - name: tier
+    datatype: Int32
+    description: 保管会社の Tier
+  - name: location
+    datatype: String
+    description: 保管場所
+  - name: qty
+    datatype: Int32
+    description: 在庫数量
+  - name: as_of_date
+    datatype: Date
+    description: 基準日
+    dimension:
+      is_time: true
+  custom_extensions:
+  - vendor_name: SOLOMON
+    data:
+      version: 1
+      kind: table
+      queryable: true
 relationships:
 - name: shipments_unit
   from: shipments
@@ -903,6 +980,48 @@ relationships:
   - parent_equipment_id
   to_columns:
   - equipment_id
+- name: inventory_lot
+  from: inventory
+  to: lots
+  from_columns:
+  - lot_id
+  to_columns:
+  - lot_id
+- name: inventory_holder
+  from: inventory
+  to: suppliers
+  from_columns:
+  - holder_supplier_id
+  to_columns:
+  - supplier_id
+- name: alternatives_part
+  from: supplier_alternatives
+  to: parts
+  from_columns:
+  - part_no
+  to_columns:
+  - part_no
+- name: lots_part
+  from: lots
+  to: parts
+  from_columns:
+  - part_no
+  to_columns:
+  - part_no
+- name: lots_equipment
+  from: lots
+  to: equipment
+  from_columns:
+  - equipment_id
+  to_columns:
+  - equipment_id
+- name: claims_model
+  from: field_claims
+  to: vehicle_models
+  from_columns:
+  - model_code
+  to_columns:
+  - model_code
 metrics:
 - name: backlash_usl_ratio
   expression: AVG(value / usl)

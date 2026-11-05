@@ -50,3 +50,5 @@ PYTHONPATH=. python -m demo.mfg_quality.generator --seed 42 --scale 0.01 --docs 
 - 系譜段数: EPS-A200 経路 3 段、PG-310→PWR-55 は 4 段、WH-200→EPS-A210 は 5 段（固定 3 段 JOIN では KX-1 等が漏れる）。
 
 投入（S3 / Trino / PuppyGraph / OpenSearch）は別 PR。
+
+デモの内容とデモデータの説明（発表者・視聴者向け）: [DEMO_GUIDE.md](DEMO_GUIDE.md)

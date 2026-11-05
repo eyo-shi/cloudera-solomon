@@ -45,19 +45,23 @@ incident:
 
 genealogy_hops:
   note: |
-    lot_genealogy は 1 行 = 親子 1 段（child が parent を消費）。
-    固定 3 段 JOIN では SX-5 の EPS-A200 経路しか出ず、PG-310→PWR-55（4 段）や WH-200→EPS-A210（5 段）が漏れる。
+    lot_genealogy は 1 行 = 1 段の消費関係。child_lot_id = 投入（消費）されたロット、
+    parent_lot_id = それを使って作られたロット。材料 → 成形 → … → ユニットは child → parent の向き。
+    段数は材料ロットからユニットロットまでの辺の数。
+    固定 3 段 JOIN では SX-5 の EPS-A200 経路しか出ず、PG-310→PWR-55（4 段, VN-7）や
+    WH-200→EPS-A210（5 段, CV-3 / KX-1）が漏れる。
   eps_a200_path_hops: 3   # 材料→成形→サブ組立→ユニット
-  pg310_pwr55_path_hops: 4
-  wh200_eps_a210_path_hops: 5
+  pg310_pwr55_path_hops: 4  # 材料→成形→サブ組立×2→ユニット
+  wh200_eps_a210_path_hops: 5  # 材料→成形→サブ組立×3→ユニット
 
 hidden_facts:
   H1:
     material_lot: HC-2605-117
     mold_lots: 9
+    affected_products: [EPS-A200, EPS-A210, PWR-55]
     affected_models: [SX-5, CV-3, VN-7, KX-1]
     affected_oems: 2
-    estimated_units: 11400
+    estimated_units: 11400  # 117 由来ユニットの出荷台数（121 由来の 700 台は含まない）
   H2:
     doc_8d: QR-2024-0815
     plant: 北見工場
@@ -83,6 +87,10 @@ hidden_facts:
     decoy_doc_count: 400
     decoy_terms: [異音, 振動]
 
+# 封じ込め範囲 = D-07 不調期間に M-07 で成形した 15 ロット（117 由来 9 + 121 由来 6）の下流すべて。
+# 出荷合計 12,100 台 = 117 由来 11,400 台（Q2）+ 121 由来 700 台（SX-5 向け U-A200-260605）。
+# 在庫: Tier1 = SA-A200-260604-01（600）+ U-P55-260611（640）、Tier2 = ML-2605-121-WH200-05/06（1,600 + 1,500）。
+# 値は agent 採点の must-contain に使われるので、説明文はコメントに書く。
 containment:
   mold_lots: 15
   subassy_lots: 11
@@ -97,12 +105,15 @@ containment:
     OEM-YAMATO:
       VN-7: 1900
 
+# PA66-GF30（北陸ケミカル）を使う成形品 7 点の、東洋ポリマー材での PPAP 状況。
 q7_ppap:
   material: PA66-GF30
   parts_using_north_chem: 7
   ppap_approved: 4
   ppap_pending: 3
   includes_pg310: true
+  approved_parts: [WH-200, WH-210, CL-80, HS-40]
+  pending_parts: [PG-310, PG-320, GR-150]
 
 expected_answers:
   Q1:
@@ -111,6 +122,7 @@ expected_answers:
   Q2:
     resin_lot: HC-2605-117
     mold_lots: 9
+    products: [EPS-A200, EPS-A210, PWR-55]
     models: [SX-5, CV-3, VN-7, KX-1]
     oems: 2
     units: 11400
@@ -141,20 +153,144 @@ generation_lexicon:
   equipment: ["M-07", M07, "7 号機", "成形 No.7", "7 番機", D-07, "7 号ドライヤー", "ホッパードライヤー(7)"]
   parts: [WH-200, ウォームホイール, "EPS ギア", 樹脂ホイール, PG-310, "PW ギア", レギュレータギア]
 
+# 仕込み文書（本文はここが正。生成器は must_include / must_exclude を検証する）
 planted_documents:
   - doc_id: QR-2024-0815
     doc_type: 8d
+    doc_date: "2024-08-15"
     plant: 北見工場
-    must_include: [打音, コトコト, ペレット吸湿, 露点計]
+    equipment_id: K-03
+    part_no: PG-310
+    lot_ids: [HC-2408-033, ML-2408-033-PG310-01]
+    title: 8D QR-2024-0815 PG-310 噛み合い打音（北見工場）
+    body: |-
+      8D レポート QR-2024-0815（北見工場 / PG-310 パワーウィンドウ用ギア）
+      D1 チーム: 品証・北見成形課・三協モールド技術
+      D2 現象: 客先返却品で、ウィンドウ昇降時にギアの噛み合い部から打音（コトコト）。樹脂ギアのガタ・遊び大を確認。寸法・外観検査は全数合格。
+      D3 暫定処置: 成形ロット ML-2408-033-PG310-01 の出荷停止と在庫選別。
+      D4 真因: ペレット吸湿。ホッパードライヤーの露点計ドリフトで乾燥不足のまま成形し、加水分解で歯面強度が低下。バックラッシは規格内だが上限寄り。
+      D5/D6 恒久対策: 露点計の定期校正（月次）、乾燥 4h の遵守、乾燥条件の記録化。
+      D7 横展開: （未記入）
+      D8 完了: 2024-09-30
+    must_include: [打音, コトコト, ペレット吸湿, 露点計, "（未記入）"]
     must_exclude: [異音]
   - doc_id: DR-2025-0320-北見
     doc_type: daily_report
+    doc_date: "2025-03-20"
+    plant: 北見工場
+    equipment_id: K-03
+    part_no: PG-310
+    lot_ids: []
+    title: 作業日報 2025-03-20 北見 成形 3 号機
+    body: |-
+      作業日報 2025-03-20 北見工場 成形 3 号機（PG-310）。
+      立ち上げ品の噛み合い確認でコトコト音あり。ペレット水分が高めのため乾燥やり直し（4h）を実施し、再確認で音なし。
     must_include: [コトコト, 乾燥やり直し]
+    must_exclude: [異音]
+  - doc_id: DR-2026-0512-M07
+    doc_type: daily_report
+    doc_date: "2026-05-12"
+    plant: 豊浜工場
+    equipment_id: M-07
+    part_no: WH-200
+    lot_ids: []
+    title: 作業日報 2026-05-12 成形 A 班
+    body: |-
+      作業日報 2026-05-12 豊浜工場 成形 A 班。
+      7 号機の段取り替え。ドライヤーの露点計表示がふらつくため保全へ連絡。生産なし。
+    must_include: ["7 号機", 露点計]
     must_exclude: [異音]
   - doc_id: DR-2026-0514-M07
     doc_type: daily_report
+    doc_date: "2026-05-14"
+    plant: 豊浜工場
     equipment_id: M-07
-    must_include: ["7 号機", 露点, "2.5h"]
+    part_no: WH-200
+    lot_ids: [HC-2605-117]
+    title: 作業日報 2026-05-14 成形 A 班
+    body: |-
+      作業日報 2026-05-14 豊浜工場 成形 A 班。
+      7 号機ドライヤー露点高め（-20℃前後）。保全に連絡済みだが部品待ち。
+      WH-200 の納期優先で乾燥 2.5h で立ち上げ（通常 4h）。材料 HC-2605-117。外観・寸法 OK。
+    must_include: ["7 号機", 露点, "2.5h", HC-2605-117]
+    must_exclude: [異音]
+  - doc_id: DR-2026-0515-M07
+    doc_type: daily_report
+    doc_date: "2026-05-15"
+    plant: 豊浜工場
+    equipment_id: M-07
+    part_no: WH-200
+    lot_ids: [HC-2605-117]
+    title: 作業日報 2026-05-15 成形 A 班
+    body: |-
+      作業日報 2026-05-15 豊浜工場 成形 A 班。
+      M07 で WH-200 継続。露点計の表示が不安定、昨日に続き乾燥 2.5h。材料 HC-2605-117。検査 OK。
+    must_include: [M07, "2.5h"]
+    must_exclude: [異音]
+  - doc_id: DR-2026-0516-M07
+    doc_type: daily_report
+    doc_date: "2026-05-16"
+    plant: 豊浜工場
+    equipment_id: M-07
+    part_no: PG-310
+    lot_ids: [HC-2605-117]
+    title: 作業日報 2026-05-16 成形 B 班
+    body: |-
+      作業日報 2026-05-16 豊浜工場 成形 B 班。
+      成形 No.7 で PG-310 に切替。ドライヤー露点やや高い。段取り時間確保のため乾燥 2.5h で開始。材料 HC-2605-117 の残りを使用。
+    must_include: ["成形 No.7", "2.5h"]
+    must_exclude: [異音]
+  - doc_id: DR-2026-0522-M07
+    doc_type: daily_report
+    doc_date: "2026-05-22"
+    plant: 豊浜工場
+    equipment_id: M-07
+    part_no: WH-200
+    lot_ids: [HC-2605-121]
+    title: 作業日報 2026-05-22 成形 A 班
+    body: |-
+      作業日報 2026-05-22 豊浜工場 成形 A 班。
+      7 番機で WH-200。新しい材料ロット HC-2605-121 を投入。ドライヤーはまだ部品待ちで、乾燥 2.5h で回す。外観 OK。
+    must_include: ["7 番機", "2.5h", HC-2605-121]
+    must_exclude: [異音]
+  - doc_id: DR-2026-0524-M07
+    doc_type: daily_report
+    doc_date: "2026-05-24"
+    plant: 豊浜工場
+    equipment_id: M-07
+    part_no: WH-200
+    lot_ids: [HC-2605-121]
+    title: 作業日報 2026-05-24 成形 B 班
+    body: |-
+      作業日報 2026-05-24 豊浜工場 成形 B 班。
+      7 号機で WH-200。露点高めのまま、乾燥 2.5h で休日出勤対応。材料 HC-2605-121。
+    must_include: ["7 号機", "2.5h"]
+    must_exclude: [異音]
+  - doc_id: MT-2026-0512-D07
+    doc_type: maintenance
+    doc_date: "2026-05-12"
+    plant: 豊浜工場
+    equipment_id: D-07
+    part_no: null
+    lot_ids: []
+    title: 保全記録 2026-05-12 D-07 露点計不調
+    body: |-
+      保全記録 2026-05-12 D-07（M-07 付属ホッパードライヤー）。
+      露点計不調（指示値ドリフト）。交換部品を手配したが入荷待ち（5/26 予定）。暫定で運転継続。
+    must_include: [露点計不調, 入荷待ち]
+    must_exclude: [異音]
+  - doc_id: MT-2026-0526-D07
+    doc_type: maintenance
+    doc_date: "2026-05-26"
+    plant: 豊浜工場
+    equipment_id: D-07
+    part_no: null
+    lot_ids: []
+    title: 保全記録 2026-05-26 D-07 露点計交換
+    body: |-
+      保全記録 2026-05-26 D-07（M-07 付属ホッパードライヤー）。
+      露点計交換完了。露点 -40℃ への復帰を確認し、通常の乾燥条件（4h）に戻す。
+    must_include: [露点計交換完了]
     must_exclude: [異音]
 
 doc_type_targets:
@@ -193,20 +329,23 @@ search_checks:
     must_not_rank:
       - { doc_id: QR-2024-0815, max_rank: 20, modes: [keyword] }
 
+# 背景込みの目安件数（scale 1.0）。生成器は事件行を固定注入し、残りを背景で埋める。
+# production_runs / lot_genealogy / inspection_results は系譜から派生するため目安。
 table_targets:
   suppliers: 40
   supplier_alternatives: 30
   parts: 350
   bom: 900
-  equipment: 120
-  material_lots: 1500
-  production_runs: 60000
-  lot_genealogy: 180000
-  inspection_results: 400000
-  unit_lots: 6000
-  shipments: 25000
-  vehicle_models: 8
+  equipment: 28
+  material_lots: 300
+  production_runs: 5100
+  lot_genealogy: 5100
+  inspection_results: 10500
+  unit_lots: 1200
+  shipments: 2400
+  vehicle_models: 4
   oem_customers: 3
   field_claims: 800
-  defects: 5000
-  doc_index: 3000
+  defects: 1500
+  inventory: 40
+  doc_index: 3965
