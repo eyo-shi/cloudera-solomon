@@ -495,6 +495,28 @@ class TestRagSources:
             "doc_search",
         ]
 
+    def test_system_prompt_requires_full_aggregation_when_sql_enabled(self) -> None:
+        from solomon.rag.agent import build_system_prompt
+
+        prompt = build_system_prompt(
+            enabled_sources=frozenset({"table"}),
+            disabled_sources=[],
+            tool_names=["sql_query"],
+        )
+        assert "GROUP BY" in prompt
+        assert "サンプル行から推測しない" in prompt
+        assert "質問の件数と照合" in prompt
+
+    def test_system_prompt_omits_aggregation_rules_without_sql(self) -> None:
+        from solomon.rag.agent import build_system_prompt
+
+        prompt = build_system_prompt(
+            enabled_sources=frozenset({"search"}),
+            disabled_sources=["table"],
+            tool_names=["doc_search"],
+        )
+        assert "GROUP BY" not in prompt
+
     def test_system_prompt_mentions_disabled_sources(self) -> None:
         from solomon.rag.agent import build_system_prompt
 
@@ -649,3 +671,140 @@ class TestHeuristicEngine:
         assert out["engine"] == "heuristic"
         assert out["strategy"] == "KEYWORD"
         assert out["answer_markdown"] == "heuristic ok"
+
+
+class TestConversationHistory:
+    _PRIOR_ANSWER = (
+        "## 結論\n対象ロットは A-1 と A-2 〔doc:D-1〕。\n"
+        "[グラフで見る](solomon://graph-cypher?cypher=MATCH+%28n%29)\n"
+        "\n### 根拠\n- [Title \\[x\\]](solomon://search-document?doc_id=D-1)\n"
+        "- SQL: `SELECT 1`\n"
+    )
+
+    def test_compact_history_answer_drops_evidence_and_links(self) -> None:
+        from solomon.rag.agent import _compact_history_answer
+
+        out = _compact_history_answer(self._PRIOR_ANSWER)
+        assert "A-1 と A-2" in out
+        assert "グラフで見る" in out
+        assert "solomon://" not in out
+        assert "### 根拠" not in out
+        assert "SELECT 1" not in out
+
+    def test_compact_history_answer_reference_links(self) -> None:
+        from solomon.rag.agent import _compact_history_answer
+
+        text = "見る [label \\]][solomon-graph-abc]\n\n[solomon-graph-abc]: solomon://graph?x=1\n残り"
+        out = _compact_history_answer(text)
+        assert "label ]" in out
+        assert "solomon://" not in out
+        assert "残り" in out
+
+    def test_history_messages_keeps_last_turns(self) -> None:
+        from solomon.rag.agent import _history_messages
+
+        history = [(f"q{i}", f"a{i}") for i in range(5)] + [("empty", "")]
+        msgs = _history_messages(history)
+        assert [m["content"] for m in msgs] == ["q2", "a2", "q3", "a3", "q4", "a4"]
+        assert [m["role"] for m in msgs[:2]] == ["user", "assistant"]
+
+    def test_agent_receives_history_before_prompt(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_TOOL_MODE", "native")
+        seen: dict[str, Any] = {}
+
+        def fake_completion(**kwargs: Any) -> dict[str, Any]:
+            seen["messages"] = kwargs["messages"]
+            return _final_native("## 結論\nok")
+
+        prompt_kwargs: dict[str, Any] = {}
+
+        def fake_prompt(**kw: Any) -> str:
+            prompt_kwargs.update(kw)
+            return "sys"
+
+        monkeypatch.setattr("solomon.rag.agent._litellm_completion", fake_completion)
+        monkeypatch.setattr("solomon.rag.agent.build_system_prompt", fake_prompt)
+
+        run_knowledge_agent(
+            "その部品の材料は？",
+            user_ctx=None,  # type: ignore[arg-type]
+            history=[("対象ロットは？", self._PRIOR_ANSWER)],
+        )
+        roles = [m["role"] for m in seen["messages"]]
+        assert roles == ["system", "user", "assistant", "user"]
+        assert seen["messages"][1]["content"] == "対象ロットは？"
+        assert "A-1 と A-2" in seen["messages"][2]["content"]
+        assert "solomon://" not in seen["messages"][2]["content"]
+        assert seen["messages"][3]["content"] == "その部品の材料は？"
+        assert prompt_kwargs["has_history"] is True
+
+    def test_no_history_keeps_two_messages(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_TOOL_MODE", "native")
+        seen: dict[str, Any] = {}
+
+        def fake_completion(**kwargs: Any) -> dict[str, Any]:
+            seen["messages"] = kwargs["messages"]
+            return _final_native("ok")
+
+        monkeypatch.setattr("solomon.rag.agent._litellm_completion", fake_completion)
+        monkeypatch.setattr("solomon.rag.agent.build_system_prompt", lambda **_kw: "sys")
+        run_knowledge_agent("q", user_ctx=None)  # type: ignore[arg-type]
+        assert [m["role"] for m in seen["messages"]] == ["system", "user"]
+
+    def test_kickoff_passes_history_to_agent(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        from solomon.rag import crew as rag_crew
+        from solomon.transport.user_context import UserContext
+
+        captured: dict[str, Any] = {}
+
+        def fake_agent(prompt: str, **kw: Any) -> Any:
+            captured.update(kw)
+            raise RuntimeError("stop")
+
+        monkeypatch.setenv("SOLOMON_RAG_ENGINE", "agent")
+        monkeypatch.setattr("solomon.rag.agent.run_knowledge_agent", fake_agent)
+        with pytest.raises(RuntimeError, match="stop"):
+            rag_crew.kickoff_knowledge_rag(
+                user_ctx=UserContext(user_name="u"),
+                prompt="q",
+                history=[("a", "b")],
+            )
+        assert captured["history"] == [("a", "b")]
+
+
+class TestPromptInvestigationRules:
+    def _prompt(self, tool_names: list[str], **kw: Any) -> str:
+        from solomon.rag.agent import build_system_prompt
+
+        return build_system_prompt(
+            enabled_sources=frozenset(),
+            disabled_sources=[],
+            tool_names=tool_names,
+            **kw,
+        )
+
+    def test_graph_rules_when_graph_enabled(self) -> None:
+        prompt = self._prompt(["sql_query", "graph_query"])
+        assert "可変長パス" in prompt
+        assert "上流へたどって共通の起点" in prompt
+        assert "WITH RECURSIVE" not in prompt
+
+    def test_recursive_sql_fallback_without_graph(self) -> None:
+        prompt = self._prompt(["sql_query"])
+        assert "WITH RECURSIVE" in prompt
+        assert "可変長パス" not in prompt
+
+    def test_history_section_only_with_history(self) -> None:
+        assert "## 会話の続き" not in self._prompt(["sql_query"])
+        assert "## 会話の続き" in self._prompt(["sql_query"], has_history=True)
+
+    def test_general_rules_forbid_deferring_runnable_checks(self) -> None:
+        prompt = self._prompt(["doc_search"])
+        assert "X がこのセッションで使えるなら実行する" in prompt
+        assert "プレースホルダ" in prompt

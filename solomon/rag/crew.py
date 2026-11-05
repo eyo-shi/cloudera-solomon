@@ -51,6 +51,7 @@ def _run_agent(
     *,
     enabled_sources: frozenset[str],
     disabled_sources: list[str],
+    history: list[tuple[str, str]] | None = None,
 ) -> KnowledgeRagResult:
     from solomon.rag.agent import run_knowledge_agent
 
@@ -58,6 +59,7 @@ def _run_agent(
         "knowledge_rag.agent.start",
         user=user_ctx.user_name,
         sources=sorted(enabled_sources),
+        history_turns=len(history or []),
     )
     return run_knowledge_agent(
         prompt,
@@ -65,6 +67,7 @@ def _run_agent(
         on_event=on_event,
         enabled_sources=enabled_sources,
         disabled_sources=disabled_sources,
+        history=history,
     )
 
 
@@ -75,8 +78,11 @@ def kickoff_knowledge_rag(
     llm_strong: Optional[Any] = None,
     on_event: EventCallback | None = None,
     sources: Optional[list[str]] = None,
+    history: Optional[list[tuple[str, str]]] = None,
 ) -> dict[str, Any]:
     """Knowledge RAG を 1 回実行する。
+
+    ``history`` は同じセッションの直前の (質問, 回答)。agent エンジンだけが使う。
 
     ``SOLOMON_RAG_ENGINE=agent``（既定）では ReAct ツールエージェント。
     ``heuristic`` では従来の classify → retrieve → synthesize。
@@ -101,6 +107,7 @@ def kickoff_knowledge_rag(
                 on_event,
                 enabled_sources=enabled,
                 disabled_sources=disabled,
+                history=history,
             )
         else:
             result = _run_heuristic(

@@ -156,3 +156,26 @@ def test_api_semantic_context(monkeypatch: pytest.MonkeyPatch) -> None:
         assert r.status_code == 200
         body = r.json()
         assert "datasets" in body
+
+
+def test_render_graph_schema_includes_example_cypher(monkeypatch) -> None:
+    from solomon.semantic import context as sem_ctx
+
+    ctx = sem_ctx.SemanticContext()
+    ctx.graph_definitions = [
+        {"vertex": {"label": "Node", "id_field": "node_id"}, "edges": []},
+        {"vertex": {}, "edges": [{"label": "LINKS", "from_label": "Node", "to_label": "Node"}]},
+    ]
+    ctx.graph_examples = [
+        {
+            "question": "起点から終点まで",
+            "cypher": "MATCH (a:Node {node_id:$id})\n  -[:LINKS*1..5]->(b) RETURN b",
+            "notes": "可変長",
+        }
+    ]
+    monkeypatch.setattr(sem_ctx, "get_semantic_context", lambda **_kw: ctx)
+    out = sem_ctx.render_graph_schema()
+    assert "`None`" not in out
+    assert "(Node)-[:LINKS]->(Node)" in out
+    assert "MATCH (a:Node {node_id:$id}) -[:LINKS*1..5]->(b) RETURN b" in out
+    assert "起点から終点まで（可変長）" in out

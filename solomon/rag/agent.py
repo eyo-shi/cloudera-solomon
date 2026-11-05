@@ -37,6 +37,53 @@ _JSON_SYSTEM_TAIL = (
 )
 
 
+_HISTORY_TURNS_MAX = 3
+_HISTORY_PROMPT_MAX_CHARS = 1000
+_HISTORY_ANSWER_MAX_CHARS = 2500
+_EVIDENCE_HEADING = "\n### 根拠"
+_MD_LABEL = r"((?:\\.|[^\]\\])*)"
+_SOLOMON_INLINE_LINK_RE = re.compile(r"\[" + _MD_LABEL + r"\]\(solomon://[^)\s]*\)")
+_SOLOMON_REF_LINK_RE = re.compile(r"\[" + _MD_LABEL + r"\]\[solomon-[^\]]*\]")
+_SOLOMON_REF_DEF_RE = re.compile(r"(?m)^\[[^\]]+\]:\s*solomon://\S*[ \t]*\n?")
+_MD_ESCAPE_RE = re.compile(r"\\([\\\[\]])")
+
+
+def _compact_history_answer(text: str) -> str:
+    """過去ターンの回答を履歴用に縮める（自動付与の根拠節と UI 深リンクを落とす）。"""
+    body = _strip_reasoning(text)
+    cut = body.rfind(_EVIDENCE_HEADING)
+    if cut != -1:
+        body = body[:cut]
+
+    def label_only(match: re.Match[str]) -> str:
+        return _MD_ESCAPE_RE.sub(r"\1", match.group(1))
+
+    body = _SOLOMON_REF_DEF_RE.sub("", body)
+    body = _SOLOMON_INLINE_LINK_RE.sub(label_only, body)
+    body = _SOLOMON_REF_LINK_RE.sub(label_only, body)
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    if len(body) > _HISTORY_ANSWER_MAX_CHARS:
+        body = body[: _HISTORY_ANSWER_MAX_CHARS - 1] + "…"
+    return body
+
+
+def _history_messages(
+    history: list[tuple[str, str]] | None,
+) -> list[dict[str, Any]]:
+    """直近の (質問, 回答) を user / assistant メッセージに変換する。"""
+    pairs: list[tuple[str, str]] = []
+    for user_text, answer in history or []:
+        question = (user_text or "").strip()[:_HISTORY_PROMPT_MAX_CHARS]
+        reply = _compact_history_answer(answer or "")
+        if question and reply:
+            pairs.append((question, reply))
+    out: list[dict[str, Any]] = []
+    for question, reply in pairs[-_HISTORY_TURNS_MAX:]:
+        out.append({"role": "user", "content": question})
+        out.append({"role": "assistant", "content": reply})
+    return out
+
+
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _THINK_CLOSE = "</think>"
 _TOOL_CALL_RE = re.compile(
@@ -215,6 +262,7 @@ def build_system_prompt(
     enabled_sources: frozenset[str],
     disabled_sources: list[str],
     tool_names: list[str],
+    has_history: bool = False,
 ) -> str:
     sections: list[str] = [
         "あなたはテーブル・グラフ・文書検索を横断する調査アシスタントです。"
@@ -242,11 +290,61 @@ def build_system_prompt(
     if tool_help:
         sections.append("## ツールの使い分け\n" + "\n".join(tool_help) + "\n")
 
+    if "sql_query" in tool_names:
+        sections.append(
+            "## 件数・一覧・集計を含む質問（sql_query）\n"
+            "- 質問に件数（「N 件」など）・「すべて」・内訳を求める語があるときは、"
+            "LIMIT 付きのサンプル行から推測しない。"
+            "質問の条件（対象・種別・症状・期間など）をすべて WHERE に入れ、"
+            "COUNT / GROUP BY で全件を集計する。\n"
+            "- 列名や値の表記が分からないときだけ、先に少数のサンプル行で確認し、"
+            "その後に必ず集計クエリを実行する。\n"
+            "- 集計した合計件数を質問の件数と照合する。一致すれば内訳（グループごとの件数）を結論に書く。"
+            "一致しなければ条件を見直して再実行し、それでも合わないときは差と考えられる理由を未確定事項に書く。\n"
+            "- 複数テーブルにまたがる条件は JOIN でまとめてよい。\n"
+        )
+
+    if "graph_query" in tool_names:
+        sections.append(
+            "## つながり・上流/下流・影響範囲の追跡（graph_query）\n"
+            "- 段数が決まっていない追跡は、固定段数の JOIN ではなく graph_query の"
+            "可変長パス（例: `-[:REL*1..8]->`）で 1 回でたどる。"
+            "上流へたどるときは辺を逆向き（`<-[:REL*1..8]-`）に書く。\n"
+            "- 「他にどこに使われたか」「影響を受けるのはどれか」という質問は、"
+            "(1) 与えられた対象から上流へたどって共通の起点を特定し、"
+            "(2) その起点から下流へたどって全件を列挙・集計する、の 2 段で進める。\n"
+            "- 起点の ID が分からないときは、sql_query / doc_search で先に特定してから graph_query に渡す。"
+            "ID は文字列リテラルではなく params で渡す。\n"
+            "- グラフ定義のクエリ例があれば、ラベル名・辺の向き・プロパティ名をそれに合わせる。\n"
+        )
+    elif "sql_query" in tool_names:
+        sections.append(
+            "## つながり・上流/下流の追跡（グラフ無効時）\n"
+            "- 親子関係の表をたどるときは段数を決め打ちしない。"
+            "WITH RECURSIVE が使えればそれを使い、使えなければ新しい行が出なくなるまで"
+            "1 段ずつ sql_query を繰り返す。\n"
+        )
+
+    if has_history:
+        sections.append(
+            "## 会話の続き\n"
+            "- このメッセージの前にある user / assistant の発言は、同じセッションの直前のやり取り。\n"
+            "- 今回の質問に「その」「それ」「上記」「先ほどの」などがあれば、"
+            "直前の回答に出た ID・値・対象を指すものとして解釈し、ツールの条件に使う。\n"
+            "- 直前の回答の値は出発点として使ってよいが、"
+            "今回の結論に使う事実はこのターンのツール結果で確かめる。\n"
+        )
+
     sections.append(
-        "1 つのツールの結果を次のツールの条件（ID・キーワード）に使ってよい。"
-        "表記ゆれ（設備名の略称など）は文書と表を突き合わせて同一視してよいが、"
+        "## 調査の進め方\n"
+        "- 1 つのツールの結果を次のツールの条件（ID・キーワード）に使ってよい。\n"
+        "- 表記ゆれ（設備名の略称など）は文書と表を突き合わせて同一視してよいが、"
         "そう判断した根拠を最終回答に書くこと。\n"
-        "ツール結果に無い数値や ID を作らない。\n\n"
+        "- 質問の対象（品目名・名称）は、文書の似た語で推測せず、表やグラフで ID を特定してから使う。\n"
+        "- 「〜を調べるには X が必要」と書く前に、X がこのセッションで使えるなら実行する。"
+        "未確定事項に書いてよいのは、使えるツールで確かめようとして確かめられなかったことだけ。\n"
+        "- ツール結果に無い数値や ID を作らない。プレースホルダ（XXX など）の値を書かない。\n"
+        "- 根拠には結論を直接支えるツール結果だけを挙げ、関係の薄い検索ヒットは挙げない。\n\n"
         "根拠の引用: 文書を根拠にするときは `〔doc:<doc_id>〕`、"
         "グラフ結果を根拠にするときは `〔graph:<n>〕` "
         "（n はこのセッションで**成功した** graph_query の通し番号、1 から）と本文中に書く。\n\n"
@@ -515,8 +613,12 @@ def run_knowledge_agent(
     on_event: EventCallback | None = None,
     max_steps: int = 8,
     timeout_sec: float = 150.0,
+    history: list[tuple[str, str]] | None = None,
 ) -> KnowledgeRagResult:
-    """ツール呼び出し型 Knowledge RAG（最大 ``max_steps`` 手）。"""
+    """ツール呼び出し型 Knowledge RAG（最大 ``max_steps`` 手）。
+
+    ``history`` は同じセッションの直前の (質問, 回答)。指示語つきの続き質問を解決するために使う。
+    """
     if get_llm_agent_config("rag_agent") is None:
         raise RuntimeError("rag_agent LLM is not configured")
 
@@ -534,13 +636,16 @@ def run_knowledge_agent(
     openai_tools = [t.to_openai_tool() for t in agent_tools]
     tool_names = [t.name for t in agent_tools]
 
+    prior = _history_messages(history)
     system = build_system_prompt(
         enabled_sources=enabled_sources,
         disabled_sources=disabled_sources,
         tool_names=tool_names,
+        has_history=bool(prior),
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system},
+        *prior,
         {"role": "user", "content": prompt},
     ]
 
@@ -768,8 +873,9 @@ def run_knowledge_agent(
             "- LLM またはツールの応答が不完全でした。"
         )
 
+    # 最後に成功した SQL（探索のあとの集計クエリが回答の主根拠になりやすい）
     sql_executed = None
-    for h in hits:
+    for h in reversed(hits):
         if h.source == "lakehouse":
             sql_executed = h.payload.get("sql")
             break

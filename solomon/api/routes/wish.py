@@ -543,12 +543,16 @@ async def _handle_knowledge_rag(
     def _on_event(ev: dict[str, Any]) -> None:
         events.put(ev)
 
+    # 指示語つきの続き質問（「その〜」）を解決できるよう直近ターンを渡す
+    history = _conversation_history(session_id, limit=3)
+
     def _run() -> dict:
         return kickoff_knowledge_rag(
             user_ctx=scoped_ctx,
             prompt=question,
             on_event=_on_event,
             sources=list(sources) if sources is not None else None,
+            history=history,
         )
 
     task = asyncio.create_task(asyncio.to_thread(_run))

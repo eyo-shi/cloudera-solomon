@@ -164,15 +164,37 @@ def render_table_catalog(max_chars: int = 8000) -> str:
 def render_graph_schema(max_chars: int = 8000) -> str:
     ctx = get_semantic_context()
     lines = ["## グラフ定義 (Ossie SOLOMON 拡張)"]
+    vertices: list[str] = []
+    edges: list[str] = []
     for g in ctx.graph_definitions:
         v = g.get("vertex") or {}
-        lines.append(f"- 頂点 `{v.get('label')}` id=`{v.get('id_field')}`")
+        if v.get("label"):
+            vertices.append(f"- 頂点 `{v.get('label')}` id=`{v.get('id_field')}`")
         for e in g.get("edges") or []:
-            lines.append(
-                f"  - `{e.get('label')}` {e.get('from_label')} -> {e.get('to_label')}"
+            edges.append(
+                f"- 辺 `{e.get('label')}`: ({e.get('from_label')})-[:{e.get('label')}]->"
+                f"({e.get('to_label')})"
             )
+    lines.extend(vertices)
+    lines.extend(edges)
+
+    # 例は Cypher ごと渡す（質問文だけでは可変長パスの書き方が伝わらない）
+    examples: list[str] = []
     for ex in ctx.graph_examples[:10]:
-        lines.append(f"- 例: {ex.get('question', '')[:80]}")
+        question = str(ex.get("question") or "").strip()[:80]
+        cypher = " ".join(str(ex.get("cypher") or "").split())
+        notes = str(ex.get("notes") or "").strip()
+        if not question and not cypher:
+            continue
+        entry = f"- 例: {question}" if question else "- 例:"
+        if notes:
+            entry += f"（{notes[:80]}）"
+        if cypher:
+            entry += f"\n  `{cypher[:600]}`"
+        examples.append(entry)
+    if examples:
+        lines.append("### クエリ例")
+        lines.extend(examples)
     return "\n".join(lines)[:max_chars]
 
 

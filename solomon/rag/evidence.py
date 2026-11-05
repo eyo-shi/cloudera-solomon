@@ -15,6 +15,23 @@ _logger = get_logger(__name__)
 
 _DOC_MARKER = re.compile(r"〔doc:([^〕]+)〕")
 _GRAPH_MARKER = re.compile(r"〔graph:(\d+)〕")
+_WS = re.compile(r"\s+")
+_SQL_SHOW_MAX = 5
+_SQL_CHARS_MAX = 300
+
+
+@dataclass
+class _SqlRecord:
+    n: int
+    sql: str
+    row_count: int | None = None
+
+
+def _one_line_sql(sql: str) -> str:
+    text = _WS.sub(" ", sql).strip().replace("`", "'")
+    if len(text) > _SQL_CHARS_MAX:
+        text = text[: _SQL_CHARS_MAX - 1] + "…"
+    return text
 
 
 @dataclass
@@ -32,7 +49,20 @@ class _DocRecord:
 class EvidenceIndex:
     docs: dict[str, _DocRecord] = field(default_factory=dict)
     graphs: dict[int, dict[str, Any]] = field(default_factory=dict)
-    sql: str | None = None
+    sqls: list[_SqlRecord] = field(default_factory=list)
+
+    def add_sql(self, sql: str, row_count: Any = None) -> None:
+        text = sql.strip()
+        if not text:
+            return
+        key = _WS.sub(" ", text).lower()
+        if any(_WS.sub(" ", r.sql).lower() == key for r in self.sqls):
+            return
+        try:
+            count = int(row_count) if row_count is not None else None
+        except (TypeError, ValueError):
+            count = None
+        self.sqls.append(_SqlRecord(n=len(self.sqls) + 1, sql=text, row_count=count))
 
 
 def _index_from_hits_and_tools(
@@ -54,10 +84,10 @@ def _index_from_hits_and_tools(
                 idx.graphs[graph_n] = {"cypher": cypher, "params": params}
 
     for hit in hits:
-        if hit.source == "lakehouse" and not idx.sql:
+        if hit.source == "lakehouse":
             sql = hit.payload.get("sql")
-            if isinstance(sql, str) and sql.strip():
-                idx.sql = sql.strip()
+            if isinstance(sql, str):
+                idx.add_sql(sql, hit.payload.get("row_count"))
         if hit.source != "opensearch" or hit.kind != "document":
             continue
         for doc in hit.payload.get("documents") or []:
@@ -171,9 +201,15 @@ def _append_evidence_section(
         )
         lines.append(f"- {link}")
 
-    if index.sql:
-        first_line = index.sql.strip().splitlines()[0][:200]
-        lines.append(f"- SQL: `{first_line}`")
+    shown = index.sqls[-_SQL_SHOW_MAX:]
+    omitted = len(index.sqls) - len(shown)
+    if omitted > 0:
+        lines.append(f"- SQL: 先行する {omitted} 件は省略（直近 {len(shown)} 件を表示）")
+    for rec in shown:
+        label = f"SQL #{rec.n}" if len(index.sqls) > 1 else "SQL"
+        if rec.row_count is not None:
+            label += f"（{rec.row_count} 行）"
+        lines.append(f"- {label}: `{_one_line_sql(rec.sql)}`")
 
     if len(lines) <= 1:
         return text
@@ -193,8 +229,8 @@ def enrich_answer_with_evidence(
         return text
 
     index = _index_from_hits_and_tools(hits, tool_calls)
-    if sql_executed and not index.sql:
-        index.sql = sql_executed.strip()
+    if sql_executed and not index.sqls:
+        index.add_sql(sql_executed)
 
     replaced, cited_docs, cited_graphs = _replace_markers(text, index)
     return _append_evidence_section(
