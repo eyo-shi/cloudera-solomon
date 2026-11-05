@@ -445,6 +445,20 @@ class TestReadonlyGuards:
         out = run_graph_query(None, cypher="CREATE (n:Lot)")
         assert out["status"] == "error"
 
+    def test_rejects_unbound_cypher_params(self) -> None:
+        out = run_graph_query(None, cypher="MATCH (n:Lot {lot_id:$lot_id}) RETURN n")
+        assert out["status"] == "error"
+        assert "$lot_id" in out["message"]
+        assert '"lot_id"' in out["message"]
+
+    def test_missing_cypher_params_ignores_string_literals(self) -> None:
+        from solomon.rag.agent_tools import missing_cypher_params
+
+        cypher = "MATCH (n:Lot {lot_id:$id}) WHERE n.note = '$5 off' RETURN n LIMIT $n"
+        assert missing_cypher_params(cypher, {"id": "X"}) == ["n"]
+        assert missing_cypher_params(cypher, {"id": "X", "n": 5}) == []
+        assert missing_cypher_params(cypher, {"id": None, "n": 5}) == ["id"]
+
 
 class TestToolCache:
     def test_duplicate_tool_uses_cache(
@@ -476,6 +490,136 @@ class TestToolCache:
 
         run_knowledge_agent("q", user_ctx=None)  # type: ignore[arg-type]
         assert counter["n"] == 1
+
+    def test_duplicate_call_gets_note_for_llm(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_TOOL_MODE", "json")
+        from solomon.rag import agent_tools
+
+        monkeypatch.setattr(
+            agent_tools,
+            "run_sql_query",
+            lambda _u, **kw: {"status": "ok", "sql": "SELECT 1", "rows": [], "row_count": 0},
+        )
+        same = {"question": "q", "sql": "SELECT 1"}
+        seq = [
+            _json_action("1", "sql_query", same),
+            _json_action("2", "sql_query", same),
+            _json_final("3", "## done"),
+        ]
+        seen: list[list[dict[str, Any]]] = []
+
+        def fake_completion(**kwargs: Any) -> dict[str, Any]:
+            seen.append(list(kwargs["messages"]))
+            return seq.pop(0)
+
+        monkeypatch.setattr("solomon.rag.agent._litellm_completion", fake_completion)
+        monkeypatch.setattr("solomon.rag.agent.build_system_prompt", lambda **_kw: "sys")
+
+        run_knowledge_agent("q", user_ctx=None)  # type: ignore[arg-type]
+        first, second = seen[1][-1]["content"], seen[2][-1]["content"]
+        assert "同じ引数で実行済み" not in first
+        assert "同じ引数で実行済み" in second
+
+
+class TestStepBudget:
+    def test_native_mode_warns_when_two_steps_remain(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_TOOL_MODE", "native")
+        from solomon.rag import agent_tools
+
+        monkeypatch.setattr(
+            agent_tools,
+            "run_graph_query",
+            lambda _u, **kw: {"status": "ok", "records": [], "count": 0, "cypher": kw["cypher"]},
+        )
+        seen: list[list[dict[str, Any]]] = []
+        n = {"i": 0}
+
+        def fake_completion(**kwargs: Any) -> dict[str, Any]:
+            seen.append(list(kwargs["messages"]))
+            n["i"] += 1
+            if n["i"] <= 2:
+                return _tool_call_response(
+                    thought="hop",
+                    name="graph_query",
+                    args={"cypher": f"MATCH (n) RETURN n LIMIT {n['i']}"},
+                    call_id=f"c{n['i']}",
+                )
+            return _final_native("## 結論\nok")
+
+        monkeypatch.setattr("solomon.rag.agent._litellm_completion", fake_completion)
+        monkeypatch.setattr("solomon.rag.agent.build_system_prompt", lambda **_kw: "sys")
+
+        run_knowledge_agent("q", user_ctx=None, max_steps=4)  # type: ignore[arg-type]
+        after_first = seen[1][-1]
+        after_second = seen[2][-1]
+        assert after_first["role"] == "tool"
+        assert after_second["role"] == "user"
+        assert "残り 2 手" in after_second["content"]
+
+
+class TestFinalAnswerFallback:
+    def _setup_loop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SOLOMON_RAG_TOOL_MODE", "native")
+        from solomon.rag import agent_tools
+
+        monkeypatch.setattr(
+            agent_tools,
+            "run_sql_query",
+            lambda _u, **kw: {
+                "status": "ok",
+                "sql": "SELECT model, qty FROM t",
+                "columns": ["model", "qty"],
+                "rows": [["SX-5", 4100], ["CV-3", 2100]],
+                "row_count": 2,
+            },
+        )
+        monkeypatch.setattr("solomon.rag.agent.build_system_prompt", lambda **_kw: "sys")
+
+    def test_digest_turn_answers_when_final_turn_empty(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        self._setup_loop(monkeypatch)
+        digest_prompts: list[str] = []
+
+        def fake_completion(**kwargs: Any) -> dict[str, Any]:
+            msgs = kwargs["messages"]
+            if "tools" not in kwargs:
+                digest_prompts.append(str(msgs[-1]["content"]))
+                return _final_native("<think>…</think>## 結論\nSX-5 4,100 台")
+            if kwargs.get("tool_choice") == "none":
+                return _final_native("<think>考え中</think>")
+            return _tool_call_response(
+                thought="q", name="sql_query", args={"question": "q", "sql": "SELECT 1"}
+            )
+
+        monkeypatch.setattr("solomon.rag.agent._litellm_completion", fake_completion)
+        result = run_knowledge_agent("どの車種？", user_ctx=None, max_steps=2)  # type: ignore[arg-type]
+        assert "SX-5 4,100 台" in result.answer_markdown
+        assert digest_prompts and "質問: どの車種？" in digest_prompts[0]
+        assert "SX-5" in digest_prompts[0]
+
+    def test_fallback_shows_tool_results_when_llm_stays_empty(
+        self, monkeypatch: pytest.MonkeyPatch, rag_llm_config: None
+    ) -> None:
+        self._setup_loop(monkeypatch)
+
+        def fake_completion(**kwargs: Any) -> dict[str, Any]:
+            if "tools" not in kwargs or kwargs.get("tool_choice") == "none":
+                return _final_native("")
+            return _tool_call_response(
+                thought="q", name="sql_query", args={"question": "q", "sql": "SELECT 1"}
+            )
+
+        monkeypatch.setattr("solomon.rag.agent._litellm_completion", fake_completion)
+        result = run_knowledge_agent("q", user_ctx=None, max_steps=2)  # type: ignore[arg-type]
+        md = result.answer_markdown
+        assert "十分な情報を取得できませんでした" not in md
+        assert "| model | qty |" in md
+        assert "| SX-5 | 4100 |" in md
 
 
 class TestRagSources:
@@ -829,10 +973,22 @@ class TestPromptInvestigationRules:
         )
 
     def test_graph_rules_when_graph_enabled(self) -> None:
-        prompt = self._prompt(["sql_query", "graph_query"])
+        prompt = self._prompt(["graph_query"])
         assert "可変長パス" in prompt
         assert "上流へたどって共通の起点" in prompt
+        assert "1 段ずつの graph_query の繰り返しでもなく" in prompt
+        assert "params に値を入れて渡す" in prompt
         assert "WITH RECURSIVE" not in prompt
+
+    def test_graph_failure_falls_back_to_recursive_sql(self) -> None:
+        prompt = self._prompt(["sql_query", "graph_query"])
+        assert "graph_query がエラーや 0 件になったら" in prompt
+        assert "WITH RECURSIVE" in prompt
+
+    def test_step_budget_in_prompt(self) -> None:
+        assert "最大 8 手" in self._prompt(["sql_query"], max_steps=8)
+        assert "ツールを呼べるのは最大" not in self._prompt(["sql_query"])
+        assert "同じ引数で繰り返さない" in self._prompt(["sql_query"])
 
     def test_recursive_sql_fallback_without_graph(self) -> None:
         prompt = self._prompt(["sql_query"])

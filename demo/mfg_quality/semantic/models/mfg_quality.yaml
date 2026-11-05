@@ -49,16 +49,17 @@ custom_extensions:
       graph: ロット系譜の多段トレース、部品から車種・OEM まで
       search: 作業日報・保全・8D・クレーム文書の自由記述
     graph_examples:
-    - question: 材料ロットから搭載車種まで
+    - question: 材料ロットが入った製品・車種・OEM・台数（下流、1 回で集計）
       cypher: MATCH (r:Lot {lot_id:$lot_id})-[:CONSUMED_BY*1..6]->(u:Lot {lot_type:'UNIT'})
-        WITH DISTINCT u MATCH (u)-[:SHIPPED_AS]->(s:Shipment)-[:FOR_MODEL]->(m:VehicleModel)
-        RETURN u.part_no AS product, m.model_name AS model, count(DISTINCT u) AS unit_lots,
-        sum(s.qty) AS vehicles
-      notes: 可変長 CONSUMED_BY（下流向き）。同じユニットに複数経路で届くので WITH DISTINCT u で重複を除いてから台数を合計する
+        WITH DISTINCT u MATCH (u)-[:SHIPPED_AS]->(s:Shipment)-[:FOR_MODEL]->(m:VehicleModel)-[:OF_OEM]->(o:OEM)
+        RETURN u.part_no AS product, o.name AS oem, m.model_name AS model, count(DISTINCT
+        u) AS unit_lots, sum(s.qty) AS vehicles
+      notes: params={"lot_id":"<材料ロット ID>"}。成形・サブ組立を 1 段ずつたどらず、この 1 本でユニットと出荷まで集計する。同じユニットに複数経路で届くので
+        WITH DISTINCT u してから台数を合計する
     - question: ユニットロットに使われた材料ロット（上流）
       cypher: MATCH (m:Lot {lot_type:'MATERIAL'})-[:CONSUMED_BY*1..6]->(u:Lot {lot_id:$unit_lot_id})
         RETURN DISTINCT m.lot_id AS material_lot
-      notes: 矢印は常に投入側 → 生成側。上流は終点にユニットを置く
+      notes: params={"unit_lot_id":"<ユニットロット ID>"}。矢印は常に投入側 → 生成側。上流は終点にユニットを置く
     search:
       expansion_instructions: 班長の口語・略称・擬音語、保全員の型番、品証の技術用語、ディーラーの利用者語が混在する。
       use_synonyms: false

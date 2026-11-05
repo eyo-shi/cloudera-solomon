@@ -16,6 +16,19 @@ from solomon.transport.config import get_trino_config
 from solomon.transport.user_context import UserContext
 
 _VARLENGTH_RE = re.compile(r"\*(\d+)\.\.(\d+)")
+_CYPHER_STRING_RE = re.compile(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"")
+_CYPHER_PARAM_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def missing_cypher_params(cypher: str, params: dict[str, Any] | None) -> list[str]:
+    """``$name`` のうち params に値が無いもの（文字列リテラル内は除く）。"""
+    body = _CYPHER_STRING_RE.sub("''", cypher)
+    given = {k for k, v in (params or {}).items() if v is not None}
+    seen: list[str] = []
+    for name in _CYPHER_PARAM_RE.findall(body):
+        if name not in given and name not in seen:
+            seen.append(name)
+    return seen
 
 
 def clamp_cypher_varlength(cypher: str, *, max_hops: int = 8) -> str:
@@ -158,6 +171,17 @@ def run_graph_query(
     validation = validate_readonly_cypher(cypher)
     if validation:
         return {"status": "error", "message": validation}
+    missing = missing_cypher_params(cypher, params)
+    if missing:
+        example = ", ".join(f'"{name}": "<値>"' for name in missing)
+        return {
+            "status": "error",
+            "message": (
+                "Cypher のパラメータ "
+                + ", ".join(f"${name}" for name in missing)
+                + f" に値がありません。params={{{example}}} を付けて再実行する。"
+            ),
+        }
     tool = GraphCypherQueryTool()
     result = tool.run(user_ctx=user_ctx, cypher=cypher, params=params or {})
     if result.get("status") != "ok":
@@ -283,6 +307,8 @@ def default_agent_tools(
             description=(
                 "PuppyGraph で読み取り専用 openCypher を実行する。"
                 "つながり・多段トレースに使う。可変長は *1..8 まで。"
+                "多段の追跡は 1 段ずつ繰り返さず、可変長パス 1 回で末端まで集計する。"
+                "Cypher 内の $名前 には params で値を渡す。"
             ),
             parameters={
                 "type": "object",
@@ -356,6 +382,7 @@ __all__ = [
     "cache_key",
     "clamp_cypher_varlength",
     "default_agent_tools",
+    "missing_cypher_params",
     "run_doc_search",
     "run_graph_query",
     "run_sql_query",

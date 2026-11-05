@@ -288,6 +288,7 @@ def build_system_prompt(
     has_history: bool = False,
     question: str = "",
     user_ctx: UserContext | None = None,
+    max_steps: int | None = None,
 ) -> str:
     """``question`` は検証済みクエリ例の選択、``user_ctx`` はスキーマ取得の認可に使う。"""
     sections: list[str] = [
@@ -341,15 +342,23 @@ def build_system_prompt(
     if "graph_query" in tool_names:
         sections.append(
             "## つながり・上流/下流・影響範囲の追跡（graph_query）\n"
-            "- 段数が決まっていない追跡は、固定段数の JOIN ではなく graph_query の"
+            "- 段数が決まっていない追跡は、固定段数の JOIN でも 1 段ずつの graph_query の繰り返しでもなく、"
             "可変長パス（例: `-[:REL*1..8]->`）で 1 回でたどる。"
             "上流へたどるときは辺を逆向き（`<-[:REL*1..8]-`）に書く。\n"
             "- 「他にどこに使われたか」「影響を受けるのはどれか」という質問は、"
             "(1) 与えられた対象から上流へたどって共通の起点を特定し、"
-            "(2) その起点から下流へたどって全件を列挙・集計する、の 2 段で進める。\n"
-            "- 起点の ID が分からないときは、sql_query / doc_search で先に特定してから graph_query に渡す。"
-            "ID は文字列リテラルではなく params で渡す。\n"
+            "(2) その起点から下流へたどって全件を列挙・集計する、の 2 段で進める。"
+            "(2) は起点から末端（出荷・車種など）までを 1 本のクエリでたどり、集計（count / sum）まで済ませる。\n"
+            "- 起点の ID が分からないときは、sql_query / doc_search で先に特定してから graph_query に渡す。\n"
+            "- クエリ例の `$名前` はパラメータ。params に値を入れて渡す"
+            "（例: `{lot_id:$lot_id}` なら params に `{\"lot_id\": \"<特定した ID>\"}`）。\n"
             "- グラフ定義のクエリ例があれば、ラベル名・辺の向き・プロパティ名をそれに合わせる。\n"
+            + (
+                "- graph_query がエラーや 0 件になったら、同じ形で繰り返さない。"
+                "親子関係の表を WITH RECURSIVE の sql_query でたどる（検証済みクエリ例があればそれを直して使う）。\n"
+                if "sql_query" in tool_names
+                else ""
+            )
         )
     elif "sql_query" in tool_names:
         sections.append(
@@ -371,6 +380,13 @@ def build_system_prompt(
 
     sections.append(
         "## 調査の進め方\n"
+        + (
+            f"- ツールを呼べるのは最大 {max_steps} 手。"
+            "1 手で答えに直結するクエリ（集計まで含む）を選び、残りが少なくなったら最終回答を書く。\n"
+            if max_steps
+            else ""
+        )
+        + "- 同じツールを同じ引数で繰り返さない（結果は変わらない）。\n"
         "- 1 つのツールの結果を次のツールの条件（ID・キーワード）に使ってよい。\n"
         "- 表記ゆれ（設備名の略称など）は文書と表を突き合わせて同一視してよいが、"
         "そう判断した根拠を最終回答に書くこと。\n"
@@ -403,6 +419,194 @@ def _truncate_tool_result(payload: dict[str, Any]) -> tuple[str, bool]:
         return text, False
     trimmed = text[: _RESULT_MAX_CHARS - 80] + "…"
     return trimmed + '\n"(truncated: tool result exceeded 6000 characters)"', True
+
+
+_DUPLICATE_CALL_NOTE = (
+    "同じ引数で実行済みのため前回と同じ結果。"
+    "別の条件・別のツールにするか、最終回答を書く。"
+)
+
+
+def _tool_result_for_llm(result: dict[str, Any], cached: bool) -> str:
+    """LLM に返すツール結果。キャッシュ命中（同じ呼び出しの繰り返し）には注意書きを付ける。"""
+    payload = {**result, "note": _DUPLICATE_CALL_NOTE} if cached else result
+    text, _ = _truncate_tool_result(payload)
+    return text
+
+
+def _budget_notice(remaining: int) -> str | None:
+    """残り手数が少ないときに LLM へ伝える一文。"""
+    if remaining == 2:
+        return (
+            "残り 2 手です。集計が必要なら 1 回のクエリで済ませ、"
+            "その次の応答で最終回答を書いてください。"
+        )
+    if remaining == 1:
+        return "残り 1 手です。ツールは呼ばず、ここまでの結果で最終回答を書いてください。"
+    return None
+
+
+_DIGEST_MAX_CHARS = 12000
+_DIGEST_ENTRY_MAX_CHARS = 3000
+_DIGEST_ROWS_MAX = 30
+
+
+def _hit_digest_body(hit: SourceHit) -> dict[str, Any]:
+    p = hit.payload
+    if hit.source == "lakehouse":
+        return {
+            "sql": p.get("sql"),
+            "columns": p.get("columns"),
+            "rows": (p.get("rows") or [])[:_DIGEST_ROWS_MAX],
+            "row_count": p.get("row_count"),
+        }
+    if hit.source == "graph":
+        return {
+            "cypher": p.get("cypher"),
+            "params": p.get("params"),
+            "records": (p.get("records") or [])[:_DIGEST_ROWS_MAX],
+            "count": p.get("count"),
+        }
+    docs = []
+    for d in (p.get("documents") or [])[:5]:
+        if isinstance(d, dict):
+            docs.append({k: d.get(k) for k in ("doc_id", "title", "doc_date", "snippet")})
+    return {"query": p.get("query"), "documents": docs}
+
+
+def _hits_digest(hits: list[SourceHit]) -> str:
+    """ツール結果の要約テキスト（新しい結果を優先して文字数上限に収める）。"""
+    entries: list[str] = []
+    total = 0
+    for i in range(len(hits), 0, -1):
+        hit = hits[i - 1]
+        body = json.dumps(_hit_digest_body(hit), ensure_ascii=False, default=str)
+        entry = f"[{i}] {hit.source}: {body[:_DIGEST_ENTRY_MAX_CHARS]}"
+        if total + len(entry) > _DIGEST_MAX_CHARS and entries:
+            break
+        entries.append(entry)
+        total += len(entry)
+    return "\n".join(reversed(entries))
+
+
+def _final_text_from_content(raw: Any, tool_names: list[str]) -> str:
+    if not isinstance(raw, str):
+        return ""
+    text, _ = _parse_text_tool_calls(_strip_reasoning(raw), tool_names)
+    text = text.strip()
+    if text.startswith("{"):
+        parsed = _parse_json_lenient(text)
+        if isinstance(parsed, dict) and isinstance(parsed.get("final_answer"), str):
+            return parsed["final_answer"].strip()
+    return text
+
+
+def _digest_answer_turn(
+    prompt: str,
+    hits: list[SourceHit],
+    tool_names: list[str],
+    *,
+    timeout: float,
+) -> str:
+    """会話履歴を使わず、ツール結果の要約だけから最終回答を作り直す。
+
+    ReAct の会話が長くなると、まとめの 1 手が空（思考だけ・ツール呼び出しだけ）になることがある。
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "あなたは調査結果をまとめるアシスタントです。"
+                "ユーザーの質問に、与えられたツール結果だけを根拠に日本語 Markdown で答えてください。"
+                "形式: 1. 結論 2. 根拠（使ったツールと参照した ID / キー） 3. 未確定事項。"
+                "ツールは呼ばない。ツール結果に無い数値や ID を作らない。思考は短く。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"質問: {prompt}\n\n## ツール結果\n{_hits_digest(hits)}",
+        },
+    ]
+    kwargs = _merge_completion_kwargs(
+        messages,
+        tools=None,
+        tool_choice=None,
+        max_tokens=_FINAL_TURN_MAX_TOKENS,
+        temperature=0.2,
+        timeout=timeout,
+    )
+    if kwargs is None:
+        return ""
+    try:
+        resp = _litellm_completion(**kwargs)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("rag_agent.digest_turn_failed", error=str(exc))
+        return ""
+    return _final_text_from_content(_message_from_response(resp).get("content"), tool_names)
+
+
+_FALLBACK_TABLE_ROWS = 10
+
+
+def _md_cell(value: Any) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ")[:80]
+
+
+def _md_table(columns: list[str], rows: list[list[Any]]) -> str:
+    lines = [
+        "| " + " | ".join(_md_cell(c) for c in columns) + " |",
+        "| " + " | ".join("---" for _ in columns) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(_md_cell(v) for v in row) + " |")
+    return "\n".join(lines)
+
+
+def _hit_table(hit: SourceHit) -> str | None:
+    p = hit.payload
+    if hit.source == "lakehouse":
+        rows = p.get("rows") or []
+        cols = [str(c) for c in (p.get("columns") or [])]
+        if not rows:
+            return None
+        if isinstance(rows[0], dict):
+            cols = cols or [str(k) for k in rows[0]]
+            table_rows = [[r.get(c) for c in cols] for r in rows[:_FALLBACK_TABLE_ROWS]]
+        else:
+            table_rows = [list(r) for r in rows[:_FALLBACK_TABLE_ROWS]]
+            cols = cols or [f"col{i + 1}" for i in range(len(table_rows[0]))]
+        title = f"SQL（{p.get('row_count', len(rows))} 行）"
+    elif hit.source == "graph":
+        recs = [r for r in (p.get("records") or []) if isinstance(r, dict)]
+        if not recs:
+            return None
+        cols = [str(k) for k in recs[0]]
+        table_rows = [[r.get(c) for c in cols] for r in recs[:_FALLBACK_TABLE_ROWS]]
+        title = f"グラフ（{p.get('count', len(recs))} 件）"
+    else:
+        return None
+    return f"**{title}**\n\n{_md_table(cols, table_rows)}"
+
+
+def _fallback_answer(hits: list[SourceHit]) -> str:
+    """LLM が最終回答を返さなかったときの回答。取得済みの結果は捨てずに見せる。"""
+    tables = [t for t in (_hit_table(h) for h in hits[-3:]) if t]
+    if not tables:
+        return (
+            "## 結論\n"
+            "十分な情報を取得できませんでした。\n\n"
+            "## 未確定事項\n"
+            "- LLM またはツールの応答が不完全でした。"
+        )
+    return (
+        "## 結論\n"
+        "手数内に回答をまとめられませんでした。"
+        "下の取得結果と根拠のクエリを確認するか、質問を絞って再実行してください。\n\n"
+        "## 取得できた結果（直近の抜粋）\n\n"
+        + "\n\n".join(tables)
+        + "\n\n## 未確定事項\n"
+        f"- LLM の最終回答が空でした（ツール結果 {len(hits)} 件は取得済み）。"
+    )
 
 
 def _hit_from_tool(name: str, result: dict[str, Any]) -> SourceHit | None:
@@ -680,6 +884,7 @@ def run_knowledge_agent(
         has_history=bool(prior),
         question=prompt,
         user_ctx=user_ctx,
+        max_steps=max_steps,
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system},
@@ -757,12 +962,17 @@ def run_knowledge_agent(
                 if hit:
                     hits.append(hit)
 
-                result_text, _ = _truncate_tool_result(result)
+                result_text = _tool_result_for_llm(result, cached)
+                notice = _budget_notice(max_steps - steps_taken)
                 messages.append(
                     {"role": "assistant", "content": json.dumps(parsed, ensure_ascii=False)}
                 )
                 messages.append(
-                    {"role": "user", "content": f"Tool {action} result:\n{result_text}"}
+                    {
+                        "role": "user",
+                        "content": f"Tool {action} result:\n{result_text}"
+                        + (f"\n\n{notice}" if notice else ""),
+                    }
                 )
                 continue
 
@@ -841,14 +1051,16 @@ def run_knowledge_agent(
                     if hit:
                         hits.append(hit)
 
-                    result_text, _ = _truncate_tool_result(result)
                     messages.append(
                         {
                             "role": "tool",
                             "tool_call_id": tc.get("id") or name,
-                            "content": result_text,
+                            "content": _tool_result_for_llm(result, cached),
                         }
                     )
+                notice = _budget_notice(max_steps - steps_taken)
+                if notice:
+                    messages.append({"role": "user", "content": notice})
                 continue
 
             if content:
@@ -897,11 +1109,7 @@ def run_knowledge_agent(
                     tool_choice="none",
                 )
                 raw = msg.get("content") if msg else None
-                if isinstance(raw, str):
-                    remaining, _ = _parse_text_tool_calls(
-                        _strip_reasoning(raw), tool_names
-                    )
-                    final_answer = remaining
+                final_answer = _final_text_from_content(raw, tool_names)
                 if not final_answer:
                     _logger.warning(
                         "rag_agent.final_turn_empty",
@@ -911,13 +1119,15 @@ def run_knowledge_agent(
             except Exception as exc:  # noqa: BLE001
                 _logger.warning("rag_agent.final_turn_failed", error=str(exc))
 
-    if not final_answer:
-        final_answer = (
-            "## 結論\n"
-            "十分な情報を取得できませんでした。\n\n"
-            "## 未確定事項\n"
-            "- LLM またはツールの応答が不完全でした。"
+    if not final_answer and hits:
+        final_answer = _digest_answer_turn(
+            prompt, hits, tool_names, timeout=min(90.0, timeout_sec)
         )
+        if not final_answer:
+            _logger.warning("rag_agent.digest_turn_empty", hits=len(hits))
+
+    if not final_answer:
+        final_answer = _fallback_answer(hits)
 
     # 最後に成功した SQL（探索のあとの集計クエリが回答の主根拠になりやすい）
     sql_executed = None

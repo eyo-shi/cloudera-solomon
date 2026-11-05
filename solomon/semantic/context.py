@@ -188,7 +188,7 @@ def render_graph_schema(max_chars: int = 8000) -> str:
             continue
         entry = f"- 例: {question}" if question else "- 例:"
         if notes:
-            entry += f"（{notes[:80]}）"
+            entry += f"（{notes[:200]}）"
         if cypher:
             entry += f"\n  `{cypher[:600]}`"
         examples.append(entry)
