@@ -21,7 +21,8 @@ from solomon.transport.user_context import UserContext
 
 _logger = get_logger(__name__)
 
-_COLUMN_CACHE: dict[tuple[str, str, str], list[dict[str, str]]] = {}
+#: (ユーザー, catalog, schema, table)。Ranger の列ポリシーで見える列が人ごとに違う
+_COLUMN_CACHE: dict[tuple[str, str, str, str], list[dict[str, str]]] = {}
 
 
 def clear_schema_context_caches() -> None:
@@ -251,7 +252,8 @@ def fetch_columns_information_schema(
     user_ctx: Optional[UserContext] = None,
 ) -> list[dict[str, str]]:
     """プロセス内キャッシュ付き ``information_schema.columns``。"""
-    key = (catalog.lower(), schema.lower(), table.lower())
+    user = (user_ctx.user_name if user_ctx is not None else "") or ""
+    key = (user, catalog.lower(), schema.lower(), table.lower())
     if key in _COLUMN_CACHE:
         return _COLUMN_CACHE[key]
 

@@ -33,6 +33,9 @@ _USER_HEADER_CANDIDATES = (
     "remote-user",  # CML Application (BrowserSvcs)
     "cdsw-authenticated-user",
 )
+# CML Application で信用するユーザー名ヘッダ。CML が認証後に付けるもので、
+# それ以外 (X-Forwarded-User 等) はブラウザが自由に付けられるため読まない。
+_CML_USER_HEADER = "remote-user"
 # CML Workbench Application: ブラウザ same-origin リクエストは Cookie で JWT を送る
 _COOKIE_JWT_NAMES = (
     "_cdswuserstoken",
@@ -198,25 +201,31 @@ def build_user_context_from_headers(
 
     Knox JWT が無い場合 (開発モード等) は "anonymous" で構築する。
     プロダクション設定では JWT 必須にする middleware を上に置く。
+
+    CML Application では、CML が認証後に付ける ``Remote-User`` だけをユーザー名に
+    使う。ユーザー名は Trino の成り代わり (Ranger の判定主体) に使うため、
+    ブラウザが付けられるヘッダや署名を検証していない JWT のクレームからは取らない。
     """
     lower = _lowercase_headers(headers)
     jwt_token = extract_jwt(headers, cookies=cookies)
+    cml_app = _is_cml_application_mode()
 
     # ユーザー名: 明示ヘッダ → JWT claim → "anonymous"
     user_name: Optional[str] = None
-    for h in _USER_HEADER_CANDIDATES:
-        if lower.get(h):
+    user_headers = (_CML_USER_HEADER,) if cml_app else _USER_HEADER_CANDIDATES
+    for h in user_headers:
+        if lower.get(h, "").strip():
             user_name = lower[h].strip()
             break
     groups: tuple[str, ...] = ()
-    for h in _GROUPS_HEADER_CANDIDATES:
+    for h in () if cml_app else _GROUPS_HEADER_CANDIDATES:
         if lower.get(h):
             groups = tuple(g.strip() for g in lower[h].split(",") if g.strip())
             break
 
     if jwt_token and (not user_name or not groups):
         claims = _decode_jwt_payload_unverified(jwt_token)
-        if not user_name:
+        if not user_name and not cml_app:
             for claim_key in ("preferred_username", "sub", "user"):
                 v = claims.get(claim_key)
                 if isinstance(v, str) and v:
@@ -236,10 +245,15 @@ def build_user_context_from_headers(
 
 
 def is_authenticated_context(ctx: UserContext) -> bool:
-    """API 認可: Knox JWT または CML Application の remote-user セッション。"""
-    if ctx.knox_jwt:
-        return True
-    return _is_cml_application_mode() and bool(ctx.user_name) and ctx.user_name != "anonymous"
+    """API 認可: Knox JWT または CML Application の remote-user セッション。
+
+    CML Application では JWT があっても ``Remote-User`` が無ければ通さない
+    (JWT は ``/tmp/jwt`` = アプリ作成者のトークンにフォールバックするため)。
+    """
+    has_user = bool(ctx.user_name) and ctx.user_name != "anonymous"
+    if _is_cml_application_mode():
+        return has_user
+    return bool(ctx.knox_jwt)
 
 
 def bearer_header(ctx: UserContext) -> dict[str, str]:

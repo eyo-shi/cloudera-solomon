@@ -249,6 +249,10 @@ Deploy 時に `TRINO_MODE` で接続方式を切り替える（デフォルト `
 - `TRINO_SCHEMA` (default `demo`)
 - **認証**: 既定は UI ログインユーザーの **Knox JWT**。Basic 認証を使う場合は
   `TRINO_USER` + `TRINO_PASSWORD`（`TRINO_AUTH=auto` のときは password があれば Basic になる）
+- **成り代わり** (`TRINO_IMPERSONATION`, 既定 `auto`): Basic 認証のとき、CML Application では
+  `TRINO_USER` で認証し、クエリはログインユーザー（CML の `Remote-User`）として実行する。
+  Ranger の権限はログインユーザーごとに効く。Ranger の `cm_trino` で `TRINO_USER` に
+  Trino User リソースの `impersonate` を許可しておくこと。`off` で全員 `TRINO_USER` の権限になる
 
 旧名 `SOLOMON_TRINO_*` も後方互換で読み取る。
 

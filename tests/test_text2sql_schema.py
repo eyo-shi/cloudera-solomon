@@ -122,9 +122,25 @@ def test_fetch_columns_uses_cache() -> None:
     clear_schema_context_caches()
     from solomon.tools import schema_context as sc_mod
 
-    sc_mod._COLUMN_CACHE[("c", "s", "t")] = [{"name": "x", "type": "int"}]
+    sc_mod._COLUMN_CACHE[("", "c", "s", "t")] = [{"name": "x", "type": "int"}]
     cols = sc_mod.fetch_columns_information_schema("c", "s", "t")
     assert cols == [{"name": "x", "type": "int"}]
+
+
+def test_column_cache_is_per_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ranger の列ポリシーは人ごとに違うので、他人の列一覧をキャッシュから返さない。"""
+    from solomon.tools import schema_context as sc_mod
+    from solomon.transport.user_context import UserContext
+
+    clear_schema_context_caches()
+    sc_mod._COLUMN_CACHE[("alice", "c", "s", "t")] = [{"name": "secret", "type": "int"}]
+    monkeypatch.setattr("solomon.transport.config.get_trino_config", lambda: None)
+    assert sc_mod.fetch_columns_information_schema(
+        "c", "s", "t", user_ctx=UserContext(user_name="alice")
+    ) == [{"name": "secret", "type": "int"}]
+    assert sc_mod.fetch_columns_information_schema(
+        "c", "s", "t", user_ctx=UserContext(user_name="bob")
+    ) == []
 
 
 def test_japanese_question_ranks_related_tables() -> None:

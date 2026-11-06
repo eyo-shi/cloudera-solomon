@@ -94,6 +94,10 @@ class TrinoConfig:
     service_user: Optional[str] = None
     #: Basic 認証パスワード（env / Connection 由来。JWT モードでは未使用）
     password: Optional[str] = None
+    #: Basic 認証時の成り代わり ``on`` | ``off`` | ``auto``（CML Application なら on）。
+    #: on のとき ``service_user`` で認証し、クエリはログインユーザーとして実行する
+    #: （Ranger はログインユーザーで判定。Ranger で service_user に impersonate が必要）
+    impersonation: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -476,6 +480,13 @@ def _get_external_trino_config(
     catalog = catalog_env or "iceberg"
     schema = schema_env or "demo"
     auth_mode, service_user, password = _trino_auth_from_env()
+    impersonation = (trino_env("IMPERSONATION") or "auto").strip().lower()
+    if impersonation in ("true", "1", "yes"):
+        impersonation = "on"
+    elif impersonation in ("false", "0", "no"):
+        impersonation = "off"
+    elif impersonation not in ("on", "off"):
+        impersonation = "auto"
     return TrinoConfig(
         host=host,
         port=port,
@@ -488,6 +499,7 @@ def _get_external_trino_config(
         auth_mode=auth_mode,
         service_user=service_user,
         password=password,
+        impersonation=impersonation,
     )
 
 

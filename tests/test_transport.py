@@ -182,6 +182,32 @@ class TestBuildUserContext:
         opaque = "a" * 40
         assert extract_jwt({}, cookies={"_cdswuserstoken": opaque}) == opaque
 
+    def test_cml_app_trusts_only_remote_user(self, monkeypatch):
+        """CML Application では、ブラウザが付けられるヘッダでユーザーを名乗れない。"""
+        monkeypatch.setenv("CDSW_APP_PORT", "8090")
+        monkeypatch.setattr(
+            "solomon.transport.auth._load_workload_jwt_file", lambda: None
+        )
+        ctx = build_user_context_from_headers(
+            {
+                "X-Forwarded-User": "admin",
+                "X-Remote-User": "admin",
+                "X-Forwarded-Groups": "admins",
+                "Remote-User": "alice",
+            }
+        )
+        assert ctx.user_name == "alice"
+        assert ctx.groups == ()
+
+    def test_cml_app_ignores_spoofed_user_headers_and_jwt_claims(self, monkeypatch):
+        monkeypatch.setenv("CDSW_APP_PORT", "8090")
+        forged = _fake_jwt({"sub": "admin"})
+        ctx = build_user_context_from_headers(
+            {"X-Forwarded-User": "admin", "Authorization": f"Bearer {forged}"}
+        )
+        assert ctx.user_name == "anonymous"
+        assert is_authenticated_context(ctx) is False
+
 
 class TestIsAuthenticatedContext:
     def test_jwt_is_enough(self):
@@ -196,6 +222,12 @@ class TestIsAuthenticatedContext:
     def test_anonymous_not_authenticated(self, monkeypatch):
         monkeypatch.setenv("CDSW_APP_PORT", "8090")
         ctx = UserContext(user_name="anonymous")
+        assert is_authenticated_context(ctx) is False
+
+    def test_cml_app_jwt_without_remote_user_is_not_enough(self, monkeypatch):
+        # /tmp/jwt (アプリ作成者のトークン) だけでは、誰のリクエストか分からない
+        monkeypatch.setenv("CDSW_APP_PORT", "8090")
+        ctx = UserContext(user_name="anonymous", knox_jwt="tok")
         assert is_authenticated_context(ctx) is False
 
 
