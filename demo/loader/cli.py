@@ -35,6 +35,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # Solomon 本体と同じく ~/.solomon/deploy.env を読む（既存の環境変数は上書きしない）。
+    # 読まないと TRINO_* が deploy.env にしか無い環境で PuppyGraph の JDBC 値を作れない
+    from solomon.infra.deploy_env import bootstrap_deploy_env
+
+    bootstrap_deploy_env()
+
     domain_dir = Path(args.domain_dir)
     if not domain_dir.is_absolute():
         domain_dir = (REPO_ROOT / domain_dir).resolve()
