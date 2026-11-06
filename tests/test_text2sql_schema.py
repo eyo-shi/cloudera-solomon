@@ -197,6 +197,95 @@ def test_trino_error_retries_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Column bad_col not found" in llm_calls[1]
 
 
+@pytest.mark.parametrize(
+    "bad_sql",
+    [
+        "EXPLAIN ANALYZE INSERT INTO t VALUES (1)",
+        "SELECT 1; DROP TABLE t",
+        "CALL system.flush_metadata_cache()",
+    ],
+)
+def test_retry_never_executes_sql_that_fails_guard(
+    monkeypatch: pytest.MonkeyPatch, bad_sql: str
+) -> None:
+    """LLM の 1 回目が読み取り専用チェックに落ちたら、実行せずに書き直させる。"""
+    llm_calls: list[str] = []
+
+    def fake_llm(prompt: str) -> tuple[str | None, str]:
+        llm_calls.append(prompt)
+        return (bad_sql, "first") if len(llm_calls) == 1 else ("SELECT 1 FROM t LIMIT 10", "")
+
+    exec_calls: list[str] = []
+
+    def fake_trino(_self: Any, **kwargs: Any) -> dict[str, Any]:
+        exec_calls.append(kwargs.get("sql", ""))
+        return {"status": "ok", "columns": [{"name": "x"}], "rows": [[1]], "row_count": 1}
+
+    monkeypatch.setattr("solomon.tools.text2sql._llm_sql", fake_llm)
+    monkeypatch.setattr("solomon.tools.text2sql.TrinoQueryTool.run", fake_trino)
+    monkeypatch.setattr("solomon.tools.text2sql.build_schema_context", lambda *_a, **_k: "## T")
+
+    out = execute_readonly_sql_with_retry(
+        None, question="q", catalog="demo_catalog", schema="demo_schema", max_rows=10
+    )
+    assert exec_calls == ["SELECT 1 FROM t LIMIT 10"]
+    assert out["status"] == "ok"
+    assert out["attempts"][0]["sql"] == bad_sql
+    assert bad_sql in llm_calls[1]
+
+
+def test_retry_gives_up_when_guard_fails_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+    exec_calls: list[str] = []
+    monkeypatch.setattr(
+        "solomon.tools.text2sql._llm_sql", lambda _p: ("DELETE FROM t", "")
+    )
+    monkeypatch.setattr(
+        "solomon.tools.text2sql.TrinoQueryTool.run",
+        lambda _self, **kw: exec_calls.append(kw.get("sql", "")) or {"status": "ok"},
+    )
+    monkeypatch.setattr("solomon.tools.text2sql.build_schema_context", lambda *_a, **_k: "## T")
+
+    out = execute_readonly_sql_with_retry(
+        None, question="q", catalog="demo_catalog", schema="demo_schema", max_rows=10
+    )
+    assert out["status"] == "error"
+    assert exec_calls == []
+    assert len(out["attempts"]) == 2
+
+
+def test_readonly_statement_allowlist() -> None:
+    from solomon.tools.sql_guard import validate_readonly_sql, validate_readonly_statement
+
+    for ok_sql in (
+        "SELECT 1",
+        "-- head\nWITH a AS (SELECT 1) SELECT * FROM a",
+        "SHOW TABLES",
+        "DESCRIBE iceberg.s.t",
+        "EXPLAIN SELECT 1",
+        "EXPLAIN ANALYZE VERBOSE SELECT 1",
+        "EXPLAIN (TYPE DISTRIBUTED) SELECT 1",
+    ):
+        assert validate_readonly_statement(ok_sql) is None, ok_sql
+    for bad_sql in (
+        "/* x */ DROP TABLE t",
+        "EXPLAIN ANALYZE INSERT INTO t VALUES (1)",
+        "EXPLAIN (TYPE IO) DELETE FROM t",
+        "SET SESSION a = 1",
+        "RESET SESSION a",
+        "USE iceberg.s",
+        "CALL system.x()",
+        "COMMENT ON TABLE t IS 'x'",
+        "REFRESH MATERIALIZED VIEW v",
+        "EXECUTE stmt",
+        "START TRANSACTION",
+        "SHOW TABLES; DROP TABLE t",
+    ):
+        assert validate_readonly_statement(bad_sql) is not None, bad_sql
+    assert validate_readonly_sql("/* c */ SELECT 1") is None
+    assert validate_readonly_sql("/* c */ DROP TABLE t") is not None
+    assert validate_readonly_sql("SHOW TABLES") is not None
+
+
 def test_run_sql_query_with_sql_uses_retry_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

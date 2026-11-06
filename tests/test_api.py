@@ -29,6 +29,11 @@ def _api_setup_services_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+# セッションは持ち主しか使えないので、作った人と同じユーザーで呼ぶ
+_ALICE = {"X-Forwarded-User": "alice"}
+_BOB = {"X-Forwarded-User": "bob"}
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     app = create_app()
@@ -167,6 +172,63 @@ def test_query_rejects_mutation(client: TestClient) -> None:
     assert r.json()["detail"]["error_code"] == "TRINO_QUERY_FAILED"
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "/* preview */ DROP TABLE x",
+        "-- note\nINSERT INTO x VALUES (1)",
+        "EXPLAIN ANALYZE INSERT INTO x VALUES (1)",
+        "SET SESSION query_max_run_time = '1h'",
+        "CALL iceberg.system.rollback_to_snapshot('s', 't', 1)",
+        "SELECT 1; DROP TABLE x",
+    ],
+)
+def test_query_rejects_disguised_mutation(client: TestClient, sql: str) -> None:
+    """先頭コメント・EXPLAIN ANALYZE・SET/CALL など、禁止語の照合をすり抜ける文も 400。"""
+    r = client.post(
+        "/api/query",
+        headers={"Authorization": "Bearer fake.jwt.token"},
+        json={"sql": sql},
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"]["error_code"] == "TRINO_QUERY_FAILED"
+
+
+def test_session_hidden_from_other_user(client: TestClient) -> None:
+    """他人のセッションは読めず、ID を指定しても履歴を引き継げない。"""
+    r = client.post(
+        "/api/wish", headers=_ALICE, json={"prompt": "こんにちは", "session_id": "sess_iso_1"}
+    )
+    assert r.status_code == 200
+
+    assert client.get("/api/sessions/sess_iso_1", headers=_BOB).status_code == 404
+
+    r = client.post(
+        "/api/wish", headers=_BOB, json={"prompt": "こんにちは", "session_id": "sess_iso_1"}
+    )
+    done_evt = next(p for k, p in _parse_sse(r.text) if k == "done")
+    bob_sid = done_evt["session_id"]
+    assert bob_sid != "sess_iso_1"
+
+    alice = client.get("/api/sessions/sess_iso_1", headers=_ALICE).json()
+    assert len(alice["turns"]) == 1
+    bob = client.get(f"/api/sessions/{bob_sid}", headers=_BOB).json()
+    assert bob["user_name"] == "bob" and len(bob["turns"]) == 1
+
+
+def test_artifact_hidden_from_other_user(client: TestClient) -> None:
+    from solomon.api.state import get_store
+
+    store = get_store()
+    sess = store.get_or_create_session("sess_iso_art", "alice")
+    art = store.register_artifact("sql", ref={"sql": "SELECT 1"}, session_id=sess.session_id)
+
+    assert client.get(f"/api/artifacts/{art.artifact_id}", headers=_BOB).status_code == 404
+    r = client.get(f"/api/artifacts/{art.artifact_id}", headers=_ALICE)
+    assert r.status_code == 200
+    assert r.json()["ref"] == {"sql": "SELECT 1"}
+
+
 def test_ossie_bad_fq(client: TestClient) -> None:
     r = client.get("/api/ossie/not_a_fq")
     assert r.status_code == 404
@@ -251,6 +313,7 @@ def test_wish_analytics_summary_dispatches_to_summary_crew(
     )
     r = client.post(
         "/api/wish",
+        headers=_ALICE,
         json={"prompt": "そのテーブルをサマリーして", "session_id": sess.session_id},
     )
     assert r.status_code == 200
@@ -288,6 +351,7 @@ def test_wish_analytics_dashboard_dispatches_to_dashboard_crew(
     )
     r = client.post(
         "/api/wish",
+        headers=_ALICE,
         json={
             "prompt": "そのテーブルからダッシュボードを作って",
             "session_id": sess.session_id,

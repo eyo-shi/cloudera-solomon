@@ -10,11 +10,11 @@ Knox 経由の Trino Gateway に対し、エンドユーザーの Knox JWT を B
 """
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from solomon.tools.sql_guard import validate_readonly_statement
 from solomon.transport.errors import ErrorCode, err, ok
 from solomon.transport.trino_catalog import resolve_trino_catalog
 from solomon.tools._schema_args import coalesce_schema_field
@@ -25,14 +25,8 @@ from solomon.tools._trino_client import map_trino_error, trino_connection_for_us
 
 _logger = get_logger(__name__)
 
-_MUTATION_KEYWORDS = re.compile(
-    r"^\s*(CREATE|DROP|ALTER|INSERT|UPDATE|DELETE|TRUNCATE|MERGE|CALL|GRANT|REVOKE)\b",
-    re.IGNORECASE,
-)
-
-
 def _is_readonly(sql: str) -> bool:
-    return _MUTATION_KEYWORDS.match(sql) is None
+    return validate_readonly_statement(sql) is None
 
 
 # ------------------------------------------------------------------ #

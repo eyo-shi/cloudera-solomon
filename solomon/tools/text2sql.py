@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
@@ -17,11 +16,6 @@ from solomon.transport.errors import ErrorCode, err, ok
 from solomon.transport.llm import try_json_completion
 from solomon.transport.tool_base import BaseSolomonTool
 from solomon.transport.user_context import UserContext
-
-_MUTATION = re.compile(
-    r"^\s*(CREATE|DROP|ALTER|INSERT|UPDATE|DELETE|TRUNCATE|MERGE|GRANT|REVOKE)\b",
-    re.IGNORECASE,
-)
 
 _PROMPT_RULES = (
     "Generate Trino SQL for the question below.\n"
@@ -147,48 +141,44 @@ def execute_readonly_sql_with_retry(
     for attempt_idx in range(2):
         guard = validate_readonly_sql(current_sql)
         if guard:
+            # 読み取り専用チェックに落ちた SQL は決して実行しない。
+            # LLM が書いた 1 回目だけ、理由を添えて書き直させる
             if sql and attempt_idx == 0:
                 return {"status": "error", "message": guard, "attempts": attempts}
-            if attempt_idx == 0 and not sql:
-                attempts.append({"sql": current_sql, "error": guard})
-            else:
+            attempts.append({"sql": current_sql, "error": guard})
+            if attempt_idx == 1:
                 return {"status": "error", "message": guard, "attempts": attempts}
+            err_msg, error_code = guard, None
+        else:
+            exec_result = trino.run(
+                user_ctx=user_ctx,
+                sql=current_sql,
+                catalog=catalog,
+                schema=schema,
+                max_rows=max_rows,
+            )
+            if exec_result.get("status") == "ok":
+                return {
+                    "status": "ok",
+                    "sql": current_sql,
+                    "reasoning": reasoning,
+                    "attempts": attempts,
+                    "columns": exec_result.get("columns"),
+                    "rows": exec_result.get("rows"),
+                    "row_count": exec_result.get("row_count"),
+                }
 
-        if _MUTATION.match(current_sql):
-            return {
-                "status": "error",
-                "message": "Generated SQL is not read-only.",
-                "attempts": attempts,
-            }
-
-        exec_result = trino.run(
-            user_ctx=user_ctx,
-            sql=current_sql,
-            catalog=catalog,
-            schema=schema,
-            max_rows=max_rows,
-        )
-        if exec_result.get("status") == "ok":
-            return {
-                "status": "ok",
-                "sql": current_sql,
-                "reasoning": reasoning,
-                "attempts": attempts,
-                "columns": exec_result.get("columns"),
-                "rows": exec_result.get("rows"),
-                "row_count": exec_result.get("row_count"),
-            }
-
-        err_msg = str(exec_result.get("message") or "Trino query failed")
-        attempts.append({"sql": current_sql, "error": err_msg})
-        if attempt_idx == 1:
-            return {
-                "status": "error",
-                "message": err_msg,
-                "error_code": exec_result.get("error_code"),
-                "sql": current_sql,
-                "attempts": attempts,
-            }
+            err_msg = str(exec_result.get("message") or "Trino query failed")
+            error_code = exec_result.get("error_code")
+            attempts.append({"sql": current_sql, "error": err_msg})
+            if attempt_idx == 1:
+                return {
+                    "status": "error",
+                    "message": err_msg,
+                    "error_code": error_code,
+                    "sql": current_sql,
+                    "attempts": attempts,
+                }
 
         block = schema_block or build_schema_context(
             question,
@@ -209,7 +199,7 @@ def execute_readonly_sql_with_retry(
             return {
                 "status": "error",
                 "message": err_msg,
-                "error_code": exec_result.get("error_code"),
+                "error_code": error_code,
                 "attempts": attempts,
             }
 

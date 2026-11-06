@@ -5,23 +5,18 @@ ResultPane の Table タブが Iceberg テーブル先頭 N 行を取るため�
 """
 from __future__ import annotations
 
-import re
 from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from solomon.api.auth import require_user_context
+from solomon.tools.sql_guard import validate_readonly_statement
 from solomon.transport.config import get_trino_config
 from solomon.transport.user_context import UserContext
 from solomon.tools._trino_client import map_trino_error, trino_connection_for_user
 
 router = APIRouter(prefix="/api", tags=["query"])
-
-_MUTATION_RE = re.compile(
-    r"^\s*(CREATE|DROP|ALTER|INSERT|UPDATE|DELETE|TRUNCATE|MERGE|CALL|GRANT|REVOKE)\b",
-    re.IGNORECASE,
-)
 
 
 class QueryRequest(BaseModel):
@@ -59,14 +54,13 @@ def run_query(
                 ),
             },
         )
-    if _MUTATION_RE.match(body.sql):
+    guard = validate_readonly_statement(body.sql)
+    if guard:
         raise HTTPException(
             status_code=400,
             detail={
                 "error_code": "TRINO_QUERY_FAILED",
-                "message": (
-                    "/api/query is read-only. Mutation statements are rejected."
-                ),
+                "message": f"/api/query is read-only. {guard}",
             },
         )
     conn_or_err = trino_connection_for_user(
